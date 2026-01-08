@@ -1,0 +1,40 @@
+# Replacement patterns for schema fix
+# Pattern 1: .from("tams360.TABLE") -> .schema("tams360").from("TABLE")
+# Pattern 2: asset:tams360.assets -> asset:assets  
+# Pattern 3: asset_type:tams360.asset_types -> asset_type:asset_types
+
+Done manually via edit_tool:
+- Lines 488-492: ✓ asset_types
+- Lines 502-506: ✓ asset_status  
+- Lines 510-514: ✓ assets
+- Lines 550-554: ✓ assets
+- Lines 565-573: ✓ asset_inventory_log
+- Lines 961-973: ✓ maintenance_records with foreign keys
+- Lines 1002-1006: ✓ maintenance_records
+- Lines 1028-1030: ✓ maintenance_records
+
+Remaining to fix:
+- Line 1068-1080: maintenance_records with foreign key
+- Line 1318-1327: asset_component_templates
+- Line 1345-1350: asset_component_templates  
+- Line 1388-1397: inspection_component_scores
+- Line 1409-1415: inspections
+- Line 1440-1444: inspection_component_scores
+- Line 1483-1495: maintenance_records with foreign key
+- Line 1519-1520: maintenance_records
+- Line 1573-1588: maintenance_records
+- Line 1616-1628: maintenance_records with foreign key
+- Line 1654-1666: asset_inventory_log with foreign key
+- Line 1717-1721: asset_types
+- Line 1729-1740: asset_component_templates
+- Line 1796-1809: inspections
+- Line 1847-1849: inspection_component_scores
+- Line 1866-1880: inspections
+- Line 1903-1905: inspections
+- Line 1921-1924: dashboard_urgency_summary
+- Line 1959-1961: dashboard_ci_distribution
+- Line 1978-1981: dashboard_urgency_summary
+- Line 1998-2001: dashboard_asset_type_summary
+- Line 2019-2021: assets
+- Line 2023-2025: inspections
+- Line 2032-2036: dashboard_urgency_summary

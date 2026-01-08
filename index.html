@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- Primary Meta Tags -->
+  <title>TAMS360 - Road & Traffic Asset Management Suite</title>
+  <meta name="title" content="TAMS360 - Road Asset Management">
+  <meta name="description" content="Comprehensive Road & Traffic Asset Management Suite for managing signage, guardrails, traffic signals, and safety barriers">
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" href="/favicon.ico">
+  
+  <!-- Apple Touch Icon -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  
+  <!-- PWA Icons -->
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192x192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512x512.png">
+  
+  <!-- Manifest -->
+  <link rel="manifest" href="/manifest.json">
+  
+  <!-- Theme Color -->
+  <meta name="theme-color" content="#010D13">
+  <meta name="msapplication-TileColor" content="#010D13">
+  
+  <!-- Apple Mobile Web App -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TAMS360">
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="TAMS360 - Road Asset Management">
+  <meta property="og:description" content="Comprehensive Road & Traffic Asset Management Suite">
+  <meta property="og:image" content="/icon-512x512.png">
+  
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary">
+  <meta property="twitter:title" content="TAMS360 - Road Asset Management">
+  <meta property="twitter:description" content="Comprehensive Road & Traffic Asset Management Suite">
+  <meta property="twitter:image" content="/icon-512x512.png">
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/app/App.tsx"></script>
+  
+  <!-- Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(registration => {
+            console.log('SW registered:', registration);
+            
+            // Check for updates periodically
+            setInterval(() => {
+              registration.update();
+            }, 60000); // Check every minute
+          })
+          .catch(err => {
+            console.log('SW registration failed:', err);
+          });
+      });
+    }
+  </script>
+</body>
+</html>
