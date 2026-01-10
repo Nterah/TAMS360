@@ -1,6 +1,12 @@
+import { useState, useContext } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "../ui/alert";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Button } from "../ui/button";
 import Logo from "../ui/Logo";
 
 export default function RegisterPage() {

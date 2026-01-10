@@ -74,7 +74,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Logo width={48} height={48} />
             <div>
               <h1 className="text-lg font-bold text-sidebar-foreground">TAMS360</h1>
-              <p className="text-xs text-sidebar-foreground/70">Asset Management</p>
+              <p className="text-xs text-sidebar-foreground/70">Road & Traffic Asset Management Suite</p>
             </div>
           </div>
 
@@ -135,7 +135,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   <Logo width={40} height={40} />
                   <div>
                     <h1 className="text-lg font-bold text-sidebar-foreground">TAMS360</h1>
-                    <p className="text-xs text-sidebar-foreground/70">Asset Management</p>
+                    <p className="text-xs text-sidebar-foreground/70">Road & Traffic Asset Management Suite</p>
                   </div>
                 </div>
 
