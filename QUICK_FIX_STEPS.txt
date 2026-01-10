@@ -1,0 +1,100 @@
+═══════════════════════════════════════════════════════════
+  TAMS360 - QUICK FIX STEPS (Do These Now!)
+═══════════════════════════════════════════════════════════
+
+The blank page is caused by WRONG environment variables in Vercel.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1: FIX VERCEL ENVIRONMENT VARIABLES (5 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Go to: https://vercel.com/dashboard
+2. Click your "tams-360" project
+3. Settings → Environment Variables
+4. DELETE all existing VITE_SUPABASE_* variables
+5. ADD these three (copy-paste exactly):
+
+   Name: VITE_SUPABASE_URL
+   Value: https://fuvzhbuvwpnysluojqni.supabase.co
+   Environment: ✓ Production ✓ Preview ✓ Development
+
+   Name: VITE_SUPABASE_ANON_KEY
+   Value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1dnpoYnV2d3BueXNsdW9qcW5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQzNjYxMzAsImV4cCI6MjA2OTk0MjEzMH0.HIDTkfm_glqEQG3JFXqmw6QHRJ6W57hA10TseweH5PA
+   Environment: ✓ Production ✓ Preview ✓ Development
+
+   Name: VITE_SUPABASE_SERVICE_ROLE_KEY
+   Value: [Get from Supabase Dashboard → Settings → API → service_role key]
+   Environment: ✓ Production ✓ Preview ✓ Development
+
+6. Click "Save"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2: GET SERVICE ROLE KEY FROM SUPABASE (2 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Go to: https://supabase.com/dashboard
+2. Select project: fuvzhbuvwpnysluojqni
+3. Click Settings (gear icon) → API
+4. Scroll to "Project API keys"
+5. Copy the "service_role" key (secret - starts with eyJ...)
+6. Paste into Vercel as VITE_SUPABASE_SERVICE_ROLE_KEY
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3: REDEPLOY IN VERCEL (2 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. In Vercel → Deployments tab
+2. Click "..." on latest deployment
+3. Click "Redeploy"
+4. Wait 2-3 minutes for build
+5. Test: https://app.tams360.co.za
+
+Should now show LOGIN PAGE (not blank!)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4: DOWNLOAD & PUSH CODE UPDATES (10 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Download updated files from Figma Make
+2. Extract to: C:\HN\OneDrive - HN\Nterah Digital\GitHub\TAMS360
+3. Open GitHub Desktop
+4. Review changes (should see 6 files changed)
+5. Commit: "Fix: Correct Supabase credentials and resolve errors"
+6. Push to GitHub
+7. Vercel will auto-deploy again
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FILES THAT CHANGED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ /utils/supabase/info.tsx - Fixed project ID
+✅ /index.html - Removed favicon.ico error
+✅ /vercel.json - NEW file to fix manifest 401 error
+✅ /VERCEL_ENVIRONMENT_VARIABLES.md - NEW instructions
+✅ /FIXES_APPLIED_JAN10.md - NEW summary
+✅ /QUICK_FIX_STEPS.txt - NEW this file
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHAT WAS WRONG?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The code expects: https://fuvzhbuvwpnysluojqni.supabase.co
+Vercel probably has: Wrong URL or missing keys
+
+Result: App can't connect to database = blank page
+
+FIX: Update environment variables in Vercel to match code!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PRIORITY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DO STEP 1-3 NOW (9 minutes total)
+This will fix the blank page immediately!
+
+Do Step 4 later (adds vercel.json to fix manifest error)
+
+═══════════════════════════════════════════════════════════
+Date: January 10, 2026
+Status: Ready to Fix!
+═══════════════════════════════════════════════════════════
