@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "../ui/sheet";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
-import logoImage from "figma:asset/64eb9bc8e330e96a962c9d775073b6c24bad7ae0.png";
+import Logo from "../ui/Logo";
 import OfflineBanner from "../offline/OfflineBanner";
 import SyncStatusBadge from "../offline/SyncStatusBadge";
 
@@ -71,7 +71,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex flex-col flex-1 min-h-0">
           {/* Logo */}
           <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
-            <img src={logoImage} alt="TAMS360" className="w-12 h-12" />
+            <Logo width={48} height={48} />
             <div>
               <h1 className="text-lg font-bold text-sidebar-foreground">TAMS360</h1>
               <p className="text-xs text-sidebar-foreground/70">Asset Management</p>
@@ -132,7 +132,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="flex flex-col h-full">
                 {/* Logo */}
                 <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
-                  <img src={logoImage} alt="TAMS360" className="w-10 h-10" />
+                  <Logo width={40} height={40} />
                   <div>
                     <h1 className="text-lg font-bold text-sidebar-foreground">TAMS360</h1>
                     <p className="text-xs text-sidebar-foreground/70">Asset Management</p>
@@ -175,7 +175,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Sheet>
 
           <div className="flex items-center gap-3 flex-1">
-            <img src={logoImage} alt="TAMS360" className="w-8 h-8" />
+            <Logo width={32} height={32} />
             <h1 className="text-lg font-bold">TAMS360</h1>
           </div>
           <SyncStatusBadge />

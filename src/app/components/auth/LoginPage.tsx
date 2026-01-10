@@ -1,13 +1,7 @@
-import { useState, useContext } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
 import { AuthContext } from "../../App";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "../ui/alert";
-import logoImage from "figma:asset/64eb9bc8e330e96a962c9d775073b6c24bad7ae0.png";
+import Logo from "../ui/Logo";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -41,10 +35,9 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-primary rounded-full mb-4">
-            <img src={logoImage} alt="TAMS360 Logo" className="w-20 h-20" />
+          <div className="inline-flex items-center justify-center mb-4">
+            <Logo width={160} height={60} />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">TAMS360</h1>
           <p className="text-gray-300">Road & Traffic Asset Management Suite</p>
         </div>
 

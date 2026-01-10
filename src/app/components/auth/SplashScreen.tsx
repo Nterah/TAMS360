@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import logoImage from "figma:asset/64eb9bc8e330e96a962c9d775073b6c24bad7ae0.png";
+import Logo from "../ui/Logo";
 import { MapPin, BarChart3, ClipboardCheck, Settings } from "lucide-react";
 
 export default function SplashScreen() {
@@ -38,10 +38,10 @@ export default function SplashScreen() {
           
           {/* Logo */}
           <div className="relative bg-white/10 backdrop-blur-sm p-8 rounded-3xl border border-white/20">
-            <img 
-              src={logoImage} 
-              alt="TAMS360 Logo" 
-              className="w-32 h-32 animate-pulse" 
+            <Logo 
+              width={128} 
+              height={128}
+              className="animate-pulse" 
             />
           </div>
         </div>

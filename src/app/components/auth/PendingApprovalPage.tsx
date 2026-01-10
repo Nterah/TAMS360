@@ -1,8 +1,6 @@
-import { Link } from "react-router-dom";
-import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
 import { Clock } from "lucide-react";
-import logoImage from "figma:asset/64eb9bc8e330e96a962c9d775073b6c24bad7ae0.png";
+import Logo from "../ui/Logo";
 
 export default function PendingApprovalPage() {
   return (

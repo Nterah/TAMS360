@@ -1,0 +1,129 @@
+TAMS360 - Files Excluded from GitHub Repository
+================================================
+
+These files are automatically excluded by .gitignore and will NOT be uploaded to GitHub.
+They exist only in your local Figma Make environment.
+
+DOCUMENTATION FILES (will be ignored):
+--------------------------------------
+ACCESSIBILITY_FIXES.md
+ARCHITECTURE_DIAGRAM.md
+ASSET_AUTO_NUMBERING_IMPLEMENTATION.md
+ATTRIBUTIONS.md
+BACKEND_FIXES_SUMMARY.md
+CHANGE_LOG.md
+COMMIT-NOW.md
+COMPONENT_TEMPLATES_SETTINGS.md
+DATABASE_IMPLEMENTATION_GUIDE.md
+DATABASE_SCHEMA.md
+DATA_BINDING_CHECKLIST.md
+DATA_INTEGRITY_FIXES_COMPLETE.md
+DEPLOYMENT-CHECKLIST.md
+ERRORS-FIXED.md
+ERRORS_FIXED.md
+GITHUB-DEPLOYMENT-WORKFLOW.md
+GITHUB-DESKTOP-GUIDE.md
+ICON_GENERATION_GUIDE.md
+ICON_GENERATION_INSTRUCTIONS.md
+ICON_IMPLEMENTATION_STATUS.md
+IMPLEMENTATION_GUIDE.md
+INSPECTION_DETAILS_FIX_SUMMARY.md
+INSPECTION_DETAILS_VISUAL_GUIDE.md
+LIVE_DATA_SUMMARY.md
+LIVE_DATA_UPDATE_STATUS.md
+MAINTENANCE_VIEWS_FIX.md
+MD-FILES-TO-DELETE.md
+MIGRATION_STATUS.md
+MOBILE_MVP_SUMMARY.md
+MOBILE_USER_QUICK_START.md
+MVP_CHECKLIST.md
+NEXT_STEPS_FOR_MVP.md
+OFFLINE_EXPLANATION.md
+PROJECT_STATUS_SUMMARY.md
+PWA-SETUP-COMPLETE.md
+QUICK-DEPLOY-GUIDE.md
+QUICK_REFERENCE.md
+QUICK_START_GUIDE.md
+REPORTS_IMPLEMENTATION_GUIDE.md
+SCHEMA_FIX.md
+SETUP_CHECKLIST.md
+SETUP_INSTRUCTIONS.md
+START_HERE.md
+TABLE_SCHEMA_FIX_INSTRUCTIONS.md
+TAMS360_DOCUMENTATION.md
+TESTING_CHECKLIST.md
+TESTING_REPORT.md
+TESTING_SUMMARY.md
+TROUBLESHOOTING_INSPECTION_DETAILS.md
+VERIFICATION_TESTING_GUIDE.md
+VIEW_INTEGRATION_GUIDE.md
+WHATS_NEW.md
+
+OLD/DUPLICATE SQL FILES (will be ignored):
+-------------------------------------------
+seed-complete.sql
+seed-database-final.sql
+seed-database-fixed.sql
+seed-database-uuid.sql
+seed-database.sql
+seed-remaining-templates.sql
+seed-sample-data.sql
+seed-test-minimal.sql
+database-views-migration.sql.tsx
+maintenance-views-migration.sql
+
+DIRECTORIES (will be ignored):
+-------------------------------
+tmp/
+guidelines/
+node_modules/ (never committed)
+dist/ (build output, generated during deployment)
+
+OTHER FILES (will be ignored):
+------------------------------
+public/icon-generator.js
+.env (contains secrets, never commit!)
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+FILES THAT WILL BE IN GITHUB:
+==============================
+✅ README.md
+✅ .gitignore
+✅ package.json
+✅ vite.config.ts
+✅ postcss.config.mjs
+✅ index.html
+✅ All files in /src/
+✅ All files in /supabase/
+✅ All files in /utils/
+✅ All files in /public/ (except icon-generator.js)
+✅ CREATE_TAMS360_PUBLIC_VIEWS.sql
+✅ DATABASE_SCHEMA_ENHANCEMENTS.sql
+✅ PUBLIC_VIEWS_SETUP.sql
+✅ TAMS360_APP_VIEWS.sql
+✅ database-views-migration.sql
+✅ DEPLOYMENT_READY.md (this deployment guide)
+
+IMPORTANT NOTES:
+================
+1. You do NOT need to manually delete any files
+2. The .gitignore file handles everything automatically
+3. When you commit, Git will skip the ignored files
+4. Ignored files stay safe in your local Figma Make environment
+5. Only production-ready files will be uploaded to GitHub
+6. DO NOT drag/drop or manually move files - let Git handle it!
+
+HOW TO VERIFY:
+==============
+Before pushing to GitHub, run:
+  git status
+
+You should ONLY see changes to production files.
+If you see any .md files (except README.md), something is wrong.
+
+---
+Generated: January 10, 2026
+Status: Ready for GitHub Upload

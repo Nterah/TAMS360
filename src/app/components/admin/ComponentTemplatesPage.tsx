@@ -1,52 +1,9 @@
-import { useState, useEffect, useContext } from "react";
-import { AuthContext } from "../../App";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
-import { Badge } from "../ui/badge";
-import { 
-  Settings, 
-  Plus, 
-  Edit, 
-  Trash2, 
-  Save, 
-  X, 
-  Info,
-  AlertCircle,
-  CheckCircle2,
-  Loader2,
-  ChevronDown,
-  ChevronUp
-} from "lucide-react";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
-import { toast } from "sonner";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "../ui/accordion";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../ui/dialog";
-import { Alert, AlertDescription } from "../ui/alert";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
-import exampleImage1 from "figma:asset/7750978f078f42c4f2da7a4744039960839e9d60.png";
-import exampleImage2 from "figma:asset/38da1c27c4fc4d7da73e4f69733af0cb1b722b40.png";
-import inspectorGuideImage from "figma:asset/5d03898f8044f3ad8156492f63e817a2a100990a.png";
 
 interface AssetType {
   asset_type_id: string;

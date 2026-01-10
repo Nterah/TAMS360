@@ -1739,51 +1739,8 @@ app.get("/make-server-c894a9ff/dashboard/summary", async (c) => {
 // Get CI distribution for charts (redirects to newer implementation below at line 3530)
 // This endpoint is kept for backward compatibility
 
-// Get urgency summary for charts
-app.get("/make-server-c894a9ff/dashboard/urgency-summary", async (c) => {
-  try {
-    // Query inspections to build urgency summary with reasonable limit
-    const { data: inspections, error } = await supabase
-      .from("tams360_inspections_app")
-      .select("calculated_urgency, ci_final, total_remedial_cost")
-      .limit(25000);
-
-    if (error) {
-      console.error("Error fetching inspections for urgency summary:", error);
-      return c.json({ error: error.message }, 500);
-    }
-
-    // Group by urgency
-    const urgencyMap = new Map();
-    (inspections || []).forEach((inspection: any) => {
-      const urgency = inspection.calculated_urgency || "Unknown";
-      if (!urgencyMap.has(urgency)) {
-        urgencyMap.set(urgency, {
-          calculated_urgency: urgency,
-          count: 0,
-          total_ci: 0,
-          total_remedial_cost: 0,
-        });
-      }
-      
-      const summary = urgencyMap.get(urgency);
-      summary.count += 1;
-      summary.total_ci += inspection.ci_final || 0;
-      summary.total_remedial_cost += Number(inspection.total_remedial_cost) || 0;
-    });
-
-    // Calculate averages
-    const summaryArray = Array.from(urgencyMap.values()).map((item: any) => ({
-      ...item,
-      avg_ci: item.count > 0 ? Math.round(item.total_ci / item.count * 10) / 10 : 0,
-    }));
-
-    return c.json({ summary: summaryArray });
-  } catch (error) {
-    console.error("Error fetching urgency summary:", error);
-    return c.json({ error: "Failed to fetch urgency summary" }, 500);
-  }
-});
+// NOTE: Urgency summary route moved to line 3881 to avoid duplicate route definition
+// The implementation at line 3881 uses the proper database view and has better error handling
 
 // Get critical alerts for dashboard
 app.get("/make-server-c894a9ff/dashboard/critical-alerts", async (c) => {
@@ -4033,4 +3990,42 @@ app.get("/make-server-c894a9ff/dashboard/stats", async (c) => {
   }
 });
 
-Deno.serve(app.fetch);
+// Wrap app with timeout protection to prevent hanging connections
+const withTimeout = (handler: any) => {
+  return async (request: Request) => {
+    // Create a timeout promise (140 seconds - leave 10s buffer before 150s edge function limit)
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Request timeout - exceeded 140 seconds')), 140000);
+    });
+
+    try {
+      // Race between the actual handler and the timeout
+      const response = await Promise.race([
+        handler(request),
+        timeoutPromise
+      ]);
+      
+      return response;
+    } catch (error: any) {
+      console.error('Request handler error:', error?.message || error);
+      
+      // Return a proper error response instead of letting connection hang
+      return new Response(
+        JSON.stringify({ 
+          error: 'Request failed', 
+          message: error?.message || 'Unknown error',
+          hint: 'This may be due to database connectivity issues or timeout'
+        }),
+        { 
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          }
+        }
+      );
+    }
+  };
+};
+
+Deno.serve(withTimeout(app.fetch));

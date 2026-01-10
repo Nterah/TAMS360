@@ -209,11 +209,11 @@ Output in `/dist` folder.
 
 ## 📖 Documentation
 
-- **Quick Start:** `/QUICK-DEPLOY-GUIDE.md`
-- **Deployment:** `/DEPLOYMENT-CHECKLIST.md`
-- **GitHub Workflow:** `/GITHUB-DEPLOYMENT-WORKFLOW.md`
-- **GitHub Desktop:** `/GITHUB-DESKTOP-GUIDE.md`
-- **Database Schema:** `/DATABASE_SCHEMA.md`
+For detailed setup and deployment instructions, refer to the SQL files in the root directory:
+- `CREATE_TAMS360_PUBLIC_VIEWS.sql` - Database view creation
+- `DATABASE_SCHEMA_ENHANCEMENTS.sql` - Schema updates
+- `PUBLIC_VIEWS_SETUP.sql` - Public view configuration
+- `TAMS360_APP_VIEWS.sql` - Application-specific views
 
 ## 🧪 Testing
 
@@ -314,5 +314,5 @@ For questions or issues:
 ---
 
 **Version:** 1.0.0  
-**Last Updated:** January 8, 2026  
+**Last Updated:** January 10, 2026  
 **Status:** ✅ Production Ready

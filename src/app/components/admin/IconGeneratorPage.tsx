@@ -1,19 +1,24 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Download, ExternalLink, CheckCircle, AlertCircle, Info } from "lucide-react";
 import { Alert, AlertDescription } from "../ui/alert";
-import logoImage from "figma:asset/64eb9bc8e330e96a962c9d775073b6c24bad7ae0.png";
+import Logo from "../ui/Logo";
 
 export default function IconGeneratorPage() {
-  const downloadImage = () => {
-    // Create a temporary link to download the logo
-    const link = document.createElement("a");
-    link.href = logoImage;
-    link.download = "tams360-logo.png";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const downloadLogo = () => {
+    // Create SVG blob and download
+    const svgElement = document.getElementById('tams360-logo-svg');
+    if (svgElement) {
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const blob = new Blob([svgData], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "tams360-logo.svg";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
   };
 
   const iconStatus = [
@@ -81,15 +86,13 @@ export default function IconGeneratorPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="bg-[#010D13] p-8 rounded-lg flex items-center justify-center">
-              <img
-                src={logoImage}
-                alt="TAMS360 Logo"
-                className="w-48 h-48 object-contain"
-              />
+              <div id="tams360-logo-svg">
+                <Logo width={200} height={80} />
+              </div>
             </div>
-            <Button onClick={downloadImage} className="w-full">
+            <Button onClick={downloadLogo} className="w-full">
               <Download className="w-4 h-4 mr-2" />
-              Download Logo
+              Download Logo (SVG)
             </Button>
             <div className="text-xs text-muted-foreground space-y-1">
               <p>
