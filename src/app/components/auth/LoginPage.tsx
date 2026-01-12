@@ -96,9 +96,9 @@ export default function LoginPage() {
               </Button>
 
               <p className="text-sm text-center text-muted-foreground">
-                Don't have an account?{" "}
-                <Link to="/register" className="text-primary hover:underline">
-                  Register here
+                Don't have an organization?{" "}
+                <Link to="/tenant-register" className="text-primary hover:underline">
+                  Start free trial
                 </Link>
               </p>
             </CardFooter>

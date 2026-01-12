@@ -1,4 +1,4 @@
-import { UserPlus, Users, Shield, Activity, CheckCircle, XCircle, Clock, Stethoscope, Settings2, ImageIcon } from "lucide-react";
+import { UserPlus, Users, Shield, Activity, CheckCircle, XCircle, Clock, Stethoscope, Settings2, ArrowRightLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { useState, useEffect, useContext } from "react";
@@ -16,6 +16,7 @@ export default function AdminConsolePage() {
   const [pendingUsers, setPendingUsers] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
@@ -27,7 +28,7 @@ export default function AdminConsolePage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [pendingRes, usersRes, auditRes] = await Promise.all([
+      const [pendingRes, usersRes, auditRes, invitationsRes] = await Promise.all([
         fetch(`${API_URL}/admin/registrations/pending`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         }),
@@ -35,6 +36,9 @@ export default function AdminConsolePage() {
           headers: { Authorization: `Bearer ${accessToken}` },
         }),
         fetch(`${API_URL}/admin/audit`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }),
+        fetch(`${API_URL}/admin/invitations`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         }),
       ]);
@@ -52,6 +56,15 @@ export default function AdminConsolePage() {
       if (auditRes.ok) {
         const data = await auditRes.json();
         setAuditLogs(data.logs || []);
+      }
+
+      if (invitationsRes.ok) {
+        const data = await invitationsRes.json();
+        // Filter for pending invitations only
+        const pending = (data.invitations || []).filter(
+          (inv: any) => inv.status === "pending" && new Date(inv.expiresAt) > new Date()
+        );
+        setPendingInvitations(pending);
       }
     } catch (error) {
       console.error("Error fetching admin data:", error);
@@ -110,10 +123,16 @@ export default function AdminConsolePage() {
           <p className="text-muted-foreground">Manage users, permissions, and system settings</p>
         </div>
         <div className="flex gap-2">
-          <Link to="/admin/icon-generator">
+          <Link to="/admin/user-invitations">
             <Button variant="outline">
-              <ImageIcon className="mr-2 size-4" />
-              Icon Generator
+              <UserPlus className="mr-2 size-4" />
+              Invite Users
+            </Button>
+          </Link>
+          <Link to="/admin/bulk-asset-assignment">
+            <Button variant="outline">
+              <ArrowRightLeft className="mr-2 size-4" />
+              Bulk Asset Assignment
             </Button>
           </Link>
           <Link to="/admin/tenant-settings">
@@ -138,7 +157,20 @@ export default function AdminConsolePage() {
       </div>
 
       {/* Stats Overview */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm">Pending Invitations</CardTitle>
+            <UserPlus className="w-4 h-4 text-[#F8D227]" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{pendingInvitations.length}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Active invite codes
+            </p>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm">Pending Approvals</CardTitle>
@@ -146,6 +178,9 @@ export default function AdminConsolePage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{pendingUsers.length}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Awaiting review
+            </p>
           </CardContent>
         </Card>
 

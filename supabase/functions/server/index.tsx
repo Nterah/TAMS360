@@ -111,63 +111,150 @@ app.get("/make-server-c894a9ff/health", (c) => {
 // AUTHENTICATION ROUTES
 // ============================================================================
 
-// User signup (creates pending user)
-app.post("/make-server-c894a9ff/auth/signup", async (c) => {
+// Tenant signup (creates new organization with first admin user)
+app.post("/make-server-c894a9ff/auth/tenant-signup", async (c) => {
   try {
     const body = await c.req.json();
-    const { email, password, name, organization } = body;
+    const { tenantName, tenantDomain, adminName, adminEmail, adminPassword } = body;
 
-    // Check if this is the first user
-    const allUsers = await kv.getByPrefix("user:");
-    const isFirstUser = allUsers.length === 0;
+    if (!tenantName || !adminName || !adminEmail || !adminPassword) {
+      return c.json({ error: "All fields are required" }, 400);
+    }
 
-    // Create user with Supabase Auth
+    // Generate tenant ID
+    const tenantId = `tenant_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    // Check if tenant name already exists
+    const allTenants = await kv.getByPrefix("tenant:");
+    const existingTenant = allTenants.find(
+      (t: any) => t.name.toLowerCase() === tenantName.toLowerCase()
+    );
+    if (existingTenant) {
+      return c.json({ error: "An organization with this name already exists" }, 400);
+    }
+
+    // Create first admin user with Supabase Auth
     const { data, error } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      user_metadata: { name, organization },
-      email_confirm: true, // Auto-confirm since email server not configured
+      email: adminEmail,
+      password: adminPassword,
+      user_metadata: { name: adminName, tenantId },
+      email_confirm: true,
     });
 
     if (error) {
       return c.json({ error: error.message }, 400);
     }
 
-    // Auto-approve and make admin if first user, otherwise pending
-    const userStatus = isFirstUser ? "approved" : "pending";
-    const userRole = isFirstUser ? "admin" : "field_user";
+    // Calculate trial end date (30 days from now)
+    const trialEndDate = new Date();
+    trialEndDate.setDate(trialEndDate.getDate() + 30);
 
-    // Store user profile
-    await kv.set(`user:${data.user.id}`, {
-      id: data.user.id,
-      email,
-      name,
-      organization,
-      role: userRole,
-      tier: "basic",
-      status: userStatus,
+    // Create tenant record
+    await kv.set(`tenant:${tenantId}`, {
+      id: tenantId,
+      name: tenantName,
+      domain: tenantDomain || null,
+      ownerId: data.user.id,
+      tier: "trial",
+      status: "active",
+      trialEndsAt: trialEndDate.toISOString(),
       createdAt: new Date().toISOString(),
-      approvedAt: isFirstUser ? new Date().toISOString() : null,
-      approvedBy: isFirstUser ? "system" : null,
+      settings: {
+        allowDomainSignup: false,
+        requireInvitation: true,
+        assetNumberFormat: "TAMS-{YEAR}-{SEQ}",
+      },
     });
 
-    // If not first user, add to pending registrations queue
-    if (!isFirstUser) {
-      await kv.set(`registration:${data.user.id}`, {
-        userId: data.user.id,
-        email,
-        name,
-        organization,
-        submittedAt: new Date().toISOString(),
-      });
-    }
+    // Store admin user profile
+    await kv.set(`user:${data.user.id}`, {
+      id: data.user.id,
+      tenantId,
+      email: adminEmail,
+      name: adminName,
+      role: "admin",
+      tier: "trial",
+      status: "approved",
+      createdAt: new Date().toISOString(),
+      approvedAt: new Date().toISOString(),
+      approvedBy: "system",
+    });
 
     return c.json({
       success: true,
-      message: isFirstUser
-        ? "Welcome! You are the first admin user. You can now log in."
-        : "Registration submitted. Awaiting admin approval.",
-      isFirstUser,
+      message: "Organization created successfully! You can now log in.",
+      tenantId,
+      userId: data.user.id,
+    });
+  } catch (error) {
+    console.error("Tenant signup error:", error);
+    return c.json({ error: "Tenant registration failed" }, 500);
+  }
+});
+
+// User signup (invitation-only)
+app.post("/make-server-c894a9ff/auth/signup", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { email, password, name, inviteCode } = body;
+
+    // Validate invite code (required)
+    if (!inviteCode) {
+      return c.json({ 
+        error: "Registration requires an invitation code. Please contact your administrator." 
+      }, 403);
+    }
+
+    const invite = await kv.get(`invite:${inviteCode}`);
+    if (!invite) {
+      return c.json({ error: "Invalid or expired invitation code" }, 400);
+    }
+    if (invite.status !== "pending") {
+      return c.json({ error: "This invitation has already been used" }, 400);
+    }
+    if (invite.email && invite.email !== email) {
+      return c.json({ error: "This invitation is for a different email address" }, 400);
+    }
+
+    // Create user with Supabase Auth
+    const { data, error } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      user_metadata: { name },
+      email_confirm: true,
+    });
+
+    if (error) {
+      return c.json({ error: error.message }, 400);
+    }
+
+    // Store user profile (pre-approved via invitation)
+    await kv.set(`user:${data.user.id}`, {
+      id: data.user.id,
+      tenantId: invite.tenantId,
+      email,
+      name,
+      role: invite.role || "field_user",
+      tier: "basic",
+      status: "approved",
+      createdAt: new Date().toISOString(),
+      approvedAt: new Date().toISOString(),
+      approvedBy: invite.invitedBy,
+      invitedBy: invite.invitedBy,
+    });
+
+    // Mark invitation as used
+    await kv.set(`invite:${inviteCode}`, {
+      ...invite,
+      status: "accepted",
+      acceptedAt: new Date().toISOString(),
+      acceptedBy: data.user.id,
+    });
+
+    return c.json({
+      success: true,
+      message: "Account created successfully! You can now log in.",
+      isFirstUser: false,
     });
   } catch (error) {
     console.error("Signup error:", error);
@@ -422,6 +509,47 @@ app.get("/make-server-c894a9ff/admin/audit", requireAdmin, async (c) => {
 // TENANT SETTINGS ROUTES
 // ============================================================================
 
+// Get tenant info (tier, status, trial expiration)
+app.get("/make-server-c894a9ff/admin/tenant-info", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: userData } = await supabaseAuth.auth.getUser(token);
+    
+    if (!userData.user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    // Get user's profile to find tenant ID
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || !userProfile.tenantId) {
+      return c.json({ error: "User has no tenant" }, 400);
+    }
+
+    // Get tenant info
+    const tenant = await kv.get(`tenant:${userProfile.tenantId}`);
+    if (!tenant) {
+      return c.json({ error: "Tenant not found" }, 404);
+    }
+
+    return c.json({ 
+      tenant: {
+        name: tenant.name,
+        tier: tenant.tier,
+        status: tenant.status,
+        trialEndsAt: tenant.trialEndsAt || null,
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching tenant info:", error);
+    return c.json({ error: "Failed to fetch tenant info" }, 500);
+  }
+});
+
 // Get tenant settings
 app.get("/make-server-c894a9ff/admin/tenant-settings", async (c) => {
   try {
@@ -505,6 +633,144 @@ app.post("/make-server-c894a9ff/admin/tenant-settings/logo", async (c) => {
 });
 
 // ============================================================================
+// ADMIN ROUTES - User Invitations
+// ============================================================================
+
+// Create invitation
+app.post("/make-server-c894a9ff/admin/invitations/create", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Check if user is admin
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || userProfile.role !== "admin") {
+      return c.json({ error: "Admin access required" }, 403);
+    }
+
+    const body = await c.req.json();
+    const { email, role, expiryDays } = body;
+
+    // Generate unique invite code
+    const inviteCode = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+
+    // Calculate expiration date
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + (expiryDays || 7));
+
+    // Store invitation
+    await kv.set(`invite:${inviteCode}`, {
+      code: inviteCode,
+      email: email || null,
+      role: role || "field_user",
+      status: "pending",
+      tenantId: userProfile.tenantId,
+      invitedBy: userData.user.id,
+      createdAt: new Date().toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    });
+
+    return c.json({
+      success: true,
+      inviteCode,
+      expiresAt: expiresAt.toISOString(),
+    });
+  } catch (error) {
+    console.error("Error creating invitation:", error);
+    return c.json({ error: "Failed to create invitation" }, 500);
+  }
+});
+
+// Get all invitations for tenant
+app.get("/make-server-c894a9ff/admin/invitations", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Check if user is admin
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || userProfile.role !== "admin") {
+      return c.json({ error: "Admin access required" }, 403);
+    }
+
+    // Get all invitations
+    const allInvites = await kv.getByPrefix("invite:");
+    
+    // Filter by tenant
+    const tenantInvites = allInvites.filter((invite: any) => invite.tenantId === userProfile.tenantId);
+
+    return c.json({
+      invitations: tenantInvites,
+    });
+  } catch (error) {
+    console.error("Error fetching invitations:", error);
+    return c.json({ error: "Failed to fetch invitations" }, 500);
+  }
+});
+
+// Delete invitation
+app.delete("/make-server-c894a9ff/admin/invitations/:code", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Check if user is admin
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || userProfile.role !== "admin") {
+      return c.json({ error: "Admin access required" }, 403);
+    }
+
+    const inviteCode = c.req.param("code");
+    
+    // Get the invitation to verify it belongs to the user's tenant
+    const invitation = await kv.get(`invite:${inviteCode}`);
+    
+    if (!invitation) {
+      return c.json({ error: "Invitation not found" }, 404);
+    }
+    
+    if (invitation.tenantId !== userProfile.tenantId) {
+      return c.json({ error: "Unauthorized to delete this invitation" }, 403);
+    }
+
+    // Delete the invitation
+    await kv.del(`invite:${inviteCode}`);
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting invitation:", error);
+    return c.json({ error: "Failed to delete invitation" }, 500);
+  }
+});
+
+// ============================================================================
 // ASSET ROUTES
 // ============================================================================
 
@@ -523,6 +789,12 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
 
     if (authError || !userData.user) {
       return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile to retrieve tenantId
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || !userProfile.tenantId) {
+      return c.json({ error: "User not associated with an organization" }, 403);
     }
 
     const asset = await c.req.json();
@@ -555,6 +827,7 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
     
     // Map frontend field names to database field names (using actual schema)
     const assetData = {
+      tenant_id: userProfile.tenantId,
       asset_ref: asset.referenceNumber || asset.asset_ref,
       asset_type_id: assetType.asset_type_id,
       description: asset.name || asset.description,
@@ -574,6 +847,7 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
       replacement_value: asset.replacementValue ? parseFloat(asset.replacementValue) : null,
       purchase_price: asset.installationCost ? parseFloat(asset.installationCost) : null,
       created_by: userData.user.id,
+      assigned_to: userData.user.id,
     };
 
     // Try to insert into database first
@@ -589,8 +863,10 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
       const assetId = `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const assetRecord = {
         id: assetId,
+        tenantId: userProfile.tenantId,
         ...asset,
         createdBy: userData.user.id,
+        assignedTo: userData.user.id,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -633,6 +909,25 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
 // Get all assets with pagination
 app.get("/make-server-c894a9ff/assets", async (c) => {
   try {
+    // Get user context for tenant filtering
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile to retrieve tenantId and role
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || !userProfile.tenantId) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
     const page = parseInt(c.req.query("page") || "1");
     // Cap pageSize at 100 to prevent timeouts
     const requestedPageSize = parseInt(c.req.query("pageSize") || "100");
@@ -640,7 +935,7 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    console.log(`GET /assets request - page:${page}, pageSize:${pageSize}, range:${from}-${to}`);
+    console.log(`GET /assets request - user:${userData.user.id}, tenant:${userProfile.tenantId}, role:${userProfile.role}, page:${page}, pageSize:${pageSize}`);
 
     // Use public tenant-safe view (public.tams360_assets_app)
     // The view already includes latest_ci, latest_urgency from the database
@@ -649,9 +944,18 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     
     // Wrap database query with retry logic for network resilience
     const { data: assets, error, count } = await retryWithBackoff(async () => {
-      const result = await supabase
+      let query = supabase
         .from("tams360_assets_app")
         .select("*", { count: includeCount ? 'exact' : undefined })
+        .eq("tenant_id", userProfile.tenantId);
+
+      // Field users see only their assigned assets
+      if (userProfile.role === "field_user") {
+        query = query.eq("assigned_to", userData.user.id);
+      }
+      // Admins and supervisors see all tenant assets
+
+      const result = await query
         .order("created_at", { ascending: false })
         .range(from, to);
       
@@ -1262,6 +1566,74 @@ app.post("/make-server-c894a9ff/seed-data", async (c) => {
   }
 });
 
+// Bulk assign assets to region/depot
+app.post("/make-server-c894a9ff/assets/bulk-assign", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(
+      accessToken,
+    );
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile to check role
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || !userProfile.tenantId) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
+    // Only admins can bulk assign
+    if (userProfile.role !== "admin") {
+      return c.json({ error: "Admin access required" }, 403);
+    }
+
+    const { assetIds, region, depot } = await c.req.json();
+
+    if (!assetIds || !Array.isArray(assetIds) || assetIds.length === 0) {
+      return c.json({ error: "No asset IDs provided" }, 400);
+    }
+
+    if (!region && !depot) {
+      return c.json({ error: "Must provide region or depot to assign" }, 400);
+    }
+
+    // Build update object
+    const updateData: any = {};
+    if (region) updateData.region = region;
+    if (depot) updateData.depot = depot;
+
+    // Update all assets
+    const { data: updatedAssets, error: updateError } = await supabase
+      .from("assets")
+      .update(updateData)
+      .in("asset_id", assetIds)
+      .eq("tenant_id", userProfile.tenantId)
+      .select();
+
+    if (updateError) {
+      console.error("Error updating assets:", updateError);
+      return c.json({ error: "Failed to update assets" }, 500);
+    }
+
+    console.log(`Bulk assigned ${updatedAssets?.length || 0} assets to region:${region}, depot:${depot}`);
+
+    return c.json({
+      success: true,
+      updatedCount: updatedAssets?.length || 0,
+    });
+  } catch (error) {
+    console.error("Error in bulk assign:", error);
+    return c.json({ error: "Failed to bulk assign assets" }, 500);
+  }
+});
+
 // ============================================================================
 // INSPECTION ROUTES
 // ============================================================================
@@ -1319,12 +1691,19 @@ app.post("/make-server-c894a9ff/maintenance", async (c) => {
       return c.json({ error: "Invalid session" }, 401);
     }
 
+    // Get user profile to retrieve tenantId
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || !userProfile.tenantId) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
     const maintenance = await c.req.json();
 
     // Try to insert into database first
     const { data: record, error } = await supabase
       .from("maintenance_records")
       .insert({
+        tenant_id: userProfile.tenantId,
         asset_id: maintenance.asset_id,
         maintenance_type: maintenance.maintenance_type,
         scheduled_date: maintenance.scheduled_date || null,
@@ -1345,6 +1724,7 @@ app.post("/make-server-c894a9ff/maintenance", async (c) => {
       const maintenanceId = `maintenance-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const maintenanceRecord = {
         maintenance_id: maintenanceId,
+        tenant_id: userProfile.tenantId,
         ...maintenance,
         logged_by: userData.user.id,
         created_at: new Date().toISOString(),
@@ -2866,10 +3246,30 @@ app.post("/make-server-c894a9ff/calculations/preview", async (c) => {
 // Update existing maintenance GET to include asset details
 app.get("/make-server-c894a9ff/maintenance", async (c) => {
   try {
-    // Query maintenance records from database
+    // Get user context for tenant filtering
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile to retrieve tenantId
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || !userProfile.tenantId) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
+    // Query maintenance records from database filtered by tenant
     const { data: records, error } = await supabase
       .from("maintenance_records")
       .select("*")
+      .eq("tenant_id", userProfile.tenantId)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -2930,63 +3330,72 @@ app.get("/make-server-c894a9ff/maintenance", async (c) => {
   }
 });
 
+// DUPLICATE ROUTE - Should be removed or merged
 // Update existing maintenance POST to use database
-app.post("/make-server-c894a9ff/maintenance", async (c) => {
-  try {
-    const authHeader = c.req.header("Authorization");
-    if (!authHeader) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
+// app.post("/make-server-c894a9ff/maintenance", async (c) => {
+//   try {
+//     const authHeader = c.req.header("Authorization");
+//     if (!authHeader) {
+//       return c.json({ error: "Unauthorized" }, 401);
+//     }
 
-    const accessToken = authHeader.split(" ")[1];
-    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(
-      accessToken,
-    );
+//     const accessToken = authHeader.split(" ")[1];
+//     const { data: userData, error: authError } = await supabaseAuth.auth.getUser(
+//       accessToken,
+//     );
 
-    if (authError || !userData.user) {
-      return c.json({ error: "Invalid session" }, 401);
-    }
+//     if (authError || !userData.user) {
+//       return c.json({ error: "Invalid session" }, 401);
+//     }
 
-    const maintenance = await c.req.json();
+//     // Get user profile to retrieve tenantId
+//     const userProfile = await kv.get(`user:${userData.user.id}`);
+//     if (!userProfile || !userProfile.tenantId) {
+//       return c.json({ error: "User not associated with an organization" }, 403);
+//     }
 
-    // Try to insert into database first
-    const { data: record, error } = await supabase
-      .from("maintenance_records")
-      .insert({
-        asset_id: maintenance.asset_id,
-        maintenance_type: maintenance.maintenance_type,
-        scheduled_date: maintenance.scheduled_date || null,
-        completed_date: maintenance.completed_date || null,
-        status: maintenance.status || "Scheduled",
-        description: maintenance.description,
-        notes: maintenance.notes,
-        estimated_cost: maintenance.cost || null,
-        actual_cost: maintenance.actual_cost || null,
-        created_by: userData.user.id,
-      })
-      .select()
-      .single();
+//     const maintenance = await c.req.json();
 
-    if (error) {
-      console.error("Error creating maintenance in DB:", error);
-      // Fallback to KV store
-      const maintenanceId = `maintenance-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const maintenanceRecord = {
-        maintenance_id: maintenanceId,
-        ...maintenance,
-        logged_by: userData.user.id,
-        created_at: new Date().toISOString(),
-      };
-      await kv.set(`maintenance:${maintenanceId}`, maintenanceRecord);
-      return c.json({ success: true, maintenance: maintenanceRecord });
-    }
+//     // Try to insert into database first
+//     const { data: record, error } = await supabase
+//       .from("maintenance_records")
+//       .insert({
+//         tenant_id: userProfile.tenantId,
+//         asset_id: maintenance.asset_id,
+//         maintenance_type: maintenance.maintenance_type,
+//         scheduled_date: maintenance.scheduled_date || null,
+//         completed_date: maintenance.completed_date || null,
+//         status: maintenance.status || "Scheduled",
+//         description: maintenance.description,
+//         notes: maintenance.notes,
+//         estimated_cost: maintenance.cost || null,
+//         actual_cost: maintenance.actual_cost || null,
+//         created_by: userData.user.id,
+//       })
+//       .select()
+//       .single();
 
-    return c.json({ success: true, maintenance: record });
-  } catch (error) {
-    console.error("Error creating maintenance record:", error);
-    return c.json({ error: "Failed to create maintenance record" }, 500);
-  }
-});
+//     if (error) {
+//       console.error("Error creating maintenance in DB:", error);
+//       // Fallback to KV store
+//       const maintenanceId = `maintenance-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+//       const maintenanceRecord = {
+//         maintenance_id: maintenanceId,
+//         tenant_id: userProfile.tenantId,
+//         ...maintenance,
+//         logged_by: userData.user.id,
+//         created_at: new Date().toISOString(),
+//       };
+//       await kv.set(`maintenance:${maintenanceId}`, maintenanceRecord);
+//       return c.json({ success: true, maintenance: maintenanceRecord });
+//     }
+
+//     return c.json({ success: true, maintenance: record });
+//   } catch (error) {
+//     console.error("Error creating maintenance record:", error);
+//     return c.json({ error: "Failed to create maintenance record" }, 500);
+//   }
+// });
 
 // ============================================================================
 // ASSET INVENTORY LOG ROUTES
@@ -3232,6 +3641,12 @@ app.post("/make-server-c894a9ff/inspections", async (c) => {
       return c.json({ error: "Invalid session" }, 401);
     }
 
+    // Get user profile to retrieve tenantId
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || !userProfile.tenantId) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
     const inspection = await c.req.json();
 
     // Prepare calculation metadata
@@ -3261,6 +3676,7 @@ app.post("/make-server-c894a9ff/inspections", async (c) => {
     const { data: inspectionRecord, error: inspectionError } = await supabase
       .from("inspections")
       .insert({
+        tenant_id: userProfile.tenantId,
         asset_id: inspection.asset_id,
         inspection_date: inspection.inspection_date,
         inspector_name: inspection.inspector_name,
@@ -3282,6 +3698,7 @@ app.post("/make-server-c894a9ff/inspections", async (c) => {
       const inspectionId = `inspection-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const record = {
         inspection_id: inspectionId,
+        tenant_id: userProfile.tenantId,
         ...inspection,
         inspector_id: userData.user.id,
         created_at: new Date().toISOString(),
@@ -3328,15 +3745,35 @@ app.post("/make-server-c894a9ff/inspections", async (c) => {
 // Get inspections with pagination
 app.get("/make-server-c894a9ff/inspections", async (c) => {
   try {
+    // Get user context for tenant filtering
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile to retrieve tenantId
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || !userProfile.tenantId) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
     const page = parseInt(c.req.query("page") || "1");
     const pageSize = parseInt(c.req.query("pageSize") || "500");
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    // Use public app view (tams360_inspections_app) - includes tenant filtering via RLS
+    // Use public app view (tams360_inspections_app) with tenant filtering
     const { data: inspections, error, count } = await supabase
       .from("tams360_inspections_app")
       .select("*", { count: 'exact' })
+      .eq("tenant_id", userProfile.tenantId)
       .order("inspection_date", { ascending: false })
       .range(from, to);
 

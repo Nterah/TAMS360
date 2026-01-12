@@ -1,7 +1,7 @@
-import { useState, useContext } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useState, useContext, useEffect } from "react";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { AuthContext } from "../../App";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, CheckCircle } from "lucide-react";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
@@ -9,18 +9,36 @@ import { Label } from "../ui/label";
 import { Button } from "../ui/button";
 import Logo from "../ui/Logo";
 
+// Registration Page - Fixed hooks issue
 export default function RegisterPage() {
+  console.log("RegisterPage component rendering...");
+  
+  // Hooks MUST be at the top level - not in try-catch!
+  const [searchParams] = useSearchParams();
+  const inviteCodeFromUrl = searchParams.get("invite") || "";
+  console.log("Invite code from URL:", inviteCodeFromUrl);
+  
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
     confirmPassword: "",
-    organization: "",
+    inviteCode: inviteCodeFromUrl,
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { register } = useContext(AuthContext);
+  const authContext = useContext(AuthContext);
   const navigate = useNavigate();
+
+  console.log("Auth context:", authContext);
+
+  // Update invite code when URL changes
+  useEffect(() => {
+    console.log("RegisterPage loaded with invite code:", inviteCodeFromUrl);
+    if (inviteCodeFromUrl) {
+      setFormData(prev => ({ ...prev, inviteCode: inviteCodeFromUrl }));
+    }
+  }, [inviteCodeFromUrl]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -40,18 +58,23 @@ export default function RegisterPage() {
       return;
     }
 
+    if (!formData.inviteCode) {
+      setError("Invitation code is required");
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const result = await register({
+      const result = await authContext.register({
         name: formData.name,
         email: formData.email,
         password: formData.password,
-        organization: formData.organization,
+        inviteCode: formData.inviteCode,
       });
       
       // If first user, redirect to login. Otherwise go to pending approval page
-      if (result.isFirstUser) {
+      if (result?.isFirstUser) {
         navigate("/login");
       } else {
         navigate("/pending-approval");
@@ -78,11 +101,23 @@ export default function RegisterPage() {
           <CardHeader>
             <CardTitle>Create Account</CardTitle>
             <CardDescription>
-              Register for access to TAMS360. Your account will be reviewed by an administrator.
+              {inviteCodeFromUrl 
+                ? "Complete your registration using the invitation code provided."
+                : "Register for access to TAMS360. Your account will be reviewed by an administrator."
+              }
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
+              {inviteCodeFromUrl && (
+                <Alert className="bg-primary/10 border-primary">
+                  <CheckCircle className="h-4 w-4 text-primary" />
+                  <AlertDescription className="text-primary">
+                    Invitation code detected and auto-filled!
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {error && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
@@ -119,13 +154,13 @@ export default function RegisterPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="organization">Organization</Label>
+                <Label htmlFor="inviteCode">Invite Code</Label>
                 <Input
-                  id="organization"
-                  name="organization"
+                  id="inviteCode"
+                  name="inviteCode"
                   type="text"
-                  placeholder="Your Organization"
-                  value={formData.organization}
+                  placeholder="Your Invite Code"
+                  value={formData.inviteCode}
                   onChange={handleChange}
                   className="bg-input-background"
                 />

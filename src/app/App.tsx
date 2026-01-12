@@ -9,6 +9,7 @@ import { OfflineProvider } from "./components/offline/OfflineContext";
 // Auth Pages
 import LoginPage from "./components/auth/LoginPage";
 import RegisterPage from "./components/auth/RegisterPage";
+import TenantRegisterPage from "./components/auth/TenantRegisterPage";
 import PendingApprovalPage from "./components/auth/PendingApprovalPage";
 import SplashScreen from "./components/auth/SplashScreen";
 
@@ -29,7 +30,8 @@ import AdminConsolePage from "./components/admin/AdminConsolePage";
 import SystemHealthPage from "./components/admin/SystemHealthPage";
 import ComponentTemplatesPage from "./components/admin/ComponentTemplatesPage"; // Inspection Templates
 import TenantSettingsPage from "./components/admin/TenantSettingsPage";
-import IconGeneratorPage from "./components/admin/IconGeneratorPage";
+import UserInvitationsPage from "./components/admin/UserInvitationsPage";
+import BulkAssetAssignmentPage from "./components/admin/BulkAssetAssignmentPage";
 import MobileCaptureHub from "./components/mobile/MobileCaptureHub";
 
 // Layout
@@ -39,6 +41,7 @@ import PWAInstallPrompt from "./components/pwa/PWAInstallPrompt";
 // Types
 export interface User {
   id: string;
+  tenantId: string;
   email: string;
   name: string;
   organization?: string;
@@ -189,10 +192,10 @@ function App() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#010D13] via-[#1a2d32] to-[#010D13]">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading TAMS360...</p>
+          <div className="w-16 h-16 border-4 border-[#39AEDF] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-300">Loading TAMS360...</p>
         </div>
       </div>
     );
@@ -211,6 +214,10 @@ function App() {
             <Route
               path="/register"
               element={user ? <Navigate to="/dashboard" /> : <RegisterPage />}
+            />
+            <Route
+              path="/tenant-register"
+              element={user ? <Navigate to="/dashboard" /> : <TenantRegisterPage />}
             />
             <Route path="/pending-approval" element={<PendingApprovalPage />} />
             <Route
@@ -244,7 +251,8 @@ function App() {
                       <Route path="/admin/system-health" element={<SystemHealthPage />} />
                       <Route path="/admin/component-templates" element={<ComponentTemplatesPage />} />
                       <Route path="/admin/tenant-settings" element={<TenantSettingsPage />} />
-                      <Route path="/admin/icon-generator" element={<IconGeneratorPage />} />
+                      <Route path="/admin/user-invitations" element={<UserInvitationsPage />} />
+                      <Route path="/admin/bulk-asset-assignment" element={<BulkAssetAssignmentPage />} />
                       <Route path="/mobile/capture-hub" element={<MobileCaptureHub />} />
                       <Route path="*" element={<Navigate to="/dashboard" />} />
                     </Routes>

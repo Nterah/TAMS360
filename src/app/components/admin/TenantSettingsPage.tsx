@@ -9,9 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Switch } from "../ui/switch";
 import { Badge } from "../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Building2, Palette, Hash, Globe, Save, Upload, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Building2, Palette, Hash, Globe, Save, Upload, Image as ImageIcon, Loader2, Clock, AlertCircle, Crown } from "lucide-react";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 
 export default function TenantSettingsPage() {
   const { accessToken } = useContext(AuthContext);
@@ -19,6 +20,12 @@ export default function TenantSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [tenantInfo, setTenantInfo] = useState<{
+    tier: string;
+    status: string;
+    trialEndsAt: string | null;
+    name: string;
+  } | null>(null);
   const [settings, setSettings] = useState({
     // Organization Branding
     organizationName: "TAMS360",
@@ -55,6 +62,7 @@ export default function TenantSettingsPage() {
 
   useEffect(() => {
     fetchTenantSettings();
+    fetchTenantInfo();
   }, []);
 
   const fetchTenantSettings = async () => {
@@ -75,6 +83,25 @@ export default function TenantSettingsPage() {
       console.error("Error fetching tenant settings:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTenantInfo = async () => {
+    try {
+      const response = await fetch(`${API_URL}/admin/tenant-info`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.tenant) {
+          setTenantInfo(data.tenant);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching tenant info:", error);
     }
   };
 
@@ -177,6 +204,18 @@ export default function TenantSettingsPage() {
     );
   }
 
+  // Calculate trial days remaining
+  const getTrialDaysRemaining = () => {
+    if (!tenantInfo?.trialEndsAt) return null;
+    const now = new Date();
+    const trialEnd = new Date(tenantInfo.trialEndsAt);
+    const diff = trialEnd.getTime() - now.getTime();
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+    return days;
+  };
+
+  const trialDaysRemaining = getTrialDaysRemaining();
+
   return (
     <div className="space-y-6 pb-8">
       {/* Header */}
@@ -201,6 +240,40 @@ export default function TenantSettingsPage() {
           )}
         </Button>
       </div>
+
+      {/* Trial Status Banner */}
+      {tenantInfo && tenantInfo.tier === "trial" && trialDaysRemaining !== null && (
+        <Alert className={`${trialDaysRemaining <= 7 ? "border-yellow-600 bg-yellow-50 dark:bg-yellow-950/20" : "border-blue-600 bg-blue-50 dark:bg-blue-950/20"}`}>
+          <Clock className={`h-4 w-4 ${trialDaysRemaining <= 7 ? "text-yellow-600" : "text-blue-600"}`} />
+          <AlertTitle className="flex items-center gap-2">
+            Trial Account
+            <Badge variant={trialDaysRemaining <= 7 ? "destructive" : "default"}>
+              {trialDaysRemaining} {trialDaysRemaining === 1 ? "day" : "days"} remaining
+            </Badge>
+          </AlertTitle>
+          <AlertDescription className="mt-2">
+            {trialDaysRemaining <= 7 ? (
+              <>Your trial expires on <strong>{new Date(tenantInfo.trialEndsAt!).toLocaleDateString()}</strong>. Upgrade to continue using TAMS360 without interruption.</>
+            ) : (
+              <>Your trial period ends on <strong>{new Date(tenantInfo.trialEndsAt!).toLocaleDateString()}</strong>. Explore all features during your trial.</>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Paid Account Badge */}
+      {tenantInfo && tenantInfo.tier !== "trial" && (
+        <Alert className="border-green-600 bg-green-50 dark:bg-green-950/20">
+          <Crown className="h-4 w-4 text-green-600" />
+          <AlertTitle className="flex items-center gap-2">
+            {tenantInfo.tier.charAt(0).toUpperCase() + tenantInfo.tier.slice(1)} Account
+            <Badge variant="default" className="bg-green-600">Active</Badge>
+          </AlertTitle>
+          <AlertDescription className="mt-2">
+            You have full access to all TAMS360 features.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Tabs defaultValue="branding" className="space-y-6">
         <TabsList>
@@ -674,6 +747,59 @@ export default function TenantSettingsPage() {
           )}
         </Button>
       </div>
+
+      {/* Tenant Info */}
+      {tenantInfo && (
+        <div className="mt-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Tenant Information</CardTitle>
+              <CardDescription>
+                Overview of your tenant account
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Tenant Name</Label>
+                  <Input
+                    value={tenantInfo.name}
+                    readOnly
+                    className="bg-muted/50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Tier</Label>
+                  <Input
+                    value={tenantInfo.tier}
+                    readOnly
+                    className="bg-muted/50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <Input
+                    value={tenantInfo.status}
+                    readOnly
+                    className="bg-muted/50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Trial Ends At</Label>
+                  <Input
+                    value={tenantInfo.trialEndsAt ? new Date(tenantInfo.trialEndsAt).toLocaleDateString() : "N/A"}
+                    readOnly
+                    className="bg-muted/50"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 
