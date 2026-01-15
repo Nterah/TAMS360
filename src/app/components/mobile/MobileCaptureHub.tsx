@@ -1,8 +1,3 @@
-import { useState, useContext } from "react";
-import { AuthContext } from "../../App";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
 import { Camera, ClipboardCheck, MapPin, Plus, ScanLine, Navigation, CheckCircle2, Clock, AlertCircle, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";

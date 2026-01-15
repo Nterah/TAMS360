@@ -1,3 +1,7 @@
+import * as XLSX from "xlsx";
+import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { Link, useNavigate } from "react-router-dom";
+import { downloadReport } from "../../utils/reportGenerators";
 import { useState, useContext, useEffect } from "react";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -6,10 +10,6 @@ import { Download, Upload, FileText, Database, Trash2, RefreshCw, CheckCircle, A
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
-import * as XLSX from "xlsx";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
-import { Link, useNavigate } from "react-router-dom";
-import { downloadReport } from "../../utils/reportGenerators";
 import { Checkbox } from "../ui/checkbox";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -307,11 +307,11 @@ export default function DataManagementPage() {
                   <CardContent className="space-y-2">
                     <p className="text-sm text-muted-foreground">{dataCounts.assets} records</p>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" className="w-full" onClick={() => handleExportData('assets', 'CSV')}>
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => handleExportData('assets', 'CSV')}>
                         <Download className="w-4 h-4 mr-1" />
                         CSV
                       </Button>
-                      <Button size="sm" variant="outline" className="w-full" onClick={() => handleExportData('assets', 'PDF')}>
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => handleExportData('assets', 'PDF')}>
                         <Download className="w-4 h-4 mr-1" />
                         PDF
                       </Button>
@@ -329,11 +329,11 @@ export default function DataManagementPage() {
                   <CardContent className="space-y-2">
                     <p className="text-sm text-muted-foreground">{dataCounts.inspections} records</p>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" className="w-full" onClick={() => handleExportData('inspections', 'CSV')}>
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => handleExportData('inspections', 'CSV')}>
                         <Download className="w-4 h-4 mr-1" />
                         CSV
                       </Button>
-                      <Button size="sm" variant="outline" className="w-full" onClick={() => handleExportData('inspections', 'PDF')}>
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => handleExportData('inspections', 'PDF')}>
                         <Download className="w-4 h-4 mr-1" />
                         PDF
                       </Button>
@@ -351,11 +351,11 @@ export default function DataManagementPage() {
                   <CardContent className="space-y-2">
                     <p className="text-sm text-muted-foreground">{dataCounts.maintenance} records</p>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" className="w-full" onClick={() => handleExportData('maintenance', 'CSV')}>
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => handleExportData('maintenance', 'CSV')}>
                         <Download className="w-4 h-4 mr-1" />
                         CSV
                       </Button>
-                      <Button size="sm" variant="outline" className="w-full" onClick={() => handleExportData('maintenance', 'PDF')}>
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => handleExportData('maintenance', 'PDF')}>
                         <Download className="w-4 h-4 mr-1" />
                         PDF
                       </Button>
