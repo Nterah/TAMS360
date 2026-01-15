@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -18,6 +18,7 @@ import { toast } from "sonner";
 export default function MaintenancePage() {
   const navigate = useNavigate();
   const { user, accessToken } = useContext(AuthContext);
+  const [searchParams] = useSearchParams();
   const [maintenanceRecords, setMaintenanceRecords] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +60,31 @@ export default function MaintenancePage() {
     fetchStats();
   }, []);
 
+  // Read URL parameters and apply filters
+  useEffect(() => {
+    const status = searchParams.get('status');
+    
+    if (status) {
+      // Status can be a comma-separated list like "pending,in_progress,scheduled"
+      const statuses = status.split(',');
+      // For now, just set the first one (we could enhance this to handle multiple)
+      if (statuses.length === 1) {
+        // Map dashboard status to maintenance status format
+        const statusMap: Record<string, string> = {
+          'pending': 'Scheduled',
+          'in_progress': 'In Progress',
+          'scheduled': 'Scheduled'
+        };
+        const mappedStatus = statusMap[statuses[0].toLowerCase()] || statuses[0];
+        setFilterStatus(mappedStatus);
+        setShowFilters(true);
+      } else {
+        // Multiple statuses - just show all matching records
+        setShowFilters(true);
+      }
+    }
+  }, [searchParams]);
+
   const fetchMaintenanceRecords = async () => {
     try {
       const response = await fetch(`${API_URL}/maintenance`, {
@@ -69,7 +95,11 @@ export default function MaintenancePage() {
 
       if (response.ok) {
         const data = await response.json();
+        console.log("✅ Maintenance records fetched:", data.records?.length || 0, "records");
         setMaintenanceRecords(data.records || []);
+      } else {
+        const errorData = await response.json();
+        console.error("❌ Failed to fetch maintenance records. Status:", response.status, "Error:", errorData);
       }
     } catch (error) {
       console.error("Error fetching maintenance records:", error);
@@ -167,7 +197,7 @@ export default function MaintenancePage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5 lg:grid-cols-5">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Scheduled</CardTitle>
@@ -192,10 +222,7 @@ export default function MaintenancePage() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-success">{stats?.completed || 0}</div>
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" />
-              This month
-            </p>
+            <p className="text-xs text-muted-foreground">This month</p>
           </CardContent>
         </Card>
         <Card>
@@ -204,7 +231,16 @@ export default function MaintenancePage() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-destructive">{stats?.overdue || 0}</div>
-            <p className="text-xs text-muted-foreground">Needs attention</p>
+            <p className="text-xs text-muted-foreground">Past due date</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Cancelled</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-muted-foreground">{stats?.cancelled || 0}</div>
+            <p className="text-xs text-muted-foreground">All time</p>
           </CardContent>
         </Card>
       </div>

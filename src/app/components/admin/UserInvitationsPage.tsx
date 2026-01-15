@@ -151,14 +151,15 @@ export default function UserInvitationsPage() {
 
   // Fallback copy method with better error handling
   const copyToClipboard = async (text: string, successMessage: string) => {
-    // Try modern clipboard API first (only if available and secure)
-    if (navigator.clipboard && window.isSecureContext) {
+    // Skip clipboard API entirely in iframe/blocked contexts - use fallback directly
+    // Only try clipboard API if explicitly available and not in an iframe
+    if (navigator.clipboard && window.isSecureContext && window.parent === window) {
       try {
         await navigator.clipboard.writeText(text);
         toast.success(successMessage);
         return;
       } catch (err) {
-        // Silent fail, try fallback
+        // Silently fall through to fallback method
       }
     }
     

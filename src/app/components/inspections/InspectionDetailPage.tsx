@@ -6,7 +6,7 @@ import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { 
   ArrowLeft, Calendar, User, MapPin, FileText, AlertTriangle, 
-  Banknote, Trash2, Edit, Info, Image as ImageIcon 
+  Banknote, Trash2, Edit, Info, Image as ImageIcon, Wrench, Plus, ExternalLink
 } from "lucide-react";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { toast } from "sonner";
@@ -32,6 +32,7 @@ export default function InspectionDetailPage() {
   const navigate = useNavigate();
   const { accessToken } = useContext(AuthContext);
   const [inspection, setInspection] = useState<any>(null);
+  const [maintenanceRecords, setMaintenanceRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
@@ -40,6 +41,7 @@ export default function InspectionDetailPage() {
   useEffect(() => {
     if (id) {
       fetchInspection();
+      fetchMaintenanceRecords();
     }
   }, [id]);
 
@@ -66,6 +68,23 @@ export default function InspectionDetailPage() {
     }
   };
 
+  const fetchMaintenanceRecords = async () => {
+    try {
+      const response = await fetch(`${API_URL}/maintenance?inspection_id=${id}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMaintenanceRecords(data.records || []);
+      }
+    } catch (error) {
+      console.error("Error fetching maintenance records:", error);
+    }
+  };
+
   const handleDelete = async () => {
     try {
       const response = await fetch(`${API_URL}/inspections/${id}`, {
@@ -85,6 +104,11 @@ export default function InspectionDetailPage() {
       console.error("Error deleting inspection:", error);
       toast.error("Error deleting inspection");
     }
+  };
+
+  const handleCreateMaintenance = () => {
+    // Navigate to maintenance creation with inspection context
+    navigate(`/maintenance/new?inspection_id=${id}&asset_id=${inspection?.asset_id}`);
   };
 
   const getUrgencyInfo = (urgency: string | number) => {
@@ -589,6 +613,87 @@ export default function InspectionDetailPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Maintenance Records */}
+        {maintenanceRecords.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Maintenance Records</CardTitle>
+              <CardDescription>
+                Maintenance activities linked to this inspection ({maintenanceRecords.length} record{maintenanceRecords.length !== 1 ? 's' : ''})
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {maintenanceRecords.map((record: any) => {
+                  const getStatusBadge = (status: string) => {
+                    const statusMap: Record<string, { variant: "default" | "destructive" | "outline" | "secondary" }> = {
+                      "Scheduled": { variant: "outline" },
+                      "In Progress": { variant: "default" },
+                      "Completed": { variant: "secondary" },
+                      "Cancelled": { variant: "destructive" },
+                    };
+                    return statusMap[status] || { variant: "outline" };
+                  };
+
+                  return (
+                    <div 
+                      key={record.maintenance_id} 
+                      className="p-4 border rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
+                      onClick={() => navigate(`/maintenance/${record.maintenance_id}`)}
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-1">
+                            <Wrench className="w-4 h-4 text-muted-foreground" />
+                            <h4 className="font-semibold">{record.maintenance_type || "Maintenance"}</h4>
+                            {record.status && (
+                              <Badge variant={getStatusBadge(record.status).variant} className="text-xs">
+                                {record.status}
+                              </Badge>
+                            )}
+                          </div>
+                          {record.description && (
+                            <p className="text-sm text-muted-foreground ml-7">{record.description}</p>
+                          )}
+                        </div>
+                        <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                      <div className="grid grid-cols-3 gap-4 ml-7 mt-2">
+                        {record.scheduled_date && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Scheduled</p>
+                            <p className="text-sm font-medium">{new Date(record.scheduled_date).toLocaleDateString()}</p>
+                          </div>
+                        )}
+                        {record.actual_cost && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Cost</p>
+                            <p className="text-sm font-medium text-[#F8D227]">R {record.actual_cost.toLocaleString()}</p>
+                          </div>
+                        )}
+                        {record.work_order_number && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Work Order</p>
+                            <p className="text-sm font-medium">{record.work_order_number}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Create Maintenance Button */}
+        <div className="flex items-center justify-end">
+          <Button variant="outline" onClick={handleCreateMaintenance}>
+            <Plus className="w-4 h-4 mr-2" />
+            Create Maintenance Record
+          </Button>
+        </div>
 
         {/* Delete Confirmation Dialog */}
         <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

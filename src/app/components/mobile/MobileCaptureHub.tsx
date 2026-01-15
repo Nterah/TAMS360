@@ -3,13 +3,17 @@ import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Camera, ClipboardCheck, MapPin, Plus, ScanLine, Navigation, CheckCircle2, Clock, AlertCircle } from "lucide-react";
+import { Camera, ClipboardCheck, MapPin, Plus, ScanLine, Navigation, CheckCircle2, Clock, AlertCircle, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { syncAllOfflineData } from "../../utils/offlineSync";
 
 export default function MobileCaptureHub() {
-  const { user } = useContext(AuthContext);
+  const { user, accessToken } = useContext(AuthContext);
   const navigate = useNavigate();
   const [syncStatus, setSyncStatus] = useState<"synced" | "pending" | "offline">("synced");
+  const [syncing, setSyncing] = useState(false);
 
   // Get pending items from localStorage
   const getPendingCounts = () => {
@@ -24,6 +28,39 @@ export default function MobileCaptureHub() {
   };
 
   const pending = getPendingCounts();
+
+  // Handle sync
+  const handleSync = async () => {
+    if (!accessToken) {
+      toast.error("Not authenticated");
+      return;
+    }
+
+    if (!navigator.onLine) {
+      toast.error("No internet connection");
+      return;
+    }
+
+    setSyncing(true);
+    try {
+      const result = await syncAllOfflineData(accessToken);
+      
+      if (result.success) {
+        toast.success(`Successfully synced ${result.synced} item(s)`);
+        window.location.reload(); // Refresh to update counts
+      } else {
+        toast.error(`Synced ${result.synced}, failed ${result.failed}`);
+        if (result.errors.length > 0) {
+          console.error("Sync errors:", result.errors);
+        }
+      }
+    } catch (error) {
+      console.error("Sync error:", error);
+      toast.error("Failed to sync data");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 pb-20">
@@ -51,8 +88,8 @@ export default function MobileCaptureHub() {
                   {pending.assets} asset{pending.assets !== 1 ? 's' : ''}, {pending.inspections} inspection{pending.inspections !== 1 ? 's' : ''}
                 </p>
               </div>
-              <Button size="sm" variant="outline" className="border-amber-600 text-amber-700">
-                Sync Now
+              <Button size="sm" variant="outline" className="border-amber-600 text-amber-700" onClick={handleSync}>
+                {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sync Now"}
               </Button>
             </div>
           </CardContent>
@@ -64,7 +101,7 @@ export default function MobileCaptureHub() {
         {/* Capture New Asset */}
         <Card 
           className="border-2 border-primary hover:shadow-lg transition-all cursor-pointer active:scale-95"
-          onClick={() => navigate("/assets?action=new")}
+          onClick={() => navigate("/mobile/field-capture")}
         >
           <CardHeader className="pb-3">
             <div className="flex items-center gap-3">

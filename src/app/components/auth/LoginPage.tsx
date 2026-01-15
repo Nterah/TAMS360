@@ -8,6 +8,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Button } from "../ui/button";
 import Logo from "../ui/Logo";
+import { projectId } from "../../../../utils/supabase/info";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -24,6 +25,28 @@ export default function LoginPage() {
 
     try {
       await login(email, password);
+      
+      // Check if user has a tenant
+      const token = localStorage.getItem("tams360_token");
+      if (token) {
+        const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+        const checkResponse = await fetch(`${API_URL}/auth/check-tenant`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        
+        if (checkResponse.ok) {
+          const checkData = await checkResponse.json();
+          if (!checkData.hasTenant || !checkData.tenantExists) {
+            // User needs to set up organization
+            navigate("/setup-organization");
+            return;
+          }
+        }
+      }
+      
       navigate("/dashboard");
     } catch (err: any) {
       if (err.message === "pending") {

@@ -37,6 +37,13 @@ export interface ReportOptions {
 export async function generatePDFReport(options: ReportOptions): Promise<void> {
   const { title, data, columns, tenant, fileName, includeDate = true, includeFooter = true } = options;
   
+  // Debug logging
+  console.log('[PDF Generator] Starting PDF generation');
+  console.log('[PDF Generator] Tenant data received:', tenant);
+  console.log('[PDF Generator] Organization Name:', tenant.organizationName);
+  console.log('[PDF Generator] Logo URL:', tenant.logoUrl);
+  console.log('[PDF Generator] Primary Color:', tenant.primaryColor);
+  
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const primaryColor = tenant.primaryColor || '#010D13';
@@ -66,8 +73,24 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
         img.onerror = reject;
         img.src = tenant.logoUrl!;
       });
-      doc.addImage(img, 'PNG', 15, yPosition, 30, 30);
-      yPosition += 35;
+      
+      // Calculate dimensions preserving aspect ratio
+      const maxWidth = 35;
+      const maxHeight = 20;
+      const aspectRatio = img.width / img.height;
+      
+      let logoWidth = maxWidth;
+      let logoHeight = maxWidth / aspectRatio;
+      
+      // If height exceeds max, scale down based on height
+      if (logoHeight > maxHeight) {
+        logoHeight = maxHeight;
+        logoWidth = maxHeight * aspectRatio;
+      }
+      
+      console.log(`[PDF Generator] Logo dimensions: ${img.width}x${img.height}, Rendered as: ${logoWidth}x${logoHeight}`);
+      doc.addImage(img, 'PNG', 15, yPosition, logoWidth, logoHeight);
+      yPosition += logoHeight + 5;
     } catch (error) {
       console.warn('Could not load logo:', error);
     }
@@ -197,13 +220,25 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
     const pageCount = doc.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
+      const pageHeight = doc.internal.pageSize.getHeight();
+      
+      // Left: Tenant name and page number
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
       doc.text(
         `${tenant.organizationName || 'TAMS360'} | Page ${i} of ${pageCount}`,
-        pageWidth / 2,
-        doc.internal.pageSize.getHeight() - 10,
-        { align: 'center' }
+        15,
+        pageHeight - 10
+      );
+      
+      // Right: "Created by TAMS360"
+      doc.setFontSize(7);
+      doc.setTextColor(180, 180, 180);
+      doc.text(
+        'Created by TAMS360',
+        pageWidth - 15,
+        pageHeight - 10,
+        { align: 'right' }
       );
     }
   }
@@ -268,39 +303,44 @@ export function generateExcelReport(options: ReportOptions): void {
 export function generateCSVReport(options: ReportOptions): void {
   const { title, data, columns, tenant, fileName } = options;
   
-  // Prepare CSV data
-  const csvData = [
-    // Header information
-    { field: 'Organization', value: tenant.organizationName || 'TAMS360' },
-    { field: 'Report', value: title },
-    { field: 'Generated', value: new Date().toLocaleString('en-ZA') },
-    {}, // Empty row
-    // Column headers and data
-    ...data.map(row => {
-      const csvRow: any = {};
-      columns.forEach(col => {
-        const value = row[col.key];
-        // Format currency values
-        if (col.key.includes('cost') || col.key.includes('value') || col.key.includes('price')) {
-          csvRow[col.header] = typeof value === 'number' ? `R ${value.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : value || '';
-        }
-        // Format dates
-        else if (col.key.includes('date') || col.key.includes('Date')) {
-          csvRow[col.header] = value ? new Date(value).toLocaleDateString('en-ZA') : '';
-        }
-        else {
-          csvRow[col.header] = value || '';
-        }
-      });
-      return csvRow;
-    })
-  ];
+  // Prepare header lines as comments
+  const headerComments = [
+    `# Organization: ${tenant.organizationName || 'TAMS360'}`,
+    `# Report: ${title}`,
+    `# Generated: ${new Date().toLocaleString('en-ZA')}`,
+    '', // Empty line
+  ].join('\n');
   
-  // Generate CSV
-  const csv = Papa.unparse(csvData);
+  // Prepare actual data rows with proper column mapping
+  const csvRows = data.map(row => {
+    const csvRow: any = {};
+    columns.forEach(col => {
+      const value = row[col.key];
+      // Format currency values
+      if (col.key.includes('cost') || col.key.includes('value') || col.key.includes('price')) {
+        csvRow[col.header] = typeof value === 'number' ? `R ${value.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : value || '';
+      }
+      // Format dates
+      else if (col.key.includes('date') || col.key.includes('Date')) {
+        csvRow[col.header] = value ? new Date(value).toLocaleDateString('en-ZA') : '';
+      }
+      else {
+        csvRow[col.header] = value || '';
+      }
+    });
+    return csvRow;
+  });
+  
+  // Generate CSV from data rows only
+  const csv = Papa.unparse(csvRows, {
+    columns: columns.map(col => col.header),
+  });
+  
+  // Combine header comments with CSV data
+  const fullCsv = headerComments + '\n' + csv;
   
   // Download CSV
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([fullCsv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
   link.setAttribute('href', url);

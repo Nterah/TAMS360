@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
+import "leaflet.markercluster";
+
+// Add MarkerCluster CSS imports
+import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 
 interface SimpleMapProps {
   center: [number, number];
@@ -8,8 +14,9 @@ interface SimpleMapProps {
   userLocation: { lat: number; lng: number } | null;
   onAssetClick: (asset: any) => void;
   onNavigate: (asset: any) => void;
-  colorMode?: "condition" | "ci" | "urgency" | "status";
+  colorMode?: "condition" | "ci" | "urgency" | "status" | "region" | "ward" | "depot" | "owner";
   mapLayer?: "street" | "satellite" | "hybrid";
+  clusteringEnabled?: boolean;
 }
 
 // Asset type icon SVG paths (simple shapes for different asset types)
@@ -49,6 +56,38 @@ const getMarkerColor = (asset: any, colorMode: string = "condition") => {
       if (status.toLowerCase() === "missing") return "#FF4444"; // Red
       if (status.toLowerCase() === "repaired") return "#39AEDF"; // Blue
       return "#455B5E"; // Default grey
+    }
+    case "region": {
+      // Generate consistent color based on region name
+      const region = asset.region_name || asset.region || "";
+      if (!region) return "#455B5E";
+      const hash = region.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
+      const colors = ["#5DB32A", "#39AEDF", "#F8D227", "#FF4444", "#010D13", "#455B5E", "#9B59B6", "#E67E22"];
+      return colors[Math.abs(hash) % colors.length];
+    }
+    case "ward": {
+      // Generate consistent color based on ward name
+      const ward = asset.ward_name || asset.ward || "";
+      if (!ward) return "#455B5E";
+      const hash = ward.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
+      const colors = ["#5DB32A", "#39AEDF", "#F8D227", "#FF4444", "#010D13", "#455B5E", "#9B59B6", "#E67E22"];
+      return colors[Math.abs(hash) % colors.length];
+    }
+    case "depot": {
+      // Generate consistent color based on depot name
+      const depot = asset.depot_name || asset.depot || "";
+      if (!depot) return "#455B5E";
+      const hash = depot.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
+      const colors = ["#5DB32A", "#39AEDF", "#F8D227", "#FF4444", "#010D13", "#455B5E", "#9B59B6", "#E67E22"];
+      return colors[Math.abs(hash) % colors.length];
+    }
+    case "owner": {
+      // Generate consistent color based on owner name
+      const owner = asset.owner_name || asset.owner || "";
+      if (!owner) return "#455B5E";
+      const hash = owner.split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
+      const colors = ["#5DB32A", "#39AEDF", "#F8D227", "#FF4444", "#010D13", "#455B5E", "#9B59B6", "#E67E22"];
+      return colors[Math.abs(hash) % colors.length];
     }
     case "condition":
     default: {
@@ -97,11 +136,13 @@ export function SimpleMap({
   onAssetClick, 
   onNavigate,
   colorMode = "condition",
-  mapLayer = "street"
+  mapLayer = "street",
+  clusteringEnabled = true
 }: SimpleMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const markersRef = useRef<L.Marker[]>([]);
+  const markerClusterRef = useRef<L.MarkerClusterGroup | null>(null);
+  const userMarkerRef = useRef<L.Marker | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
 
   // Initialize map
@@ -185,14 +226,18 @@ export function SimpleMap({
   useEffect(() => {
     if (!mapRef.current) return;
 
-    console.log(`SimpleMap: Updating markers. Received ${assets.length} assets (color mode: ${colorMode})`);
+    console.log(`SimpleMap: Updating markers. Received ${assets.length} assets (color mode: ${colorMode}, clustering: ${clusteringEnabled})`);
 
-    // Clear existing markers
-    markersRef.current.forEach(marker => marker.remove());
-    markersRef.current = [];
+    // Clear existing marker cluster
+    if (markerClusterRef.current) {
+      mapRef.current.removeLayer(markerClusterRef.current);
+      markerClusterRef.current = null;
+    }
 
     // Add asset markers
     let addedCount = 0;
+    const markers: L.Marker[] = [];
+    
     assets.forEach(asset => {
       if (!asset.latitude || !asset.longitude) {
         return;
@@ -243,12 +288,66 @@ export function SimpleMap({
 
       marker.bindPopup(popupContent);
       marker.on('click', () => onAssetClick(asset));
-      marker.addTo(mapRef.current!);
-      markersRef.current.push(marker);
+      markers.push(marker);
       addedCount++;
     });
 
-    console.log(`SimpleMap: Added ${addedCount} markers to the map`);
+    if (clusteringEnabled) {
+      // Create marker cluster group with custom styling
+      const markerCluster = L.markerClusterGroup({
+        maxClusterRadius: 50,
+        spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false,
+        zoomToBoundsOnClick: true,
+        iconCreateFunction: function(cluster: any) {
+          const childCount = cluster.getChildCount();
+          let clusterClass = 'marker-cluster-small';
+          let clusterColor = '#39AEDF';
+          
+          if (childCount > 100) {
+            clusterClass = 'marker-cluster-large';
+            clusterColor = '#010D13';
+          } else if (childCount > 50) {
+            clusterClass = 'marker-cluster-medium';
+            clusterColor = '#455B5E';
+          }
+
+          return L.divIcon({
+            html: `
+              <div style="
+                background-color: ${clusterColor};
+                width: ${Math.min(40 + Math.log(childCount) * 5, 60)}px;
+                height: ${Math.min(40 + Math.log(childCount) * 5, 60)}px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+                font-size: ${Math.min(12 + Math.log(childCount), 18)}px;
+                border: 3px solid white;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+              ">
+                ${childCount}
+              </div>
+            `,
+            className: clusterClass,
+            iconSize: L.point(40, 40),
+          });
+        },
+      });
+
+      markers.forEach(marker => markerCluster.addLayer(marker));
+      mapRef.current.addLayer(markerCluster);
+      markerClusterRef.current = markerCluster;
+      console.log(`SimpleMap: Added ${addedCount} markers with clustering enabled`);
+    } else {
+      // Add markers directly without clustering
+      const layerGroup = L.layerGroup(markers);
+      layerGroup.addTo(mapRef.current);
+      markerClusterRef.current = layerGroup as any;
+      console.log(`SimpleMap: Added ${addedCount} markers without clustering`);
+    }
 
     // Add user location marker
     if (userLocation) {
@@ -297,10 +396,10 @@ export function SimpleMap({
       `);
 
       userMarker.addTo(mapRef.current);
-      markersRef.current.push(userMarker);
+      userMarkerRef.current = userMarker;
       console.log(`SimpleMap: Added user location marker`);
     }
-  }, [assets, userLocation, onAssetClick, colorMode]);
+  }, [assets, userLocation, onAssetClick, colorMode, clusteringEnabled]);
 
   return (
     <>

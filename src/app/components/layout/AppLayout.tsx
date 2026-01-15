@@ -20,6 +20,7 @@ import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import Logo from "../ui/Logo";
 import OfflineBanner from "../offline/OfflineBanner";
 import SyncStatusBadge from "../offline/SyncStatusBadge";
+import TenantBanner from "./TenantBanner";
 
 const navigation = [
   { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin", "supervisor", "field_user", "viewer"] },
@@ -111,6 +112,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content */}
       <div className="md:pl-64">
+        {/* Tenant Banner */}
+        <TenantBanner />
+        
         {/* Offline Banner */}
         <OfflineBanner />
         

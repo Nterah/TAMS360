@@ -42,8 +42,9 @@ export default function GISMapPage() {
   const [mapCenter, setMapCenter] = useState<[number, number]>(DEFAULT_CENTER);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
   const [controlsMinimized, setControlsMinimized] = useState(false);
-  const [colorMode, setColorMode] = useState<"condition" | "ci" | "urgency" | "status">("condition");
+  const [colorMode, setColorMode] = useState<"condition" | "ci" | "urgency" | "status" | "region" | "ward" | "depot" | "owner">("ci");
   const [mapLayer, setMapLayer] = useState<"street" | "satellite" | "hybrid">("street");
+  const [clusteringEnabled, setClusteringEnabled] = useState(true);
   
   const [filters, setFilters] = useState({
     type: "all",
@@ -90,6 +91,7 @@ export default function GISMapPage() {
 
   // Abort controller for request cancellation
   const abortControllerRef = useRef<AbortController | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     fetchAssets();
@@ -707,29 +709,39 @@ export default function GISMapPage() {
     toast.success("PDF report opened - use browser Print to save as PDF");
   };
 
-  const exportAsImage = () => {
-    const imageWindow = window.open("", "_blank");
-    if (!imageWindow) {
-      toast.error("Please allow popups");
+  const exportAsImage = async () => {
+    if (!mapContainerRef.current) {
+      toast.error("Map container not found");
       return;
     }
 
-    imageWindow.document.write(`<!DOCTYPE html><html><head><title>Map Screenshot Instructions</title><style>
-      body{margin:0;padding:20px;font-family:Arial,sans-serif;background:#f5f5f5}.container{max-width:800px;margin:0 auto;background:white;padding:20px;border-radius:8px}
-      h1{color:#010D13;border-bottom:3px solid #39AEDF;padding-bottom:10px}.info{background:#f0f9ff;padding:15px;border-radius:5px;margin:20px 0;border-left:4px solid #39AEDF}
-      .instructions{margin:20px 0;padding:15px;background:#fff3cd;border-left:4px solid #F8D227;border-radius:5px}
-      button{background:#39AEDF;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;margin:5px}</style></head><body>
-      <div class="container"><h1>📸 Map Screenshot Instructions</h1>
-      <div class="info"><strong>Map Details:</strong><br>📍 Assets: ${filteredAssets.length} | 🎨 Color: ${colorMode} | 🗺️ Layer: ${mapLayer}</div>
-      <div class="instructions"><strong>How to capture:</strong><ul>
-        <li><strong>Windows:</strong> Press <kbd>Win + Shift + S</kbd></li>
-        <li><strong>Mac:</strong> Press <kbd>Cmd + Shift + 4</kbd></li>
-        <li><strong>Browser:</strong> Use screenshot extension</li></ul>
-      <p><strong>Tip:</strong> Return to map window and use your OS screenshot tool</p></div>
-      <button onclick="window.close()">Close</button><button onclick="window.opener.focus()">Back to Map</button>
-      </div></body></html>`);
-    imageWindow.document.close();
-    toast.success("Screenshot instructions opened");
+    try {
+      toast.info("Capturing map...");
+      const html2canvas = (await import('html2canvas')).default;
+      
+      const canvas = await html2canvas(mapContainerRef.current, {
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        scale: 2, // Higher quality
+      });
+
+      // Convert to blob and download
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `TAMS360_Map_${new Date().toISOString().split('T')[0]}.png`;
+          link.click();
+          URL.revokeObjectURL(url);
+          toast.success("Map image exported successfully!");
+        }
+      });
+    } catch (error) {
+      console.error("Error capturing map:", error);
+      toast.error("Failed to capture map image");
+    }
   };
 
   return (
@@ -790,6 +802,40 @@ export default function GISMapPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Color Mode Selector - Available for all tabs */}
+            <div>
+              <Label className="text-sm mb-2 block">Color By</Label>
+              <Select value={colorMode} onValueChange={(v: any) => setColorMode(v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ci">Condition Index (CI)</SelectItem>
+                  <SelectItem value="urgency">Urgency</SelectItem>
+                  <SelectItem value="status">Status</SelectItem>
+                  <SelectItem value="region">Region</SelectItem>
+                  <SelectItem value="ward">Ward</SelectItem>
+                  <SelectItem value="depot">Depot</SelectItem>
+                  <SelectItem value="owner">Owner</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Marker Clustering Toggle */}
+            <div className="flex items-center justify-between p-3 bg-accent/50 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm cursor-pointer" htmlFor="clustering-toggle">
+                  Group Nearby Assets
+                </Label>
+              </div>
+              <Checkbox
+                id="clustering-toggle"
+                checked={clusteringEnabled}
+                onCheckedChange={setClusteringEnabled}
+              />
+            </div>
+
             <Tabs defaultValue="filters" className="w-full">
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="filters">Filters</TabsTrigger>
@@ -926,22 +972,6 @@ export default function GISMapPage() {
                     <Layers className="w-4 h-4" />
                     Asset Layers
                   </h4>
-                </div>
-
-                {/* Color Mode Selector */}
-                <div>
-                  <Label className="text-sm mb-2 block">Color By</Label>
-                  <Select value={colorMode} onValueChange={(v: any) => setColorMode(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="condition">Condition</SelectItem>
-                      <SelectItem value="ci">Condition Index (CI)</SelectItem>
-                      <SelectItem value="urgency">Urgency</SelectItem>
-                      <SelectItem value="status">Status</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 <div className="flex gap-2 mb-3">
@@ -1128,7 +1158,7 @@ export default function GISMapPage() {
           {/* Map Container */}
           <Card>
             <CardContent className="p-0">
-              <div className="relative">
+              <div className="relative" ref={mapContainerRef}>
                 <div className="h-[600px] rounded-lg overflow-hidden">
                   <SimpleMap
                     center={mapCenter}
@@ -1139,6 +1169,7 @@ export default function GISMapPage() {
                     onNavigate={navigateToAsset}
                     colorMode={colorMode}
                     mapLayer={mapLayer}
+                    clusteringEnabled={clusteringEnabled}
                   />
                 </div>
 

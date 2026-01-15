@@ -39,10 +39,10 @@ export default function InspectionsPage() {
     { id: "inspector_name", label: "Inspector", visible: true },
     { id: "asset_type_name", label: "Asset Type", visible: true },
     { id: "inspection_type", label: "Inspection Type", visible: true },
-    { id: "ci_final", label: "CI Score", visible: true },
+    { id: "conditional_index", label: "CI Score", visible: true },
     { id: "calculated_urgency", label: "Urgency", visible: true },
     { id: "total_remedial_cost", label: "Remedial Cost", visible: true },
-    { id: "finding_summary", label: "Summary", visible: false },
+    { id: "finding_summary", label: "Summary", visible: true },
   ]);
 
   // Filter states
@@ -247,7 +247,7 @@ export default function InspectionsPage() {
 
     // CI Range filter
     if (filterCIRange !== "all") {
-      const ci = inspection.ci_final;
+      const ci = inspection.conditional_index;
       if (ci === null || ci === undefined) {
         if (filterCIRange !== "not-inspected") return false;
       } else {
@@ -332,8 +332,8 @@ export default function InspectionsPage() {
           <CardContent>
             <div className="text-3xl font-bold">
               {(() => {
-                // Use ci_final from new view (0-100 range guaranteed)
-                const validCIs = inspections.filter(i => i.ci_final !== null && i.ci_final !== undefined).map(i => i.ci_final);
+                // Use conditional_index from the database view (0-100 range guaranteed)
+                const validCIs = inspections.filter(i => i.conditional_index !== null && i.conditional_index !== undefined).map(i => i.conditional_index);
                 const avg = validCIs.length > 0 ? validCIs.reduce((a, b) => a + b, 0) / validCIs.length : 0;
                 return avg > 0 ? avg.toFixed(0) : "—";
               })()}
@@ -520,8 +520,8 @@ export default function InspectionsPage() {
               </TableHeader>
               <TableBody>
                 {filteredInspections.slice(0, 50).map((inspection) => {
-                  const normalizedCI = inspection.ci_final !== null && inspection.ci_final !== undefined
-                    ? inspection.ci_final
+                  const normalizedCI = inspection.conditional_index !== null && inspection.conditional_index !== undefined
+                    ? inspection.conditional_index
                     : null;
                   const ciBadge = getCIBadge(normalizedCI);
                   const urgencyBadge = getUrgencyBadge(inspection.calculated_urgency);
@@ -556,7 +556,7 @@ export default function InspectionsPage() {
                       {columns.find(c => c.id === "inspection_type")?.visible && (
                         <TableCell>{inspection.inspection_type || "—"}</TableCell>
                       )}
-                      {columns.find(c => c.id === "ci_final")?.visible && (
+                      {columns.find(c => c.id === "conditional_index")?.visible && (
                         <TableCell>
                           {normalizedCI !== null ? (
                             <Badge className={ciBadge.color}>
@@ -632,8 +632,8 @@ export default function InspectionsPage() {
             <div className="space-y-4">
               {filteredInspections.slice(0, 20).map((inspection) => {
                 // Use ci_final from new view (already normalized 0-100)
-                const normalizedCI = inspection.ci_final !== null && inspection.ci_final !== undefined
-                  ? inspection.ci_final
+                const normalizedCI = inspection.conditional_index !== null && inspection.conditional_index !== undefined
+                  ? inspection.conditional_index
                   : null;
                 return (
                   <div key={inspection.inspection_id} className="flex items-start gap-4 p-4 border rounded-lg hover:bg-accent/50 transition-colors">

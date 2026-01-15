@@ -99,6 +99,7 @@ export default function DataManagementPage() {
           columns = [
             { header: 'Asset Number', key: 'asset_ref' },
             { header: 'Asset Type', key: 'asset_type_name' },
+            { header: 'Region', key: 'region' },
             { header: 'Route/Road', key: 'route_road' },
             { header: 'Chainage', key: 'chainage_km' },
             { header: 'Condition Index', key: 'condition_index' },

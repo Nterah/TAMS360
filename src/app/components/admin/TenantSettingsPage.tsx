@@ -1,109 +1,102 @@
-import { useState, useEffect, useContext } from "react";
+import { useContext, useState, useEffect } from "react";
 import { AuthContext } from "../../App";
+import { useTenant } from "../../contexts/TenantContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { Badge } from "../ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Building2, Palette, Hash, Globe, Save, Upload, Image as ImageIcon, Loader2, Clock, AlertCircle, Crown } from "lucide-react";
+import { Badge } from "../ui/badge";
+import { Save, Palette, Hash, Globe, Building2, AlertCircle, Loader2, Zap, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import EmailNotificationsTab from "./EmailNotificationsTab";
 
 export default function TenantSettingsPage() {
   const { accessToken } = useContext(AuthContext);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [tenantInfo, setTenantInfo] = useState<{
-    tier: string;
-    status: string;
-    trialEndsAt: string | null;
-    name: string;
-  } | null>(null);
+  const { settings: tenantSettings, refreshSettings, tenantName } = useTenant();
   const [settings, setSettings] = useState({
-    // Organization Branding
-    organizationName: "TAMS360",
-    organizationTagline: "Road & Traffic Asset Management Suite",
+    organizationName: "",
+    organizationTagline: "",
+    address: "",
+    phone: "",
+    email: "",
+    website: "",
     logoUrl: "",
+    licenseExpiryDate: "",
     primaryColor: "#010D13",
     secondaryColor: "#39AEDF",
     accentColor: "#5DB32A",
-    
-    // Asset Numbering System
-    assetRefPrefix: "TAMS",
-    assetRefFormat: "PREFIX-YEAR-SEQUENCE", // Options: PREFIX-YEAR-SEQUENCE, PREFIX-SEQUENCE, YEAR-PREFIX-SEQUENCE
-    assetRefSeparator: "-",
-    assetRefSequenceLength: 5, // e.g., 00001
-    assetRefIncludeType: false, // Include asset type code in reference
-    assetRefAutoGenerate: true,
-    
-    // Regional Settings
-    defaultRegion: "National",
-    defaultCurrency: "ZAR",
-    currencySymbol: "R",
-    dateFormat: "DD/MM/YYYY",
-    distanceUnit: "kilometers",
-    
-    // System Preferences
-    requireGPSForAssets: true,
-    requirePhotoForInspection: true,
-    autoCalculateCI: true,
-    enableOfflineMode: true,
-    dataRetentionYears: 10,
+    assetNumberPrefix: "AST",
+    assetNumberDigits: 6,
+    inspectionNumberPrefix: "INS",
+    maintenanceNumberPrefix: "MNT",
+    dateFormat: "YYYY-MM-DD",
+    currency: "ZAR",
+    measurementUnits: "metric",
+    timeZone: "Africa/Johannesburg",
+    fiscalYearStart: "April",
+    autoBackup: true,
+    notificationsEnabled: true,
+    // Automation Rules
+    enableAutoMaintenance: true,
+    ciThreshold: 50,
+    urgencyThreshold: "Medium",
+    autoAssignFieldUser: false,
+    autoNotifyOnCritical: true,
+    // Email Notifications
+    notificationEmails: [] as string[],
+    enableDailyDigest: false,
   });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   useEffect(() => {
-    fetchTenantSettings();
-    fetchTenantInfo();
-  }, []);
-
-  const fetchTenantSettings = async () => {
-    try {
-      const response = await fetch(`${API_URL}/admin/tenant-settings`, {
-        headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
-        },
+    // Load settings from TenantContext (same source as TenantBanner)
+    if (tenantSettings) {
+      setSettings({
+        organizationName: tenantSettings.organization_name || "",
+        organizationTagline: tenantSettings.organization_tagline || "",
+        address: tenantSettings.address || "",
+        phone: tenantSettings.phone || "",
+        email: tenantSettings.email || "",
+        website: tenantSettings.website || "",
+        logoUrl: tenantSettings.logo_url || "",
+        licenseExpiryDate: tenantSettings.license_expiry_date || "",
+        primaryColor: tenantSettings.primary_color || "#010D13",
+        secondaryColor: tenantSettings.secondary_color || "#39AEDF",
+        accentColor: tenantSettings.accent_color || "#5DB32A",
+        assetNumberPrefix: tenantSettings.asset_number_prefix || "AST",
+        assetNumberDigits: tenantSettings.asset_number_digits || 6,
+        inspectionNumberPrefix: tenantSettings.inspection_number_prefix || "INS",
+        maintenanceNumberPrefix: tenantSettings.maintenance_number_prefix || "MNT",
+        dateFormat: tenantSettings.date_format || "YYYY-MM-DD",
+        currency: tenantSettings.currency || "ZAR",
+        measurementUnits: tenantSettings.measurement_units || "metric",
+        timeZone: tenantSettings.time_zone || "Africa/Johannesburg",
+        fiscalYearStart: tenantSettings.fiscal_year_start || "April",
+        autoBackup: tenantSettings.auto_backup ?? true,
+        notificationsEnabled: tenantSettings.notifications_enabled ?? true,
+        // Automation Rules
+        enableAutoMaintenance: tenantSettings.enable_auto_maintenance ?? true,
+        ciThreshold: tenantSettings.ci_threshold ?? 50,
+        urgencyThreshold: tenantSettings.urgency_threshold ?? "Medium",
+        autoAssignFieldUser: tenantSettings.auto_assign_field_user ?? false,
+        autoNotifyOnCritical: tenantSettings.auto_notify_on_critical ?? true,
+        // Email Notifications
+        notificationEmails: tenantSettings.notification_emails ?? [],
+        enableDailyDigest: tenantSettings.enable_daily_digest ?? false,
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.settings) {
-          setSettings({ ...settings, ...data.settings });
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching tenant settings:", error);
-    } finally {
       setLoading(false);
     }
-  };
-
-  const fetchTenantInfo = async () => {
-    try {
-      const response = await fetch(`${API_URL}/admin/tenant-info`, {
-        headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.tenant) {
-          setTenantInfo(data.tenant);
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching tenant info:", error);
-    }
-  };
+  }, [tenantSettings]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -119,6 +112,7 @@ export default function TenantSettingsPage() {
 
       if (response.ok) {
         toast.success("Tenant settings saved successfully");
+        refreshSettings(); // Refresh settings in TenantContext
       } else {
         toast.error("Failed to save settings");
       }
@@ -129,40 +123,7 @@ export default function TenantSettingsPage() {
     }
   };
 
-  const handleLogoUpload = async () => {
-    if (!logoFile) return;
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("logo", logoFile);
-      const response = await fetch(`${API_URL}/admin/tenant-settings/logo`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
-        },
-        body: formData,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.logo_url) {
-          setSettings({ ...settings, logoUrl: data.logo_url });
-          toast.success("Logo uploaded successfully!");
-          setLogoFile(null);
-        }
-      } else {
-        toast.error("Failed to upload logo");
-      }
-    } catch (error) {
-      console.error("Logo upload error:", error);
-      toast.error("Error uploading logo");
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const handleFileSelect = async (file: File) => {
-    setLogoFile(file);
     setUploading(true);
     try {
       const formData = new FormData();
@@ -180,7 +141,8 @@ export default function TenantSettingsPage() {
         if (data.logo_url) {
           setSettings({ ...settings, logoUrl: data.logo_url });
           toast.success("Logo uploaded successfully!");
-          setLogoFile(null);
+          // Refresh TenantContext to update banner
+          refreshSettings();
         }
       } else {
         toast.error("Failed to upload logo");
@@ -203,18 +165,6 @@ export default function TenantSettingsPage() {
       </div>
     );
   }
-
-  // Calculate trial days remaining
-  const getTrialDaysRemaining = () => {
-    if (!tenantInfo?.trialEndsAt) return null;
-    const now = new Date();
-    const trialEnd = new Date(tenantInfo.trialEndsAt);
-    const diff = trialEnd.getTime() - now.getTime();
-    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-    return days;
-  };
-
-  const trialDaysRemaining = getTrialDaysRemaining();
 
   return (
     <div className="space-y-6 pb-8">
@@ -241,40 +191,6 @@ export default function TenantSettingsPage() {
         </Button>
       </div>
 
-      {/* Trial Status Banner */}
-      {tenantInfo && tenantInfo.tier === "trial" && trialDaysRemaining !== null && (
-        <Alert className={`${trialDaysRemaining <= 7 ? "border-yellow-600 bg-yellow-50 dark:bg-yellow-950/20" : "border-blue-600 bg-blue-50 dark:bg-blue-950/20"}`}>
-          <Clock className={`h-4 w-4 ${trialDaysRemaining <= 7 ? "text-yellow-600" : "text-blue-600"}`} />
-          <AlertTitle className="flex items-center gap-2">
-            Trial Account
-            <Badge variant={trialDaysRemaining <= 7 ? "destructive" : "default"}>
-              {trialDaysRemaining} {trialDaysRemaining === 1 ? "day" : "days"} remaining
-            </Badge>
-          </AlertTitle>
-          <AlertDescription className="mt-2">
-            {trialDaysRemaining <= 7 ? (
-              <>Your trial expires on <strong>{new Date(tenantInfo.trialEndsAt!).toLocaleDateString()}</strong>. Upgrade to continue using TAMS360 without interruption.</>
-            ) : (
-              <>Your trial period ends on <strong>{new Date(tenantInfo.trialEndsAt!).toLocaleDateString()}</strong>. Explore all features during your trial.</>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* Paid Account Badge */}
-      {tenantInfo && tenantInfo.tier !== "trial" && (
-        <Alert className="border-green-600 bg-green-50 dark:bg-green-950/20">
-          <Crown className="h-4 w-4 text-green-600" />
-          <AlertTitle className="flex items-center gap-2">
-            {tenantInfo.tier.charAt(0).toUpperCase() + tenantInfo.tier.slice(1)} Account
-            <Badge variant="default" className="bg-green-600">Active</Badge>
-          </AlertTitle>
-          <AlertDescription className="mt-2">
-            You have full access to all TAMS360 features.
-          </AlertDescription>
-        </Alert>
-      )}
-
       <Tabs defaultValue="branding" className="space-y-6">
         <TabsList>
           <TabsTrigger value="branding">
@@ -293,6 +209,14 @@ export default function TenantSettingsPage() {
             <Building2 className="w-4 h-4 mr-2" />
             System Preferences
           </TabsTrigger>
+          <TabsTrigger value="automation">
+            <Zap className="w-4 h-4 mr-2" />
+            Workflow Automation
+          </TabsTrigger>
+          <TabsTrigger value="email-notifications">
+            <Mail className="w-4 h-4 mr-2" />
+            Email Notifications
+          </TabsTrigger>
         </TabsList>
 
         {/* Branding Tab */}
@@ -305,6 +229,41 @@ export default function TenantSettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Logo Upload Section */}
+              <div className="space-y-4 pb-4 border-b">
+                <h4 className="font-semibold">Organization Logo</h4>
+                <div className="flex items-start gap-4">
+                  {settings.logoUrl && (
+                    <div className="relative">
+                      <img
+                        src={settings.logoUrl}
+                        alt="Organization Logo"
+                        className="h-24 w-auto object-contain border rounded-lg p-2"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) {
+                            handleFileSelect(e.target.files[0]);
+                          }
+                        }}
+                        disabled={uploading}
+                        className="flex-1"
+                      />
+                      {uploading && <Loader2 className="w-4 h-4 animate-spin" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Upload your organization logo. Recommended: PNG or SVG, max 2MB, transparent background preferred.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="org-name">Organization Name</Label>
@@ -327,39 +286,51 @@ export default function TenantSettingsPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="logo-url">Organization Logo URL</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="logo-url"
-                    value={settings.logoUrl}
-                    onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })}
-                    placeholder="https://example.com/logo.png"
-                    className="flex-1"
-                  />
-                  <Button variant="outline" onClick={() => document.getElementById("logo-upload")?.click()}>
-                    <Upload className="w-4 h-4 mr-2" />
-                    Upload
-                  </Button>
-                </div>
-                {settings.logoUrl && (
-                  <div className="mt-2 p-4 border rounded-lg bg-muted/50">
-                    <p className="text-sm text-muted-foreground mb-2">Logo Preview:</p>
-                    <img src={settings.logoUrl} alt="Logo" className="h-16 object-contain" />
+              <div className="space-y-4 pt-4 border-t">
+                <h4 className="font-semibold">Contact Details</h4>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="address">Physical Address</Label>
+                    <Textarea
+                      id="address"
+                      value={settings.address}
+                      onChange={(e) => setSettings({ ...settings, address: e.target.value })}
+                      placeholder="Street address, city, postal code"
+                      rows={3}
+                    />
                   </div>
-                )}
-                <input
-                  type="file"
-                  id="logo-upload"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      handleFileSelect(file);
-                    }
-                  }}
-                />
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Phone Number</Label>
+                    <Input
+                      id="phone"
+                      value={settings.phone}
+                      onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
+                      placeholder="+27 12 345 6789"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email Address</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={settings.email}
+                      onChange={(e) => setSettings({ ...settings, email: e.target.value })}
+                      placeholder="contact@organization.co.za"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="website">Website</Label>
+                    <Input
+                      id="website"
+                      value={settings.website}
+                      onChange={(e) => setSettings({ ...settings, website: e.target.value })}
+                      placeholder="https://www.organization.co.za"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-4 pt-4 border-t">
@@ -446,8 +417,8 @@ export default function TenantSettingsPage() {
                   <Label htmlFor="asset-prefix">Reference Prefix</Label>
                   <Input
                     id="asset-prefix"
-                    value={settings.assetRefPrefix}
-                    onChange={(e) => setSettings({ ...settings, assetRefPrefix: e.target.value.toUpperCase() })}
+                    value={settings.assetNumberPrefix}
+                    onChange={(e) => setSettings({ ...settings, assetNumberPrefix: e.target.value.toUpperCase() })}
                     placeholder="TAMS"
                     maxLength={10}
                   />
@@ -457,49 +428,10 @@ export default function TenantSettingsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="ref-format">Reference Format</Label>
-                  <Select
-                    value={settings.assetRefFormat}
-                    onValueChange={(v) => setSettings({ ...settings, assetRefFormat: v })}
-                  >
-                    <SelectTrigger id="ref-format">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="PREFIX-YEAR-SEQUENCE">PREFIX-YEAR-SEQUENCE</SelectItem>
-                      <SelectItem value="PREFIX-SEQUENCE">PREFIX-SEQUENCE</SelectItem>
-                      <SelectItem value="YEAR-PREFIX-SEQUENCE">YEAR-PREFIX-SEQUENCE</SelectItem>
-                      <SelectItem value="SEQUENCE-ONLY">SEQUENCE-ONLY</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    How the reference number is structured
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="ref-separator">Separator Character</Label>
-                  <Select
-                    value={settings.assetRefSeparator === "" ? "none" : settings.assetRefSeparator}
-                    onValueChange={(v) => setSettings({ ...settings, assetRefSeparator: v === "none" ? "" : v })}
-                  >
-                    <SelectTrigger id="ref-separator">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="-">Hyphen (-)</SelectItem>
-                      <SelectItem value="_">Underscore (_)</SelectItem>
-                      <SelectItem value="/">Slash (/)</SelectItem>
-                      <SelectItem value="none">None</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
                   <Label htmlFor="sequence-length">Sequence Number Length</Label>
                   <Select
-                    value={settings.assetRefSequenceLength.toString()}
-                    onValueChange={(v) => setSettings({ ...settings, assetRefSequenceLength: parseInt(v) })}
+                    value={settings.assetNumberDigits.toString()}
+                    onValueChange={(v) => setSettings({ ...settings, assetNumberDigits: parseInt(v) })}
                   >
                     <SelectTrigger id="sequence-length">
                       <SelectValue />
@@ -514,32 +446,6 @@ export default function TenantSettingsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="space-y-1">
-                  <Label>Include Asset Type Code</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Add asset type abbreviation to reference (e.g., SG for Signage)
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.assetRefIncludeType}
-                  onCheckedChange={(checked) => setSettings({ ...settings, assetRefIncludeType: checked })}
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="space-y-1">
-                  <Label>Auto-Generate Reference Numbers</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Automatically assign sequential reference numbers to new assets
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.assetRefAutoGenerate}
-                  onCheckedChange={(checked) => setSettings({ ...settings, assetRefAutoGenerate: checked })}
-                />
-              </div>
-
               {/* Reference Number Preview */}
               <div className="p-6 bg-muted/50 rounded-lg space-y-3">
                 <h4 className="font-semibold">Reference Number Preview</h4>
@@ -552,7 +458,6 @@ export default function TenantSettingsPage() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Example: The 123rd asset created in 2026
-                    {settings.assetRefIncludeType && " (Signage type)"}
                   </p>
                 </div>
               </div>
@@ -572,45 +477,6 @@ export default function TenantSettingsPage() {
             <CardContent className="space-y-6">
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="default-region">Default Region/Depot</Label>
-                  <Input
-                    id="default-region"
-                    value={settings.defaultRegion}
-                    onChange={(e) => setSettings({ ...settings, defaultRegion: e.target.value })}
-                    placeholder="National"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="default-currency">Default Currency</Label>
-                  <Select
-                    value={settings.defaultCurrency}
-                    onValueChange={(v) => setSettings({ ...settings, defaultCurrency: v })}
-                  >
-                    <SelectTrigger id="default-currency">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ZAR">South African Rand (ZAR)</SelectItem>
-                      <SelectItem value="USD">US Dollar (USD)</SelectItem>
-                      <SelectItem value="EUR">Euro (EUR)</SelectItem>
-                      <SelectItem value="GBP">British Pound (GBP)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="currency-symbol">Currency Symbol</Label>
-                  <Input
-                    id="currency-symbol"
-                    value={settings.currencySymbol}
-                    onChange={(e) => setSettings({ ...settings, currencySymbol: e.target.value })}
-                    placeholder="R"
-                    maxLength={3}
-                  />
-                </div>
-
-                <div className="space-y-2">
                   <Label htmlFor="date-format">Date Format</Label>
                   <Select
                     value={settings.dateFormat}
@@ -628,17 +494,71 @@ export default function TenantSettingsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="distance-unit">Distance Unit</Label>
+                  <Label htmlFor="currency">Currency</Label>
                   <Select
-                    value={settings.distanceUnit}
-                    onValueChange={(v) => setSettings({ ...settings, distanceUnit: v })}
+                    value={settings.currency}
+                    onValueChange={(v) => setSettings({ ...settings, currency: v })}
                   >
-                    <SelectTrigger id="distance-unit">
+                    <SelectTrigger id="currency">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="kilometers">Kilometers (km)</SelectItem>
-                      <SelectItem value="miles">Miles (mi)</SelectItem>
+                      <SelectItem value="ZAR">South African Rand (ZAR)</SelectItem>
+                      <SelectItem value="USD">US Dollar (USD)</SelectItem>
+                      <SelectItem value="EUR">Euro (EUR)</SelectItem>
+                      <SelectItem value="GBP">British Pound (GBP)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="measurement-units">Measurement Units</Label>
+                  <Select
+                    value={settings.measurementUnits}
+                    onValueChange={(v) => setSettings({ ...settings, measurementUnits: v })}
+                  >
+                    <SelectTrigger id="measurement-units">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="metric">Metric (km, kg)</SelectItem>
+                      <SelectItem value="imperial">Imperial (mi, lb)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="time-zone">Time Zone</Label>
+                  <Select
+                    value={settings.timeZone}
+                    onValueChange={(v) => setSettings({ ...settings, timeZone: v })}
+                  >
+                    <SelectTrigger id="time-zone">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Africa/Johannesburg">Africa/Johannesburg</SelectItem>
+                      <SelectItem value="America/New_York">America/New_York</SelectItem>
+                      <SelectItem value="Europe/London">Europe/London</SelectItem>
+                      <SelectItem value="Asia/Tokyo">Asia/Tokyo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="fiscal-year-start">Fiscal Year Start</Label>
+                  <Select
+                    value={settings.fiscalYearStart}
+                    onValueChange={(v) => setSettings({ ...settings, fiscalYearStart: v })}
+                  >
+                    <SelectTrigger id="fiscal-year-start">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="January">January</SelectItem>
+                      <SelectItem value="April">April</SelectItem>
+                      <SelectItem value="July">July</SelectItem>
+                      <SelectItem value="October">October</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -659,75 +579,234 @@ export default function TenantSettingsPage() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="space-y-1">
-                  <Label>Require GPS Coordinates for Assets</Label>
+                  <Label>Auto-Backup</Label>
                   <p className="text-sm text-muted-foreground">
-                    Make latitude/longitude mandatory when creating assets
+                    Automatically back up data at regular intervals
                   </p>
                 </div>
                 <Switch
-                  checked={settings.requireGPSForAssets}
-                  onCheckedChange={(checked) => setSettings({ ...settings, requireGPSForAssets: checked })}
+                  checked={settings.autoBackup}
+                  onCheckedChange={(checked) => setSettings({ ...settings, autoBackup: checked })}
                 />
               </div>
 
               <div className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="space-y-1">
-                  <Label>Require Photo for Inspections</Label>
+                  <Label>Enable Notifications</Label>
                   <p className="text-sm text-muted-foreground">
-                    Make at least one photo mandatory for all inspections
+                    Receive notifications for important system events
                   </p>
                 </div>
                 <Switch
-                  checked={settings.requirePhotoForInspection}
-                  onCheckedChange={(checked) => setSettings({ ...settings, requirePhotoForInspection: checked })}
+                  checked={settings.notificationsEnabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, notificationsEnabled: checked })}
                 />
               </div>
+            </CardContent>
+          </Card>
 
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="space-y-1">
-                  <Label>Auto-Calculate Condition Index (CI)</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Automatically calculate CI from D/E/R scores during inspections
-                  </p>
+          <Card>
+            <CardHeader>
+              <CardTitle>Browser Permissions</CardTitle>
+              <CardDescription>
+                Manage browser notifications, location access, and PWA installation
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-4 border rounded-lg space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label>Push Notifications</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Enable browser push notifications for alerts
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        const permission = await Notification.requestPermission();
+                        if (permission === "granted") {
+                          toast.success("Notifications enabled!");
+                        } else {
+                          toast.error("Notification permission denied");
+                        }
+                      } catch (error) {
+                        toast.error("Failed to request notification permission");
+                      }
+                    }}
+                  >
+                    Request Permission
+                  </Button>
                 </div>
-                <Switch
-                  checked={settings.autoCalculateCI}
-                  onCheckedChange={(checked) => setSettings({ ...settings, autoCalculateCI: checked })}
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="space-y-1">
-                  <Label>Enable Offline Mode</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Allow field users to work offline with local data caching
-                  </p>
+                <div className="text-xs text-muted-foreground">
+                  Current status: {typeof Notification !== 'undefined' ? Notification.permission : 'not supported'}
                 </div>
-                <Switch
-                  checked={settings.enableOfflineMode}
-                  onCheckedChange={(checked) => setSettings({ ...settings, enableOfflineMode: checked })}
-                />
               </div>
 
-              <div className="space-y-2 p-4 border rounded-lg">
-                <Label htmlFor="retention-years">Data Retention Period (Years)</Label>
-                <div className="flex gap-2 items-center">
-                  <Input
-                    id="retention-years"
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={settings.dataRetentionYears}
-                    onChange={(e) => setSettings({ ...settings, dataRetentionYears: parseInt(e.target.value) || 10 })}
-                    className="w-24"
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    How long to retain historical inspection and maintenance data
-                  </p>
+              <div className="p-4 border rounded-lg space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label>Location Services</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Enable location access for field inspections
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(
+                          () => {
+                            toast.success("Location access granted!");
+                          },
+                          (error) => {
+                            toast.error("Location permission denied");
+                          }
+                        );
+                      } else {
+                        toast.error("Location not supported by browser");
+                      }
+                    }}
+                  >
+                    Request Permission
+                  </Button>
+                </div>
+              </div>
+
+              <div className="p-4 border rounded-lg space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label>Install App (PWA)</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Install TAMS360 as a standalone app
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      // PWA install prompt
+                      const deferredPrompt = (window as any).deferredPrompt;
+                      if (deferredPrompt) {
+                        deferredPrompt.prompt();
+                        deferredPrompt.userChoice.then((choiceResult: any) => {
+                          if (choiceResult.outcome === 'accepted') {
+                            toast.success("App installed!");
+                          }
+                          (window as any).deferredPrompt = null;
+                        });
+                      } else {
+                        toast.info("App is already installed or browser doesn't support PWA installation");
+                      }
+                    }}
+                  >
+                    Install App
+                  </Button>
                 </div>
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Workflow Automation Tab */}
+        <TabsContent value="automation" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Workflow Automation</CardTitle>
+              <CardDescription>
+                Configure automated workflows and rules
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="space-y-1">
+                  <Label>Enable Auto-Maintenance</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Automatically schedule maintenance based on asset condition
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.enableAutoMaintenance}
+                  onCheckedChange={(checked) => setSettings({ ...settings, enableAutoMaintenance: checked })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="space-y-1">
+                  <Label>Condition Index Threshold</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Set the condition index threshold for auto-maintenance
+                  </p>
+                </div>
+                <Input
+                  type="number"
+                  value={settings.ciThreshold}
+                  onChange={(e) => setSettings({ ...settings, ciThreshold: parseInt(e.target.value) })}
+                  className="w-20"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="space-y-1">
+                  <Label>Urgency Threshold</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Set the urgency threshold for maintenance tasks
+                  </p>
+                </div>
+                <Select
+                  value={settings.urgencyThreshold}
+                  onValueChange={(v) => setSettings({ ...settings, urgencyThreshold: v })}
+                >
+                  <SelectTrigger id="urgency-threshold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Low">Low</SelectItem>
+                    <SelectItem value="Medium">Medium</SelectItem>
+                    <SelectItem value="High">High</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="space-y-1">
+                  <Label>Auto-Assign Field User</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Automatically assign maintenance tasks to field users
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.autoAssignFieldUser}
+                  onCheckedChange={(checked) => setSettings({ ...settings, autoAssignFieldUser: checked })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="space-y-1">
+                  <Label>Auto-Notify on Critical</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Automatically notify when a critical maintenance task is due
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.autoNotifyOnCritical}
+                  onCheckedChange={(checked) => setSettings({ ...settings, autoNotifyOnCritical: checked })}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Email Notifications Tab */}
+        <TabsContent value="email-notifications" className="space-y-6">
+          <EmailNotificationsTab 
+            settings={{
+              notificationEmails: settings.notificationEmails,
+              enableDailyDigest: settings.enableDailyDigest,
+              autoNotifyOnCritical: settings.autoNotifyOnCritical,
+            }}
+            onSettingsChange={(updates) => setSettings({ ...settings, ...updates })}
+          />
         </TabsContent>
       </Tabs>
 
@@ -749,7 +828,7 @@ export default function TenantSettingsPage() {
       </div>
 
       {/* Tenant Info */}
-      {tenantInfo && (
+      {tenantName && (
         <div className="mt-8">
           <Card>
             <CardHeader>
@@ -761,39 +840,28 @@ export default function TenantSettingsPage() {
             <CardContent className="space-y-6">
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Tenant Name</Label>
+                  <Label>Tenant Name (Login ID)</Label>
                   <Input
-                    value={tenantInfo.name}
+                    value={tenantName}
                     readOnly
                     className="bg-muted/50"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    This is your login identifier and cannot be changed
+                  </p>
                 </div>
-
+                
                 <div className="space-y-2">
-                  <Label>Tier</Label>
+                  <Label htmlFor="license-expiry">License Expiry Date</Label>
                   <Input
-                    value={tenantInfo.tier}
-                    readOnly
-                    className="bg-muted/50"
+                    id="license-expiry"
+                    type="date"
+                    value={settings.licenseExpiryDate}
+                    onChange={(e) => setSettings({ ...settings, licenseExpiryDate: e.target.value })}
                   />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Status</Label>
-                  <Input
-                    value={tenantInfo.status}
-                    readOnly
-                    className="bg-muted/50"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Trial Ends At</Label>
-                  <Input
-                    value={tenantInfo.trialEndsAt ? new Date(tenantInfo.trialEndsAt).toLocaleDateString() : "N/A"}
-                    readOnly
-                    className="bg-muted/50"
-                  />
+                  <p className="text-xs text-muted-foreground">
+                    System license expiration date
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -804,23 +872,10 @@ export default function TenantSettingsPage() {
   );
 
   function getPreviewReferenceNumber(): string {
-    const sep = settings.assetRefSeparator;
-    const prefix = settings.assetRefPrefix;
+    const prefix = settings.assetNumberPrefix;
     const year = new Date().getFullYear().toString().slice(-2);
-    const sequence = "123".padStart(settings.assetRefSequenceLength, "0");
-    const typeCode = settings.assetRefIncludeType ? `${sep}SG` : "";
+    const sequence = "123".padStart(settings.assetNumberDigits, "0");
 
-    switch (settings.assetRefFormat) {
-      case "PREFIX-YEAR-SEQUENCE":
-        return `${prefix}${sep}${year}${sep}${sequence}${typeCode}`;
-      case "PREFIX-SEQUENCE":
-        return `${prefix}${sep}${sequence}${typeCode}`;
-      case "YEAR-PREFIX-SEQUENCE":
-        return `${year}${sep}${prefix}${sep}${sequence}${typeCode}`;
-      case "SEQUENCE-ONLY":
-        return `${sequence}${typeCode}`;
-      default:
-        return `${prefix}${sep}${year}${sep}${sequence}${typeCode}`;
-    }
+    return `${prefix}${year}${sequence}`;
   }
 }

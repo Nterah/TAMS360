@@ -56,6 +56,7 @@ export default function DashboardPage() {
   const [worstAssets, setWorstAssets] = useState<any[]>([]);
   const [overdueInspections, setOverdueInspections] = useState<number>(0);
   const [dataQualityAlerts, setDataQualityAlerts] = useState<any>(null);
+  const [overdueMaintenance, setOverdueMaintenance] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
@@ -76,8 +77,9 @@ export default function DashboardPage() {
       fetchWorstAssets();
       fetchHighestCostAssets();
       fetchCriticalAlerts();
-      fetchOverdueInspections();
+      // REMOVED: fetchOverdueInspections() - now using stats.uninspectedAssets from backend
       fetchDataQualityAlerts();
+      // REMOVED: fetchOverdueMaintenance() - now using maintenanceStats.overdue from backend
     }
   }, [accessToken]);
 
@@ -96,6 +98,7 @@ export default function DashboardPage() {
           totalInspections: data.totalInspections || 0,
           pendingWorkOrders: data.openWorkOrders || 0,
           criticalAssets: data.criticalCount || 0,
+          uninspectedAssets: data.uninspectedAssets || 0,
         });
         
         // Set CI and urgency data from the summary endpoint
@@ -229,42 +232,18 @@ export default function DashboardPage() {
 
   const fetchRegionSummary = async () => {
     try {
-      let allAssets: any[] = [];
-      let page = 1;
-      
-      while (true) {
-        const response = await fetch(`${API_URL}/assets?page=${page}`, {
-          headers: {
-            Authorization: `Bearer ${accessToken || publicAnonKey}`,
-          },
-        });
-
-        if (!response.ok) break;
-        
-        const data = await response.json();
-        const assets = data.assets || [];
-        
-        if (assets.length === 0) break;
-        
-        allAssets = [...allAssets, ...assets];
-        
-        if (!data.hasMore) break;
-        page++;
-      }
-      
-      // Group by region
-      const regionCounts: { [key: string]: number } = {};
-      allAssets.forEach((asset: any) => {
-        const region = asset.region || "Unknown";
-        regionCounts[region] = (regionCounts[region] || 0) + 1;
+      const response = await fetch(`${API_URL}/dashboard/stats`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
       });
 
-      const summary = Object.entries(regionCounts)
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10);
-
-      setRegionSummary(summary);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.stats?.regionSummary) {
+          setRegionSummary(data.stats.regionSummary);
+        }
+      }
     } catch (error) {
       console.error("Error fetching region summary:", error);
     }
@@ -301,7 +280,8 @@ export default function DashboardPage() {
       allInspections.forEach((insp: any) => {
         const date = new Date(insp.inspection_date || insp.created_at);
         const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        const ci = insp.ci_final !== null && insp.ci_final !== undefined ? insp.ci_final : null;
+        const ci = insp.conditional_index !== null && insp.conditional_index !== undefined ? insp.conditional_index : 
+                   (insp.ci_final !== null && insp.ci_final !== undefined ? insp.ci_final : null);
         
         if (ci !== null) {
           if (!monthlyData[monthKey]) {
@@ -543,7 +523,41 @@ export default function DashboardPage() {
 
   const fetchOverdueInspections = async () => {
     try {
-      const response = await fetch(`${API_URL}/inspections`, {
+      // Fetch all assets to see which ones have never been inspected
+      const assetsResponse = await fetch(`${API_URL}/assets?pageSize=2000`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      if (assetsResponse.ok) {
+        const assetsData = await assetsResponse.json();
+        const assets = assetsData.assets || [];
+        
+        console.log(`[Overdue Inspections] Checking ${assets.length} assets for uninspected`);
+        console.log(`[Overdue Inspections] Sample asset:`, assets[0]);
+        
+        // Count assets that have never been inspected (latest_ci is null/undefined)
+        const uninspectedAssets = assets.filter((asset: any) => 
+          asset.latest_ci === null || asset.latest_ci === undefined
+        );
+
+        console.log(`[Overdue Inspections] Found ${uninspectedAssets.length} uninspected assets`);
+        console.log(`[Overdue Inspections] Uninspected sample:`, uninspectedAssets[0]);
+        setOverdueInspections(uninspectedAssets.length);
+      } else {
+        console.error(`[Overdue Inspections] Failed to fetch assets: ${assetsResponse.status}`);
+        setOverdueInspections(0);
+      }
+    } catch (error) {
+      console.error("Error fetching overdue inspections:", error);
+      setOverdueInspections(0);
+    }
+  };
+
+  const fetchOverdueMaintenance = async () => {
+    try {
+      const response = await fetch(`${API_URL}/maintenance`, {
         headers: {
           Authorization: `Bearer ${accessToken || publicAnonKey}`,
         },
@@ -551,42 +565,41 @@ export default function DashboardPage() {
 
       if (response.ok) {
         const data = await response.json();
-        const inspections = data.inspections || [];
+        const maintenance = data.maintenance || [];
+        
+        console.log(`[Overdue Maintenance] Checking ${maintenance.length} maintenance records`);
+        console.log(`[Overdue Maintenance] Sample record:`, maintenance[0]);
         
         const now = new Date();
-        let overdueCount = 0;
-
-        // Group inspections by asset to find the most recent inspection per asset
-        const assetInspections: { [key: string]: any } = {};
         
-        inspections.forEach((insp: any) => {
-          const assetId = insp.asset_id;
-          const inspDate = new Date(insp.inspection_date || insp.created_at);
-          
-          if (!assetInspections[assetId] || inspDate > new Date(assetInspections[assetId].inspection_date)) {
-            assetInspections[assetId] = insp;
+        // Count maintenance items that are past their scheduled date and not completed
+        const overdueItems = maintenance.filter((item: any) => {
+          // Skip if status is Completed
+          if (item.status === 'Completed' || item.status === 'completed') {
+            return false;
           }
+          
+          // Check if it's past the scheduled date
+          if (!item.scheduled_date) {
+            return false; // No scheduled date means can't be overdue
+          }
+          
+          const scheduledDate = new Date(item.scheduled_date);
+          const isOverdue = scheduledDate < now;
+          
+          return isOverdue;
         });
 
-        // Check each asset's most recent inspection
-        Object.values(assetInspections).forEach((insp: any) => {
-          const inspDate = new Date(insp.inspection_date || insp.created_at);
-          const daysSince = Math.floor((now.getTime() - inspDate.getTime()) / (1000 * 60 * 60 * 24));
-          
-          // If inspection_frequency is specified, use that; otherwise default to 365 days (annual)
-          const frequency = insp.inspection_frequency || 365;
-          
-          // Only count as overdue if past the inspection frequency
-          if (daysSince > frequency) {
-            overdueCount++;
-          }
-        });
-
-        setOverdueInspections(overdueCount);
+        console.log(`[Overdue Maintenance] Found ${overdueItems.length} overdue maintenance items`);
+        console.log(`[Overdue Maintenance] Sample overdue item:`, overdueItems[0]);
+        setOverdueMaintenance(overdueItems.length);
+      } else {
+        console.error(`[Overdue Maintenance] Failed to fetch: ${response.status}`);
+        setOverdueMaintenance(0);
       }
     } catch (error) {
-      console.error("Error fetching overdue inspections:", error);
-      setOverdueInspections(0);
+      console.error("Error fetching overdue maintenance:", error);
+      setOverdueMaintenance(0);
     }
   };
 
@@ -603,26 +616,56 @@ export default function DashboardPage() {
         const data = await response.json();
         const assets = data.assets || [];
         
-        // Only count CRITICAL issues (GPS and asset_type are required)
-        // Missing GPS coordinates (but allow 0,0 as it might be a placeholder)
+        console.log(`[Data Quality] Checking ${assets.length} assets for quality issues`);
+        
+        // Count all critical missing data fields
         const missingGPS = assets.filter((asset: any) => 
           !asset.gps_lat || !asset.gps_lng
         ).length;
 
-        // Find assets with missing asset type - this is critical
         const missingType = assets.filter((asset: any) => 
           !asset.asset_type_name
         ).length;
+
+        const missingDepot = assets.filter((asset: any) => 
+          !asset.depot_name
+        ).length;
+
+        const missingRegion = assets.filter((asset: any) => 
+          !asset.region_name
+        ).length;
+
+        const missingRoadName = assets.filter((asset: any) => 
+          !asset.road_name
+        ).length;
+
+        const missingOwner = assets.filter((asset: any) => 
+          !asset.owner_name
+        ).length;
+
+        const missingResponsibleParty = assets.filter((asset: any) => 
+          !asset.responsible_party_name
+        ).length;
         
-        const totalIssues = missingGPS + missingType;
+        const totalIssues = missingGPS + missingType + missingDepot + missingRegion + missingRoadName + missingOwner + missingResponsibleParty;
+
+        console.log(`[Data Quality] Found ${totalIssues} issues (GPS: ${missingGPS}, Type: ${missingType}, Depot: ${missingDepot}, Region: ${missingRegion}, Road: ${missingRoadName}, Owner: ${missingOwner}, Responsible: ${missingResponsibleParty})`);
 
         setDataQualityAlerts({ 
           count: totalIssues,
           details: {
             missingGPS,
-            missingType
+            missingType,
+            missingDepot,
+            missingRegion,
+            missingRoadName,
+            missingOwner,
+            missingResponsibleParty
           }
         });
+      } else {
+        console.error(`[Data Quality] Failed to fetch assets: ${response.status}`);
+        setDataQualityAlerts({ count: 0, details: {} });
       }
     } catch (error) {
       console.error("Error fetching data quality alerts:", error);
@@ -797,7 +840,7 @@ export default function DashboardPage() {
 
         <Card 
           className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/maintenance')}
+          onClick={() => navigate('/maintenance?status=in_progress,scheduled')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Maintenance Tasks</CardTitle>
@@ -821,7 +864,7 @@ export default function DashboardPage() {
 
         <Card 
           className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/inspections')}
+          onClick={() => navigate('/assets?urgency=immediate')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Immediate Urgency</CardTitle>
@@ -851,7 +894,7 @@ export default function DashboardPage() {
         {/* Overdue Inspections */}
         <Card 
           className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/inspections')}
+          onClick={() => navigate('/assets?ciRange=not-inspected')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Overdue Inspections</CardTitle>
@@ -859,10 +902,10 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-warning">
-              {overdueInspections || 0}
+              {stats?.uninspectedAssets || 0}
             </div>
             <p className="text-xs text-muted-foreground">
-              {overdueInspections > 0 ? (
+              {(stats?.uninspectedAssets || 0) > 0 ? (
                 <>
                   <AlertCircle className="inline w-3 h-3 text-warning" /> Require rescheduling
                 </>
@@ -878,7 +921,7 @@ export default function DashboardPage() {
         {/* Data Quality Alerts */}
         <Card 
           className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/assets')}
+          onClick={() => navigate('/assets?dataQuality=true')}
         >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Data Quality Alerts</CardTitle>
@@ -891,7 +934,7 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">
               {dataQualityAlerts?.count > 0 ? (
                 <>
-                  <AlertTriangle className="inline w-3 h-3 text-warning" /> Missing GPS/photos/data
+                  <AlertTriangle className="inline w-3 h-3 text-warning" /> Missing required data
                 </>
               ) : (
                 <>
@@ -902,30 +945,59 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Placeholder for balance */}
-        <Card className="opacity-50">
+        {/* Total Maintenance Cost */}
+        <Card 
+          className="cursor-pointer hover:shadow-lg transition-shadow"
+          onClick={() => navigate('/maintenance')}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Reserved</CardTitle>
-            <Eye className="w-4 h-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Total Maintenance Cost</CardTitle>
+            <Banknote className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">—</div>
+            <div className="text-2xl font-bold text-[#5DB32A]">
+              R {maintenanceStats?.totalCost ? (maintenanceStats.totalCost / 1000).toFixed(1) + 'k' : '0'}
+            </div>
             <p className="text-xs text-muted-foreground">
-              Future expansion
+              {maintenanceStats?.totalCost > 0 ? (
+                <>
+                  <Banknote className="inline w-3 h-3 text-[#5DB32A]" /> All time expenditure
+                </>
+              ) : (
+                <>
+                  <Banknote className="inline w-3 h-3" /> No costs recorded
+                </>
+              )}
             </p>
           </CardContent>
         </Card>
 
-        {/* Placeholder for balance */}
-        <Card className="opacity-50">
+        {/* Overdue Maintenance */}
+        <Card 
+          className="cursor-pointer hover:shadow-lg transition-shadow"
+          onClick={() => {
+            // Navigate to maintenance page with filter for overdue
+            navigate('/maintenance?status=Overdue');
+          }}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Reserved</CardTitle>
-            <Eye className="w-4 h-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Overdue Maintenance</CardTitle>
+            <Clock className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">—</div>
+            <div className="text-2xl font-bold text-warning">
+              {maintenanceStats?.overdue || 0}
+            </div>
             <p className="text-xs text-muted-foreground">
-              Future expansion
+              {(maintenanceStats?.overdue || 0) > 0 ? (
+                <>
+                  <AlertTriangle className="inline w-3 h-3 text-warning" /> Flagged over 30 days ago
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="inline w-3 h-3 text-success" /> All on track
+                </>
+              )}
             </p>
           </CardContent>
         </Card>
@@ -1175,7 +1247,7 @@ export default function DashboardPage() {
                 <BarChart data={regionSummary} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis type="number" />
-                  <YAxis dataKey="name" type="category" width={100} />
+                  <YAxis dataKey="name" type="category" width={150} />
                   <Tooltip 
                     formatter={(value: any) => [`${value} assets`, 'Count']}
                     labelStyle={{ color: '#000' }}
@@ -1345,11 +1417,11 @@ export default function DashboardPage() {
                 <BarChart 
                   data={assetTypeChartData}
                   layout="vertical"
-                  margin={{ top: 5, right: 30, left: 140, bottom: 5 }}
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis type="number" allowDecimals={false} />
-                  <YAxis dataKey="name" type="category" width={130} />
+                  <YAxis dataKey="name" type="category" />
                   <Tooltip 
                     formatter={(v: any) => [`${v} assets`, "Count"]} 
                     labelStyle={{ color: "#000" }} 

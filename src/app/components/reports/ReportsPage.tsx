@@ -1,27 +1,134 @@
 import { useState, useEffect, useContext } from "react";
 import { AuthContext } from "../../App";
+import { useTenant } from "../../contexts/TenantContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { Download, FileText, BarChart3, TrendingUp, Loader2 } from "lucide-react";
+import { Download, FileText, BarChart3, TrendingUp, Loader2, PieChart as PieChartIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { downloadReport } from "../../utils/reportGenerators";
+import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 export default function ReportsPage() {
   const { accessToken } = useContext(AuthContext);
+  const { settings: tenant } = useTenant();
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<any>(null);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [customReportType, setCustomReportType] = useState('assets');
   const [customAssetType, setCustomAssetType] = useState('all');
   const [customRegion, setCustomRegion] = useState('all');
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
+  // TAMS360 Brand Colors
+  const COLORS = {
+    primary: '#010D13', // Deep Navy
+    skyBlue: '#39AEDF',
+    green: '#5DB32A',
+    yellow: '#F8D227',
+    grey: '#455B5E',
+  };
+
+  const CHART_COLORS = [COLORS.skyBlue, COLORS.green, COLORS.yellow, COLORS.grey, COLORS.primary];
+
   useEffect(() => {
     fetchReportSummary();
+    fetchAnalyticsData();
   }, []);
+
+  const fetchAnalyticsData = async () => {
+    try {
+      const [assetsRes, inspectionsRes, maintenanceRes] = await Promise.all([
+        fetch(`${API_URL}/assets`, {
+          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+        }),
+        fetch(`${API_URL}/inspections`, {
+          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+        }),
+        fetch(`${API_URL}/maintenance`, {
+          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+        }),
+      ]);
+
+      const assetsData = assetsRes.ok ? await assetsRes.json() : { assets: [] };
+      const inspectionsData = inspectionsRes.ok ? await inspectionsRes.json() : { inspections: [] };
+      const maintenanceData = maintenanceRes.ok ? await maintenanceRes.json() : { records: [] };
+
+      const assets = assetsData.assets || [];
+      const inspections = inspectionsData.inspections || [];
+      const maintenance = maintenanceData.records || [];
+
+      // Asset Type Distribution
+      const assetTypeCounts: Record<string, number> = {};
+      assets.forEach((asset: any) => {
+        const type = asset.asset_type_name || 'Unknown';
+        assetTypeCounts[type] = (assetTypeCounts[type] || 0) + 1;
+      });
+      const assetTypeData = Object.entries(assetTypeCounts).map(([name, value]) => ({ name, value }));
+
+      // CI Distribution (Condition Index ranges)
+      const ciRanges = { 'Excellent (80-100)': 0, 'Good (60-79)': 0, 'Fair (40-59)': 0, 'Poor (20-39)': 0, 'Critical (0-19)': 0 };
+      inspections.forEach((insp: any) => {
+        const ci = insp.conditional_index || insp.ci_final;
+        if (ci >= 80) ciRanges['Excellent (80-100)']++;
+        else if (ci >= 60) ciRanges['Good (60-79)']++;
+        else if (ci >= 40) ciRanges['Fair (40-59)']++;
+        else if (ci >= 20) ciRanges['Poor (20-39)']++;
+        else if (ci >= 0) ciRanges['Critical (0-19)']++;
+      });
+      const ciDistributionData = Object.entries(ciRanges).map(([name, value]) => ({ name, value }));
+
+      // Maintenance Status Distribution
+      const statusCounts: Record<string, number> = {};
+      maintenance.forEach((maint: any) => {
+        const status = maint.status || 'Unknown';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+      });
+      const maintenanceStatusData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
+
+      // Monthly Inspections Trend (last 6 months)
+      const monthlyInspections: Record<string, number> = {};
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      
+      inspections.forEach((insp: any) => {
+        const date = new Date(insp.inspection_date);
+        if (date >= sixMonthsAgo) {
+          const monthKey = date.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short' });
+          monthlyInspections[monthKey] = (monthlyInspections[monthKey] || 0) + 1;
+        }
+      });
+      const monthlyInspectionsData = Object.entries(monthlyInspections).map(([month, count]) => ({ month, count }));
+
+      // Maintenance Cost Trends (last 6 months)
+      const monthlyCosts: Record<string, number> = {};
+      maintenance.forEach((maint: any) => {
+        const dateToUse = maint.completed_date || maint.scheduled_date;
+        if (dateToUse) {
+          const date = new Date(dateToUse);
+          if (date >= sixMonthsAgo) {
+            const monthKey = date.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short' });
+            const cost = parseFloat(maint.actual_cost || maint.estimated_cost || 0);
+            monthlyCosts[monthKey] = (monthlyCosts[monthKey] || 0) + cost;
+          }
+        }
+      });
+      const monthlyCostsData = Object.entries(monthlyCosts).map(([month, cost]) => ({ month, cost: Math.round(cost) }));
+
+      setAnalyticsData({
+        assetTypeData,
+        ciDistributionData,
+        maintenanceStatusData,
+        monthlyInspectionsData,
+        monthlyCostsData,
+      });
+    } catch (error) {
+      console.error("Error fetching analytics data:", error);
+    }
+  };
 
   const fetchReportSummary = async () => {
     try {
@@ -56,11 +163,11 @@ export default function ReportsPage() {
     try {
       setLoading(true);
       
-      const tenantRes = await fetch(`${API_URL}/tenant-settings`, {
-        headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-      });
-      const tenantData = tenantRes.ok ? await tenantRes.json() : {};
-      const tenant = tenantData.settings || {};
+      // Debug: Log tenant data to check branding info
+      console.log('Tenant settings for report:', tenant);
+      console.log('Organization Name:', tenant.organization_name || tenant.organizationName);
+      console.log('Logo URL:', tenant.logo_url || tenant.logoUrl);
+      console.log('Primary Color:', tenant.primary_color || tenant.primaryColor);
 
       let data: any[] = [];
       let columns: any[] = [];
@@ -362,10 +469,10 @@ export default function ReportsPage() {
         data,
         columns,
         tenant: {
-          organizationName: tenant.organization_name,
-          logoUrl: tenant.logo_url,
-          primaryColor: tenant.primary_color,
-          regionName: tenant.region_name,
+          organizationName: tenant.organization_name || tenant.organizationName,
+          logoUrl: tenant.logo_url || tenant.logoUrl,
+          primaryColor: tenant.primary_color || tenant.primaryColor || '#010D13',
+          regionName: tenant.region_name || tenant.regionName,
           currency: 'ZAR',
           tagline: tenant.tagline,
           address: tenant.address,
@@ -391,12 +498,6 @@ export default function ReportsPage() {
     try {
       toast.info('Generating custom report...');
       
-      const tenantRes = await fetch(`${API_URL}/tenant-settings`, {
-        headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-      });
-      const tenantData = tenantRes.ok ? await tenantRes.json() : {};
-      const tenant = tenantData.settings || {};
-
       let data: any[] = [];
       let columns: any[] = [];
       let title = `Custom ${customReportType.charAt(0).toUpperCase() + customReportType.slice(1)} Report`;
@@ -736,6 +837,132 @@ export default function ReportsPage() {
               </div>
             </TabsContent>
           </Tabs>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Analytics</CardTitle>
+          <CardDescription>Visualize key metrics and trends</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-3">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <PieChartIcon className="w-4 h-4" />
+                Asset Type Distribution
+              </h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={analyticsData?.assetTypeData || []}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {analyticsData?.assetTypeData?.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <PieChartIcon className="w-4 h-4" />
+                Condition Index Distribution
+              </h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={analyticsData?.ciDistributionData || []}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {analyticsData?.ciDistributionData?.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <PieChartIcon className="w-4 h-4" />
+                Maintenance Status Distribution
+              </h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={analyticsData?.maintenanceStatusData || []}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {analyticsData?.maintenanceStatusData?.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <BarChart3 className="w-4 h-4" />
+                Monthly Inspections Trend
+              </h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart
+                  data={analyticsData?.monthlyInspectionsData || []}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="count" fill="#8884d8" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <LineChart className="w-4 h-4" />
+                Maintenance Cost Trends
+              </h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart
+                  data={analyticsData?.monthlyCostsData || []}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="cost" stroke="#8884d8" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -1,4 +1,4 @@
-import { UserPlus, Users, Shield, Activity, CheckCircle, XCircle, Clock, Stethoscope, Settings2, ArrowRightLeft } from "lucide-react";
+import { UserPlus, Users, Shield, Activity, CheckCircle, XCircle, Clock, Stethoscope, Settings2, ArrowRightLeft, Database } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { useState, useEffect, useContext } from "react";
@@ -117,40 +117,58 @@ export default function AdminConsolePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="space-y-4">
         <div>
           <h1 className="text-3xl font-bold mb-2">Admin Console</h1>
           <p className="text-muted-foreground">Manage users, permissions, and system settings</p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-4 gap-2">
+          <Link to="/admin/users">
+            <Button variant="outline" className="w-full">
+              <Users className="mr-2 size-4" />
+              User Management
+            </Button>
+          </Link>
           <Link to="/admin/user-invitations">
-            <Button variant="outline">
+            <Button variant="outline" className="w-full">
               <UserPlus className="mr-2 size-4" />
               Invite Users
             </Button>
           </Link>
           <Link to="/admin/bulk-asset-assignment">
-            <Button variant="outline">
+            <Button variant="outline" className="w-full">
               <ArrowRightLeft className="mr-2 size-4" />
               Bulk Asset Assignment
             </Button>
           </Link>
           <Link to="/admin/tenant-settings">
-            <Button variant="outline">
+            <Button variant="outline" className="w-full">
               <Settings2 className="mr-2 size-4" />
               Tenant Settings
             </Button>
           </Link>
           <Link to="/admin/component-templates">
-            <Button variant="outline">
+            <Button variant="outline" className="w-full">
               <Settings2 className="mr-2 size-4" />
               Inspection Templates
             </Button>
           </Link>
           <Link to="/admin/system-health">
-            <Button variant="outline">
+            <Button variant="outline" className="w-full">
               <Stethoscope className="mr-2 size-4" />
               System Health
+            </Button>
+          </Link>
+          <Link to="/admin/migration-utility">
+            <Button variant="outline" className="w-full">
+              <Database className="mr-2 size-4" />
+              Migration Utility
+            </Button>
+          </Link>
+          <Link to="/admin/data-reorganization">
+            <Button variant="outline" className="w-full border-[#F8D227] text-[#F8D227] hover:bg-[#F8D227]/10">
+              <Database className="mr-2 size-4" />
+              Data Reorganization
             </Button>
           </Link>
         </div>
@@ -373,6 +391,14 @@ export default function AdminConsolePage() {
               <CardDescription>System activity and user actions</CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="mb-4">
+                <Link to="/admin/audit-logs">
+                  <Button className="w-full">
+                    <Activity className="w-4 h-4 mr-2" />
+                    View Full Audit Log
+                  </Button>
+                </Link>
+              </div>
               <div className="space-y-2">
                 {auditLogs.length === 0 ? (
                   <div className="text-center py-12">

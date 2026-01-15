@@ -1,22 +1,26 @@
-import { useState, useContext, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useContext } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AuthContext } from "../../App";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { 
+  Plus, Search, LayoutGrid, List, Download, Upload, Settings2, Filter, 
+  Database, MapPin, TrendingUp, CheckCircle2, AlertTriangle, Clock, 
+  Banknote, Eye, Edit, Trash2, MoreVertical, X, Table as TableIcon
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Badge } from "../ui/badge";
-import { Plus, Search, Edit, Trash2, Eye, MapPin, Database, History, MoreVertical, Filter, X, LayoutGrid, Table as TableIcon, TrendingUp, AlertTriangle, CheckCircle2, Banknote, Clock, LocateFixed, RefreshCw } from "lucide-react";
+import { Label } from "../ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
-import { toast } from "sonner";
-import { Textarea } from "../ui/textarea";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { ColumnCustomizer, ColumnConfig } from "../ui/column-customizer";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import EnhancedAssetForm from "./EnhancedAssetForm";
+import { requiresMigration, handleMigrationRequired } from "../../utils/migrationHelper";
 
 const ASSET_TYPES = [
   "Signage",
@@ -41,6 +45,7 @@ export default function AssetsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // View toggle state
   const [viewMode, setViewMode] = useState<"card" | "table">(() => {
@@ -58,7 +63,7 @@ export default function AssetsPage() {
     { id: "urgency", label: "Urgency", visible: true },
     { id: "remaining_life", label: "Remaining Life", visible: true },
     { id: "valuation", label: "Valuation", visible: true },
-    { id: "region", label: "Region", visible: false },
+    { id: "region", label: "Region", visible: true },
     { id: "depot", label: "Depot", visible: false },
     { id: "status", label: "Status", visible: false },
     { id: "installer", label: "Installer", visible: false },
@@ -73,6 +78,7 @@ export default function AssetsPage() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterCIRange, setFilterCIRange] = useState<string>("all");
   const [filterUrgency, setFilterUrgency] = useState<string>("all");
+  const [filterDataQuality, setFilterDataQuality] = useState<boolean>(false);
 
   // Extract unique regions and depots from assets
   const uniqueRegions = Array.from(new Set(assets.map(a => a.region).filter(Boolean)));
@@ -106,6 +112,31 @@ export default function AssetsPage() {
   useEffect(() => {
     fetchAssets();
   }, []);
+
+  // Read URL parameters and apply filters
+  useEffect(() => {
+    const ciRange = searchParams.get('ciRange');
+    const urgency = searchParams.get('urgency');
+    const dataQuality = searchParams.get('dataQuality');
+    
+    console.log('[AssetsPage] URL Params - ciRange:', ciRange, 'urgency:', urgency, 'dataQuality:', dataQuality);
+    
+    if (ciRange) {
+      console.log('[AssetsPage] Setting filterCIRange to:', ciRange);
+      setFilterCIRange(ciRange);
+      setShowFilters(true);
+    }
+    if (urgency) {
+      console.log('[AssetsPage] Setting filterUrgency to:', urgency);
+      setFilterUrgency(urgency);
+      setShowFilters(true);
+    }
+    if (dataQuality === 'true') {
+      console.log('[AssetsPage] Setting filterDataQuality to: true');
+      setFilterDataQuality(true);
+      setShowFilters(true);
+    }
+  }, [searchParams]);
 
   const fetchAssets = async () => {
     try {
@@ -241,6 +272,22 @@ export default function AssetsPage() {
       return true;
     })();
 
+    // Data Quality filter - check for missing critical fields
+    const matchesDataQuality = (() => {
+      if (!filterDataQuality) return true;
+      // Return true if asset has ANY data quality issues
+      return (
+        !asset.gps_lat || 
+        !asset.gps_lng || 
+        !asset.asset_type_name || 
+        !asset.depot_name || 
+        !asset.region_name || 
+        !asset.road_name || 
+        !asset.owner_name || 
+        !asset.responsible_party_name
+      );
+    })();
+
     return (
       matchesSearch &&
       matchesAssetType &&
@@ -248,9 +295,27 @@ export default function AssetsPage() {
       matchesDepot &&
       matchesStatus &&
       matchesCIRange &&
-      matchesUrgency
+      matchesUrgency &&
+      matchesDataQuality
     );
   });
+
+  // Log filtering results when filters change
+  useEffect(() => {
+    if (filterCIRange !== "all" || filterUrgency !== "all") {
+      console.log('[AssetsPage] Filtering -', {
+        totalAssets: assets.length,
+        filteredAssets: filteredAssets.length,
+        filterCIRange,
+        filterUrgency,
+        sampleAssets: assets.slice(0, 3).map(a => ({
+          ref: a.asset_ref,
+          ci: a.latest_ci,
+          urgency: a.latest_urgency
+        }))
+      });
+    }
+  }, [assets.length, filteredAssets.length, filterCIRange, filterUrgency]);
 
   const clearAllFilters = () => {
     setFilterAssetType("all");
@@ -259,6 +324,7 @@ export default function AssetsPage() {
     setFilterStatus("all");
     setFilterCIRange("all");
     setFilterUrgency("all");
+    setFilterDataQuality(false);
   };
 
   const activeFilterCount =
@@ -267,7 +333,8 @@ export default function AssetsPage() {
     (filterDepot !== "all" ? 1 : 0) +
     (filterStatus !== "all" ? 1 : 0) +
     (filterCIRange !== "all" ? 1 : 0) +
-    (filterUrgency !== "all" ? 1 : 0);
+    (filterUrgency !== "all" ? 1 : 0) +
+    (filterDataQuality ? 1 : 0);
 
   const getCIBadge = (ci: number | null) => {
     if (ci === null || ci === undefined) return { label: "Not Inspected", variant: "outline" as const };
@@ -317,11 +384,11 @@ export default function AssetsPage() {
   }).length;
   const excellentConditionAssets = assets.filter(asset => {
     const ci = asset.latest_ci;
-    return ci !== null && ci >= 80;
+    return ci !== null && ci !== undefined && ci >= 80;
   }).length;
   const needsAttention = assets.filter(asset => {
     const urgency = asset.latest_urgency;
-    return urgency === "4" || urgency === "Immediate" || urgency === "3" || urgency === "High";
+    return urgency === "Immediate" || urgency === "Critical" || urgency === "High";
   }).length;
 
   return (
@@ -331,68 +398,82 @@ export default function AssetsPage() {
           <h2 className="text-3xl">Assets</h2>
           <p className="text-muted-foreground">Manage road infrastructure assets</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Asset
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add New Asset</DialogTitle>
-              <DialogDescription>Create a new infrastructure asset in the system</DialogDescription>
-            </DialogHeader>
-            <EnhancedAssetForm
-              onSubmit={async (assetData) => {
-                try {
-                  // Show loading state
-                  toast.loading("Creating asset...", { id: "create-asset" });
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => navigate('/assets/map')}>
+            <MapPin className="mr-2 h-4 w-4" />
+            Map View
+          </Button>
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Asset
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Add New Asset</DialogTitle>
+                <DialogDescription>Create a new infrastructure asset in the system</DialogDescription>
+              </DialogHeader>
+              <EnhancedAssetForm
+                onSubmit={async (assetData) => {
+                  try {
+                    // Show loading state
+                    toast.loading("Creating asset...", { id: "create-asset" });
 
-                  // Create abort controller with timeout
-                  const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                    // Create abort controller with timeout
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-                  const response = await fetch(`${API_URL}/assets`, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${accessToken}`,
-                    },
-                    body: JSON.stringify({
-                      ...assetData,
-                      uniqueId: `${assetData.type.substring(0, 2).toUpperCase()}-${Date.now()}`,
-                    }),
-                    signal: controller.signal,
-                  });
+                    const response = await fetch(`${API_URL}/assets`, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${accessToken}`,
+                      },
+                      body: JSON.stringify({
+                        ...assetData,
+                        uniqueId: `${assetData.type.substring(0, 2).toUpperCase()}-${Date.now()}`,
+                      }),
+                      signal: controller.signal,
+                    });
 
-                  clearTimeout(timeoutId);
+                    clearTimeout(timeoutId);
 
-                  if (response.ok) {
-                    const result = await response.json();
-                    toast.success("Asset created successfully!", { id: "create-asset" });
-                    setIsAddDialogOpen(false);
-                    fetchAssets();
-                  } else {
-                    const error = await response.json().catch(() => ({ error: "Unknown error" }));
-                    console.error("Asset creation failed:", error);
-                    toast.error(`Failed to create asset: ${error.error || "Unknown error"}`, { id: "create-asset" });
+                    if (response.ok) {
+                      const result = await response.json();
+                      toast.success("Asset created successfully!", { id: "create-asset" });
+                      setIsAddDialogOpen(false);
+                      fetchAssets();
+                    } else {
+                      const error = await response.json().catch(() => ({ error: "Unknown error" }));
+                      console.error("Asset creation failed:", error);
+                      
+                      // Check if migration is required
+                      if (requiresMigration(error)) {
+                        toast.dismiss("create-asset");
+                        handleMigrationRequired(navigate);
+                        return;
+                      }
+                      
+                      toast.error(`Failed to create asset: ${error.error || "Unknown error"}`, { id: "create-asset" });
+                    }
+                  } catch (error: any) {
+                    console.error("Error creating asset:", error);
+                    if (error.name === 'AbortError') {
+                      toast.error("Request timed out. The server is taking too long to respond.", { id: "create-asset" });
+                    } else if (error.message?.includes('Failed to fetch')) {
+                      toast.error("Network error. Please check your internet connection.", { id: "create-asset" });
+                    } else {
+                      toast.error(`Error creating asset: ${error.message || "Unknown error"}`, { id: "create-asset" });
+                    }
                   }
-                } catch (error: any) {
-                  console.error("Error creating asset:", error);
-                  if (error.name === 'AbortError') {
-                    toast.error("Request timed out. The server is taking too long to respond.", { id: "create-asset" });
-                  } else if (error.message?.includes('Failed to fetch')) {
-                    toast.error("Network error. Please check your internet connection.", { id: "create-asset" });
-                  } else {
-                    toast.error(`Error creating asset: ${error.message || "Unknown error"}`, { id: "create-asset" });
-                  }
-                }
-              }}
-              onCancel={() => setIsAddDialogOpen(false)}
-            />
-          </DialogContent>
-        </Dialog>
+                }}
+                onCancel={() => setIsAddDialogOpen(false)}
+              />
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Summary Stats Cards */}
@@ -618,6 +699,20 @@ export default function AssetsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Data Quality Filter */}
+                <div className="space-y-2">
+                  <Label>Data Quality</Label>
+                  <Select value={filterDataQuality ? "true" : "false"} onValueChange={(value) => setFilterDataQuality(value === "true")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All data quality" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="false">All Data Quality</SelectItem>
+                      <SelectItem value="true">Poor Data Quality</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           )}
@@ -747,14 +842,14 @@ export default function AssetsPage() {
                       )}
                       {columns.find(c => c.id === "status")?.visible && (
                         <TableCell>
-                          {asset.status ? <Badge variant="secondary">{asset.status}</Badge> : "—"}
+                          {asset.status_name ? <Badge variant="secondary">{asset.status_name}</Badge> : "—"}
                         </TableCell>
                       )}
                       {columns.find(c => c.id === "installer")?.visible && (
-                        <TableCell>{asset.installer || "—"}</TableCell>
+                        <TableCell>{asset.installer_name || asset.installer_id || "—"}</TableCell>
                       )}
                       {columns.find(c => c.id === "owner")?.visible && (
-                        <TableCell>{asset.owner || "—"}</TableCell>
+                        <TableCell>{asset.owned_by || "—"}</TableCell>
                       )}
                       <TableCell>
                         <div className="flex items-center gap-2">

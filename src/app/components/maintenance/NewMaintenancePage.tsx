@@ -1,24 +1,33 @@
 import { useState, useEffect, useContext } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AuthContext } from "../../App";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Save, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { Alert, AlertDescription } from "../ui/alert";
 
 export default function NewMaintenancePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, accessToken } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
   const [assets, setAssets] = useState<any[]>([]);
+  const [inspection, setInspection] = useState<any>(null);
+  const [loadingInspection, setLoadingInspection] = useState(false);
+
+  // Get inspection_id and asset_id from URL params
+  const inspectionIdFromUrl = searchParams.get("inspection_id");
+  const assetIdFromUrl = searchParams.get("asset_id");
 
   const [formData, setFormData] = useState({
-    asset_id: "",
+    asset_id: assetIdFromUrl || "",
+    inspection_id: inspectionIdFromUrl || "",
     maintenance_type: "",
     scheduled_date: "",
     completed_date: "",
@@ -35,7 +44,51 @@ export default function NewMaintenancePage() {
 
   useEffect(() => {
     fetchAssets();
+    
+    // If inspection_id is provided, fetch inspection details
+    if (inspectionIdFromUrl) {
+      fetchInspectionDetails(inspectionIdFromUrl);
+    }
   }, []);
+
+  const fetchInspectionDetails = async (inspectionId: string) => {
+    setLoadingInspection(true);
+    try {
+      const response = await fetch(`${API_URL}/inspections/${inspectionId}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const inspData = data.inspection;
+        setInspection(inspData);
+        
+        // Pre-fill form with inspection data
+        setFormData(prev => ({
+          ...prev,
+          asset_id: inspData.asset_id || assetIdFromUrl || "",
+          inspection_id: inspectionId,
+          description: `Remedial work required based on inspection findings. ${inspData.finding_summary || ''}`.trim(),
+          maintenance_type: inspData.calculated_urgency === "4" || inspData.calculated_urgency === "Immediate" 
+            ? "Emergency" 
+            : inspData.calculated_urgency === "3" || inspData.calculated_urgency === "High"
+            ? "Corrective"
+            : "Preventive",
+          cost: inspData.total_remedial_cost?.toString() || "",
+          notes: `Linked to Inspection ID: ${inspectionId}\nCI Score: ${inspData.conditional_index || 'N/A'}\nUrgency: ${inspData.calculated_urgency || 'N/A'}`,
+        }));
+        
+        toast.success("Pre-filled from inspection data");
+      }
+    } catch (error) {
+      console.error("Error fetching inspection:", error);
+      toast.error("Could not load inspection details");
+    } finally {
+      setLoadingInspection(false);
+    }
+  };
 
   const fetchAssets = async () => {
     try {
@@ -57,6 +110,27 @@ export default function NewMaintenancePage() {
   const handleSubmit = async () => {
     if (!formData.asset_id || !formData.maintenance_type) {
       toast.error("Please fill in required fields");
+      return;
+    }
+
+    // Validation: Scheduled status requires a future scheduled_date
+    if (formData.status === "Scheduled") {
+      if (!formData.scheduled_date) {
+        toast.error("Scheduled maintenance requires a scheduled date");
+        return;
+      }
+      const scheduledDate = new Date(formData.scheduled_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
+      if (scheduledDate < today) {
+        toast.error("Scheduled date cannot be in the past. Please select a future date.");
+        return;
+      }
+    }
+
+    // Validation: Completed status requires a completed_date
+    if (formData.status === "Completed" && !formData.completed_date) {
+      toast.error("Completed maintenance requires a completed date");
       return;
     }
 
@@ -118,9 +192,19 @@ export default function NewMaintenancePage() {
       </div>
 
       {/* Form */}
+      {inspection && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Creating maintenance record based on inspection findings for <strong>{inspection.asset_ref}</strong> (Inspection Date: {new Date(inspection.inspection_date).toLocaleDateString()})
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Maintenance Details</CardTitle>
+          <CardDescription>Enter the details of the maintenance activity.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -197,7 +281,16 @@ export default function NewMaintenancePage() {
               <Input
                 type="date"
                 value={formData.completed_date}
-                onChange={(e) => setFormData({ ...formData, completed_date: e.target.value })}
+                onChange={(e) => {
+                  const newCompletedDate = e.target.value;
+                  // Auto-update status to Completed when completed_date is set
+                  if (newCompletedDate && formData.status !== "Completed") {
+                    setFormData({ ...formData, completed_date: newCompletedDate, status: "Completed" });
+                    toast.info("Status automatically set to Completed");
+                  } else {
+                    setFormData({ ...formData, completed_date: newCompletedDate });
+                  }
+                }}
               />
             </div>
 
