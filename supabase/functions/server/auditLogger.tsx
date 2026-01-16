@@ -327,7 +327,7 @@ export async function logMaintenanceChange(params: {
   const changes = params.before && params.after
     ? calculateChanges(params.before, params.after, [
         'type', 'status', 'priority', 'scheduled_date', 
-        'completed_date', 'cost', 'assigned_to'
+        'completed_date', 'cost'
       ])
     : undefined;
 

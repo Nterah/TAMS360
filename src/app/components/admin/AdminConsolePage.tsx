@@ -159,16 +159,16 @@ export default function AdminConsolePage() {
               System Health
             </Button>
           </Link>
+          <Link to="/admin/diagnostics">
+            <Button variant="outline" className="w-full border-[#39AEDF] text-[#39AEDF] hover:bg-[#39AEDF]/10">
+              <Database className="mr-2 size-4" />
+              Database Diagnostics
+            </Button>
+          </Link>
           <Link to="/admin/migration-utility">
             <Button variant="outline" className="w-full">
               <Database className="mr-2 size-4" />
               Migration Utility
-            </Button>
-          </Link>
-          <Link to="/admin/data-reorganization">
-            <Button variant="outline" className="w-full border-[#F8D227] text-[#F8D227] hover:bg-[#F8D227]/10">
-              <Database className="mr-2 size-4" />
-              Data Reorganization
             </Button>
           </Link>
         </div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/app/components/ui/button';
 import {
   Table,
@@ -38,9 +39,11 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  ArrowLeft,
+  Key,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
+import { authenticatedFetch } from '@/app/utils/auth';
 
 interface User {
   id: string;
@@ -66,10 +69,12 @@ interface Invitation {
 }
 
 export function UserManagementPage() {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [showCreateUserDialog, setShowCreateUserDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showInviteUrlDialog, setShowInviteUrlDialog] = useState(false);
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState('');
@@ -81,11 +86,37 @@ export function UserManagementPage() {
   const [inviteRole, setInviteRole] = useState('field_user');
   const [inviteExpiry, setInviteExpiry] = useState('7');
 
+  // Create user form state
+  const [createUserEmail, setCreateUserEmail] = useState('');
+  const [createUserName, setCreateUserName] = useState('');
+  const [createUserPassword, setCreateUserPassword] = useState('');
+  const [createUserRole, setCreateUserRole] = useState('field_user');
+  const [creating, setCreating] = useState(false);
+
   // Edit form state
   const [editRole, setEditRole] = useState('');
   const [editStatus, setEditStatus] = useState('');
 
+  // Password reset state
+  const [showPasswordResetDialog, setShowPasswordResetDialog] = useState(false);
+  const [resetPasswordUserId, setResetPasswordUserId] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Diagnostic state
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [diagnosticData, setDiagnosticData] = useState<any>(null);
+
   useEffect(() => {
+    // Check if user is authenticated before fetching
+    const token = localStorage.getItem('tams360_token');
+    if (!token) {
+      console.error('No authentication token found - user needs to log in');
+      toast.error('Your session has expired. Please log in again.');
+      navigate('/login');
+      return;
+    }
+
     fetchUsers();
     fetchInvitations();
   }, []);
@@ -93,15 +124,7 @@ export function UserManagementPage() {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const accessToken = localStorage.getItem('tams360_token');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff/admin/users-v2`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
+      const response = await authenticatedFetch('/admin/users-v2');
 
       const data = await response.json();
       
@@ -113,6 +136,14 @@ export function UserManagementPage() {
       setUsers(data.users || []);
     } catch (error) {
       console.error('Error fetching users:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
       toast.error(error instanceof Error ? error.message : 'Failed to load users');
     } finally {
       setLoading(false);
@@ -121,15 +152,7 @@ export function UserManagementPage() {
 
   const fetchInvitations = async () => {
     try {
-      const accessToken = localStorage.getItem('tams360_token');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff/admin/invitations`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
+      const response = await authenticatedFetch('/admin/invitations');
 
       const data = await response.json();
       
@@ -141,20 +164,25 @@ export function UserManagementPage() {
       setInvitations(data.invitations || []);
     } catch (error) {
       console.error('Error fetching invitations:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
       toast.error(error instanceof Error ? error.message : 'Failed to load invitations');
     }
   };
 
   const handleCreateInvite = async () => {
     try {
-      const accessToken = localStorage.getItem('tams360_token');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff/admin/invitations/create`,
+      const response = await authenticatedFetch('/admin/invitations/create',
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
             email: inviteEmail || null,
@@ -186,7 +214,67 @@ export function UserManagementPage() {
       toast.success('Invitation created successfully!');
     } catch (error) {
       console.error('Error creating invitation:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
       toast.error(error instanceof Error ? error.message : 'Failed to create invitation');
+    }
+  };
+
+  const handleCreateUser = async () => {
+    try {
+      setCreating(true);
+      
+      const response = await authenticatedFetch('/admin/users-v2/create',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: createUserEmail,
+            name: createUserName,
+            password: createUserPassword,
+            role: createUserRole,
+          }),
+        }
+      );
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        console.error('User creation failed:', data);
+        throw new Error(data.error || data.message || 'Failed to create user');
+      }
+
+      toast.success('User created successfully!');
+      setShowCreateUserDialog(false);
+      
+      // Reset form
+      setCreateUserEmail('');
+      setCreateUserName('');
+      setCreateUserPassword('');
+      setCreateUserRole('field_user');
+      
+      fetchUsers();
+    } catch (error) {
+      console.error('Error creating user:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
+      toast.error(error instanceof Error ? error.message : 'Failed to create user');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -194,14 +282,11 @@ export function UserManagementPage() {
     if (!selectedUser) return;
 
     try {
-      const accessToken = localStorage.getItem('tams360_token');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff/admin/users-v2/${selectedUser.id}`,
+      const response = await authenticatedFetch(`/admin/users-v2/${selectedUser.id}`,
         {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
             role: editRole,
@@ -218,30 +303,46 @@ export function UserManagementPage() {
       fetchUsers();
     } catch (error) {
       console.error('Error updating user:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
       toast.error('Failed to update user');
     }
   };
 
   const handleToggleUserStatus = async (userId: string) => {
     try {
-      const accessToken = localStorage.getItem('tams360_token');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff/admin/users-v2/${userId}/toggle-status`,
+      const response = await authenticatedFetch(`/admin/users-v2/${userId}/toggle-status`,
         {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
         }
       );
 
-      if (!response.ok) throw new Error('Failed to toggle user status');
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('Failed to toggle user status:', data);
+        throw new Error(data.details || data.error || 'Failed to toggle user status');
+      }
 
       toast.success('User status updated');
       fetchUsers();
     } catch (error) {
       console.error('Error toggling user status:', error);
-      toast.error('Failed to update user status');
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
+      toast.error(error instanceof Error ? error.message : 'Failed to update user status');
     }
   };
 
@@ -250,14 +351,9 @@ export function UserManagementPage() {
       return;
 
     try {
-      const accessToken = localStorage.getItem('tams360_token');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff/admin/users-v2/${userId}`,
+      const response = await authenticatedFetch(`/admin/users-v2/${userId}`,
         {
           method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
         }
       );
 
@@ -267,20 +363,75 @@ export function UserManagementPage() {
       fetchUsers();
     } catch (error) {
       console.error('Error deleting user:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
       toast.error('Failed to delete user');
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!newPassword || !confirmPassword) {
+      toast.error('Please enter and confirm the new password');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    try {
+      const response = await authenticatedFetch(`/admin/users-v2/${resetPasswordUserId}/reset-password`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ newPassword }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to reset password');
+      }
+
+      toast.success('Password reset successfully');
+      setShowPasswordResetDialog(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      setResetPasswordUserId('');
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
+      toast.error(error instanceof Error ? error.message : 'Failed to reset password');
     }
   };
 
   const handleResendInvite = async (code: string) => {
     try {
-      const accessToken = localStorage.getItem('tams360_token');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff/admin/invitations/${code}/resend`,
+      const response = await authenticatedFetch(`/admin/invitations/${code}/resend`,
         {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
         }
       );
 
@@ -289,6 +440,14 @@ export function UserManagementPage() {
       toast.success('Invitation resent successfully');
     } catch (error) {
       console.error('Error resending invitation:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
       toast.error('Failed to resend invitation');
     }
   };
@@ -343,14 +502,9 @@ export function UserManagementPage() {
     if (!confirm('Are you sure you want to delete this invitation?')) return;
 
     try {
-      const accessToken = localStorage.getItem('tams360_token');
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff/admin/invitations/${code}`,
+      const response = await authenticatedFetch(`/admin/invitations/${code}`,
         {
           method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
         }
       );
 
@@ -360,7 +514,34 @@ export function UserManagementPage() {
       fetchInvitations();
     } catch (error) {
       console.error('Error deleting invitation:', error);
+      
+      // Handle auth errors
+      if (error instanceof Error && (error.message === 'AUTH_REQUIRED' || error.message === 'AUTH_EXPIRED')) {
+        toast.error('Your session has expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
+      
       toast.error('Failed to delete invitation');
+    }
+  };
+
+  const runDiagnostic = async () => {
+    try {
+      toast.info('Running database diagnostic...');
+      const response = await authenticatedFetch('/admin/diagnostic/tams360-check');
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Diagnostic failed');
+      }
+      
+      setDiagnosticData(data);
+      setShowDiagnostic(true);
+      toast.success('Diagnostic complete!');
+    } catch (error) {
+      console.error('Diagnostic error:', error);
+      toast.error(error instanceof Error ? error.message : 'Diagnostic failed');
     }
   };
 
@@ -408,6 +589,16 @@ export function UserManagementPage() {
 
   return (
     <div className="space-y-6">
+      {/* Back Button */}
+      <Button
+        variant="ghost"
+        onClick={() => navigate('/admin')}
+        className="mb-4"
+      >
+        <ArrowLeft className="w-4 h-4 mr-2" />
+        Back to Admin Console
+      </Button>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -416,10 +607,16 @@ export function UserManagementPage() {
             Manage users and invitations for your organization
           </p>
         </div>
-        <Button onClick={() => setShowInviteDialog(true)}>
-          <UserPlus className="w-4 h-4 mr-2" />
-          Invite User
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowCreateUserDialog(true)}>
+            <UserPlus className="w-4 h-4 mr-2" />
+            Create User
+          </Button>
+          <Button onClick={() => setShowInviteDialog(true)}>
+            <Mail className="w-4 h-4 mr-2" />
+            Invite User
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -639,6 +836,7 @@ export function UserManagementPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="field_user">Field User</SelectItem>
+                  <SelectItem value="viewer">Viewer</SelectItem>
                   <SelectItem value="supervisor">Supervisor</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
@@ -665,6 +863,75 @@ export function UserManagementPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Create User Dialog */}
+      <Dialog open={showCreateUserDialog} onOpenChange={setShowCreateUserDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New User</DialogTitle>
+            <DialogDescription>
+              Add a new user to your organization
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="user@example.com"
+                value={createUserEmail}
+                onChange={(e) => setCreateUserEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                type="text"
+                placeholder="John Doe"
+                value={createUserName}
+                onChange={(e) => setCreateUserName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                value={createUserPassword}
+                onChange={(e) => setCreateUserPassword(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="role">Role</Label>
+              <Select value={createUserRole} onValueChange={setCreateUserRole}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="field_user">Field User</SelectItem>
+                  <SelectItem value="viewer">Viewer</SelectItem>
+                  <SelectItem value="supervisor">Supervisor</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateUserDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleCreateUser} disabled={creating}>
+              {creating ? 'Creating...' : 'Create User'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit User Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
         <DialogContent>
@@ -683,6 +950,7 @@ export function UserManagementPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="field_user">Field User</SelectItem>
+                  <SelectItem value="viewer">Viewer</SelectItem>
                   <SelectItem value="supervisor">Supervisor</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>

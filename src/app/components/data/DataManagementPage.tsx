@@ -78,12 +78,33 @@ export default function DataManagementPage() {
     try {
       toast.info(`Exporting ${dataType} as ${format}...`);
       
-      // Fetch tenant settings
-      const tenantRes = await fetch(`${API_URL}/tenant-settings`, {
+      // Fetch tenant settings from the admin endpoint
+      const tenantRes = await fetch(`${API_URL}/admin/tenant-settings`, {
         headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
       });
       const tenantData = tenantRes.ok ? await tenantRes.json() : {};
       const tenant = tenantData.settings || {};
+      
+      // Debug: Log tenant data to verify we're getting it
+      console.log('📄 Export - Full Tenant Response:', tenantData);
+      console.log('📄 Export - Tenant Settings Object:', tenant);
+      console.log('📄 Export - All Tenant Keys:', Object.keys(tenant));
+      
+      // The tenant settings use camelCase, and some fields are not available
+      const tenantSettings = {
+        organizationName: tenant.organizationName || 'TAMS360',
+        logoUrl: tenant.logoUrl,
+        primaryColor: tenant.primaryColor || '#010D13',
+        regionName: tenant.regionName,
+        tagline: tenant.organizationTagline, // Note: it's organizationTagline in the settings
+        address: tenant.address || '', // Not in settings, will be empty
+        phone: tenant.phone || '',
+        email: tenant.email || '',
+        website: tenant.website || '',
+        currency: 'ZAR',
+      };
+      
+      console.log('📄 Export - Processed Tenant Settings:', tenantSettings);
 
       let data: any[] = [];
       let columns: any[] = [];
@@ -91,34 +112,45 @@ export default function DataManagementPage() {
       
       switch (dataType) {
         case 'assets':
-          const assetsRes = await fetch(`${API_URL}/assets`, {
+          const assetsRes = await fetch(`${API_URL}/assets?pageSize=10000`, {
             headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
           });
           const assetsData = await assetsRes.json();
           data = assetsData.assets || [];
+          if (data.length > 0) {
+            console.log('📄 Export - Sample Asset Data (first record):', data[0]);
+            console.log('📄 Export - Asset Field Names:', Object.keys(data[0]));
+          }
           columns = [
             { header: 'Asset Number', key: 'asset_ref' },
             { header: 'Asset Type', key: 'asset_type_name' },
-            { header: 'Region', key: 'region' },
-            { header: 'Route/Road', key: 'route_road' },
-            { header: 'Chainage', key: 'chainage_km' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Status', key: 'status' },
+            { header: 'Region', key: 'depot' },
+            { header: 'Route/Road', key: 'road_number' },
+            { header: 'Road Name', key: 'road_name' },
+            { header: 'Chainage (km)', key: 'km_marker' },
+            { header: 'Condition Index', key: 'latest_ci' },
+            { header: 'Status', key: 'status_name' },
           ];
           break;
           
         case 'inspections':
-          const inspRes = await fetch(`${API_URL}/inspections`, {
+          const inspRes = await fetch(`${API_URL}/inspections?pageSize=10000`, {
             headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
           });
           const inspData = await inspRes.json();
           data = inspData.inspections || [];
+          if (data.length > 0) {
+            console.log('📄 Export - Sample Inspection Data (first record):', data[0]);
+            console.log('📄 Export - Inspection Field Names:', Object.keys(data[0]));
+          }
+          // Note: status field is not available in the inspections API response
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
+            { header: 'Asset Number', key: 'asset_ref' },
             { header: 'Inspection Date', key: 'inspection_date' },
             { header: 'Inspector', key: 'inspector_name' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Status', key: 'status' },
+            { header: 'Condition Index', key: 'conditional_index' },
+            { header: 'CI Band', key: 'ci_band' },
+            { header: 'Urgency', key: 'calculated_urgency' },
           ];
           break;
           
@@ -128,29 +160,27 @@ export default function DataManagementPage() {
           });
           const maintData = await maintRes.json();
           data = maintData.records || [];
+          if (data.length > 0) {
+            console.log('📄 Export - Sample Maintenance Data (first record):', data[0]);
+            console.log('📄 Export - Maintenance Field Names:', Object.keys(data[0]));
+          }
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
+            { header: 'Asset Number', key: 'asset_ref' },
             { header: 'Maintenance Type', key: 'maintenance_type' },
             { header: 'Scheduled Date', key: 'scheduled_date' },
-            { header: 'Completed Date', key: 'completed_date' },
+            { header: 'Completed Date', key: 'completion_date' },
             { header: 'Status', key: 'status' },
             { header: 'Cost (ZAR)', key: 'actual_cost' },
           ];
           break;
       }
 
-      // Download report
+      // Download report with complete tenant data
       await downloadReport(format.toLowerCase() as 'pdf' | 'excel' | 'csv', {
         title,
         data,
         columns,
-        tenant: {
-          organizationName: tenant.organization_name,
-          logoUrl: tenant.logo_url,
-          primaryColor: tenant.primary_color,
-          regionName: tenant.region_name,
-          currency: 'ZAR',
-        },
+        tenant: tenantSettings,
         fileName: `${dataType}-export-${new Date().toISOString().split('T')[0]}`,
         includeDate: true,
         includeFooter: true,

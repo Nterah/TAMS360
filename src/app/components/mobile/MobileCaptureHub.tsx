@@ -1,6 +1,10 @@
+import { useContext, useState } from "react";
 import { Camera, ClipboardCheck, MapPin, Plus, ScanLine, Navigation, CheckCircle2, Clock, AlertCircle, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { AuthContext } from "../../App";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Button } from "../ui/button";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { syncAllOfflineData } from "../../utils/offlineSync";
 

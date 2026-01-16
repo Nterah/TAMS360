@@ -25,33 +25,39 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Filter tabs based on user role - only field_user and supervisor see Capture Hub
   const tabs = [
     { 
       path: "/mobile/capture-hub", 
       icon: Home, 
-      label: "Home" 
+      label: "Home",
+      roles: ["field_user", "supervisor"] // Only these roles see this tab
     },
     { 
       path: "/mobile/assets", 
       icon: Package, 
-      label: "Assets" 
+      label: "Assets",
+      roles: ["admin", "supervisor", "field_user", "viewer"] // All roles
     },
     { 
       path: "/mobile/inspections", 
       icon: ClipboardCheck, 
-      label: "Inspect" 
+      label: "Inspect",
+      roles: ["admin", "supervisor", "field_user", "viewer"] // All roles
     },
     { 
       path: "/mobile/maintenance", 
       icon: Wrench, 
-      label: "Work" 
+      label: "Work",
+      roles: ["admin", "supervisor", "field_user"] // Not for viewers
     },
     { 
       path: "/mobile/map", 
       icon: Map, 
-      label: "Map" 
+      label: "Map",
+      roles: ["admin", "supervisor", "field_user", "viewer"] // All roles
     },
-  ];
+  ].filter(tab => tab.roles.includes(user?.role || "viewer"));
 
   const isActive = (path: string) => location.pathname === path;
 

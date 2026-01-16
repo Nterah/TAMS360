@@ -1,11 +1,12 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useState, useEffect } from "react";
-import React from "react";
-import { Toaster } from "./components/ui/sonner";
-import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../utils/supabase/info";
+import React, { useState, useEffect } from "react";
+import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { toast, Toaster } from "sonner";
+import { projectId, publicAnonKey } from "/utils/supabase/info";
 import { OfflineProvider } from "./components/offline/OfflineContext";
 import { TenantProvider } from "./contexts/TenantContext";
+
+// Debug utilities
+import './utils/checkDatabase';
 
 // Auth Pages
 import LoginPage from "./components/auth/LoginPage";
@@ -14,6 +15,7 @@ import TenantRegisterPage from "./components/auth/TenantRegisterPage";
 import PendingApprovalPage from "./components/auth/PendingApprovalPage";
 import SplashScreen from "./components/auth/SplashScreen";
 import SetupOrganizationPage from "./components/auth/SetupOrganizationPage";
+import AcceptInvitePage from "./components/auth/AcceptInvitePage";
 
 // Main App Pages
 import DashboardPage from "./components/dashboard/DashboardPage";
@@ -36,8 +38,10 @@ import ComponentTemplatesPage from "./components/admin/ComponentTemplatesPage"; 
 import TenantSettingsPage from "./components/admin/TenantSettingsPage";
 import UserInvitationsPage from "./components/admin/UserInvitationsPage";
 import { UserManagementPage } from "./components/admin/UserManagementPage";
+import { DiagnosticPage } from "./components/admin/DiagnosticPage";
 import { AuditLogViewer } from "./components/admin/AuditLogViewer";
 import BulkAssetAssignmentPage from "./components/admin/BulkAssetAssignmentPage";
+import MigrationUtilityPage from "./components/admin/MigrationUtilityPage";
 import MobileCaptureHub from "./components/mobile/MobileCaptureHub";
 import FieldCapturePage from "./components/mobile/FieldCapturePage";
 import MobileLayout from "./components/mobile/MobileLayout";
@@ -92,6 +96,14 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+
+  // Helper function to determine default landing page based on role
+  const getDefaultLandingPage = (role: string) => {
+    if (role === "admin") return "/dashboard";
+    if (role === "supervisor" || role === "field_user") return "/mobile/capture-hub";
+    if (role === "viewer") return "/dashboard";
+    return "/dashboard"; // fallback
+  };
 
   // Check for existing session on mount
   useEffect(() => {
@@ -229,38 +241,23 @@ function App() {
             {/* Public Routes */}
             <Route
               path="/login"
-              element={user ? (
-                user.role === "field_user" 
-                  ? <Navigate to="/mobile/capture-hub" /> 
-                  : <Navigate to="/dashboard" />
-              ) : <LoginPage />}
+              element={user ? <Navigate to={getDefaultLandingPage(user.role)} /> : <LoginPage />}
             />
             <Route
               path="/register"
-              element={user ? (
-                user.role === "field_user" 
-                  ? <Navigate to="/mobile/capture-hub" /> 
-                  : <Navigate to="/dashboard" />
-              ) : <RegisterPage />}
+              element={user ? <Navigate to={getDefaultLandingPage(user.role)} /> : <RegisterPage />}
             />
             <Route
               path="/tenant-register"
-              element={user ? (
-                user.role === "field_user" 
-                  ? <Navigate to="/mobile/capture-hub" /> 
-                  : <Navigate to="/dashboard" />
-              ) : <TenantRegisterPage />}
+              element={user ? <Navigate to={getDefaultLandingPage(user.role)} /> : <TenantRegisterPage />}
             />
             <Route path="/pending-approval" element={<PendingApprovalPage />} />
             <Route path="/setup-organization" element={<SetupOrganizationPage />} />
             <Route
               path="/"
-              element={user ? (
-                user.role === "field_user" 
-                  ? <Navigate to="/mobile/capture-hub" /> 
-                  : <Navigate to="/dashboard" />
-              ) : <SplashScreen />}
+              element={user ? <Navigate to={getDefaultLandingPage(user.role)} /> : <SplashScreen />}
             />
+            <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
             {/* Protected Routes */}
             <Route
@@ -293,8 +290,10 @@ function App() {
                         <Route path="/admin/tenant-settings" element={<TenantSettingsPage />} />
                         <Route path="/admin/user-invitations" element={<UserInvitationsPage />} />
                         <Route path="/admin/users" element={<UserManagementPage />} />
+                        <Route path="/admin/diagnostics" element={<DiagnosticPage />} />
                         <Route path="/admin/audit-log" element={<AuditLogViewer />} />
                         <Route path="/admin/bulk-asset-assignment" element={<BulkAssetAssignmentPage />} />
+                        <Route path="/admin/migration-utility" element={<MigrationUtilityPage />} />
                         
                         {/* Data Management Routes */}
                         <Route path="/data" element={<DataManagementPage />} />
@@ -302,7 +301,16 @@ function App() {
                         <Route path="/data/templates" element={<TemplateLibraryPage />} />
                         
                         {/* Mobile Routes with MobileLayout */}
-                        <Route path="/mobile/capture-hub" element={<MobileLayout><MobileCaptureHub /></MobileLayout>} />
+                        <Route 
+                          path="/mobile/capture-hub" 
+                          element={
+                            <RoleGuard allowedRoles={["field_user", "supervisor"]} redirectTo="/dashboard">
+                              <MobileLayout>
+                                <MobileCaptureHub />
+                              </MobileLayout>
+                            </RoleGuard>
+                          } 
+                        />
                         <Route path="/mobile/field-capture" element={<FieldCapturePage />} />
                         <Route path="/mobile/assets" element={<MobileLayout><MobileAssetsPage /></MobileLayout>} />
                         <Route path="/mobile/inspections" element={<MobileLayout><MobileInspectionsPage /></MobileLayout>} />
@@ -310,15 +318,13 @@ function App() {
                         <Route path="/mobile/map" element={<MobileLayout><MobileMapPage /></MobileLayout>} />
                         
                         <Route path="*" element={
-                          user?.role === "field_user" 
-                            ? <Navigate to="/mobile/capture-hub" /> 
-                            : <Navigate to="/dashboard" />
+                          <Navigate to={getDefaultLandingPage(user?.role || "viewer")} />
                         } />
                       </Routes>
                     </AppLayout>
                   </TenantGuard>
                 ) : (
-                  <Navigate to="/" />
+                  <Navigate to="/login" replace />
                 )
               }
             />

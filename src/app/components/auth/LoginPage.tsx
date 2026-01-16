@@ -26,7 +26,7 @@ export default function LoginPage() {
     try {
       await login(email, password);
       
-      // Check if user has a tenant
+      // Check if user has a valid tenant before redirecting
       const token = localStorage.getItem("tams360_token");
       if (token) {
         const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
@@ -39,8 +39,10 @@ export default function LoginPage() {
         
         if (checkResponse.ok) {
           const checkData = await checkResponse.json();
-          if (!checkData.hasTenant || !checkData.tenantExists) {
-            // User needs to set up organization
+          // Only redirect to setup if user doesn't have a tenant assigned
+          // If they have a tenant but it doesn't exist in DB, that's a different issue
+          if (!checkData.hasTenant) {
+            // User needs to set up organization or accept an invite
             navigate("/setup-organization");
             return;
           }

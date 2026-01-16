@@ -1,4 +1,5 @@
 import { useState, useEffect, useContext } from "react";
+import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -17,7 +18,8 @@ import {
   BarChart3,
   Wrench,
   ClipboardCheck,
-  RefreshCw
+  RefreshCw,
+  ArrowLeft
 } from "lucide-react";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 
@@ -38,6 +40,7 @@ interface SystemStats {
 }
 
 export default function SystemHealthPage() {
+  const navigate = useNavigate();
   const { user, accessToken } = useContext(AuthContext);
   const [healthChecks, setHealthChecks] = useState<HealthCheck[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
@@ -585,11 +588,21 @@ export default function SystemHealthPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl">System Health Check</h1>
-          <p className="text-muted-foreground">
-            Verify all TAMS360 components are functioning correctly
-          </p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate('/admin')}
+            className="shrink-0"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl">System Health Check</h1>
+            <p className="text-muted-foreground">
+              Verify all TAMS360 components are functioning correctly
+            </p>
+          </div>
         </div>
         <Button onClick={runHealthChecks} disabled={loading}>
           {loading ? (

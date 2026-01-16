@@ -1,21 +1,23 @@
-import { useContext, useState, useEffect } from "react";
-import { AuthContext } from "../../App";
-import { useTenant } from "../../contexts/TenantContext";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
-import { Switch } from "../ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { Switch } from "../ui/switch";
 import { Badge } from "../ui/badge";
-import { Save, Palette, Hash, Globe, Building2, AlertCircle, Loader2, Zap, Mail } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Save, Palette, Hash, Globe, Building2, AlertCircle, Loader2, Zap, Mail, ArrowLeft, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import EmailNotificationsTab from "./EmailNotificationsTab";
+import { useState, useEffect, useContext } from "react";
+import { useNavigate } from "react-router-dom";
+import { AuthContext } from "../../App";
+import { useTenant } from "../../contexts/TenantContext";
 
 export default function TenantSettingsPage() {
+  const navigate = useNavigate();
   const { accessToken } = useContext(AuthContext);
   const { settings: tenantSettings, refreshSettings, tenantName } = useTenant();
   const [settings, setSettings] = useState({
@@ -47,6 +49,8 @@ export default function TenantSettingsPage() {
     urgencyThreshold: "Medium",
     autoAssignFieldUser: false,
     autoNotifyOnCritical: true,
+    // Data Access Control
+    showAssignedAssetsOnly: false,
     // Email Notifications
     notificationEmails: [] as string[],
     enableDailyDigest: false,
@@ -90,6 +94,8 @@ export default function TenantSettingsPage() {
         urgencyThreshold: tenantSettings.urgency_threshold ?? "Medium",
         autoAssignFieldUser: tenantSettings.auto_assign_field_user ?? false,
         autoNotifyOnCritical: tenantSettings.auto_notify_on_critical ?? true,
+        // Data Access Control
+        showAssignedAssetsOnly: tenantSettings.show_assigned_assets_only ?? false,
         // Email Notifications
         notificationEmails: tenantSettings.notification_emails ?? [],
         enableDailyDigest: tenantSettings.enable_daily_digest ?? false,
@@ -170,11 +176,21 @@ export default function TenantSettingsPage() {
     <div className="space-y-6 pb-8">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Tenant Settings</h1>
-          <p className="text-muted-foreground">
-            Configure branding, asset numbering, and system preferences
-          </p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate('/admin')}
+            className="shrink-0"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Tenant Settings</h1>
+            <p className="text-muted-foreground">
+              Configure branding, asset numbering, and system preferences
+            </p>
+          </div>
         </div>
         <Button onClick={handleSave} disabled={saving}>
           {saving ? (
@@ -208,6 +224,10 @@ export default function TenantSettingsPage() {
           <TabsTrigger value="system">
             <Building2 className="w-4 h-4 mr-2" />
             System Preferences
+          </TabsTrigger>
+          <TabsTrigger value="data-access">
+            <Shield className="w-4 h-4 mr-2" />
+            Data Access
           </TabsTrigger>
           <TabsTrigger value="automation">
             <Zap className="w-4 h-4 mr-2" />
@@ -703,6 +723,32 @@ export default function TenantSettingsPage() {
                     Install App
                   </Button>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Data Access Tab */}
+        <TabsContent value="data-access" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Data Access Control</CardTitle>
+              <CardDescription>
+                Configure data access and visibility settings
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="space-y-1">
+                  <Label>Show Assigned Assets Only</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Restrict asset visibility to assigned assets only
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.showAssignedAssetsOnly}
+                  onCheckedChange={(checked) => setSettings({ ...settings, showAssignedAssetsOnly: checked })}
+                />
               </div>
             </CardContent>
           </Card>

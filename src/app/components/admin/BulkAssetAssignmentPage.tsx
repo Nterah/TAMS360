@@ -1,4 +1,5 @@
 import { useState, useEffect, useContext } from "react";
+import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -8,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Badge } from "../ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Checkbox } from "../ui/checkbox";
-import { MapPin, Building2, Layers, Users, Loader2, ArrowRightLeft, Filter, X } from "lucide-react";
+import { MapPin, Building2, Layers, Users, Loader2, ArrowRightLeft, Filter, X, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
@@ -25,6 +26,7 @@ interface Asset {
 }
 
 export default function BulkAssetAssignmentPage() {
+  const navigate = useNavigate();
   const { accessToken } = useContext(AuthContext);
   const [loading, setLoading] = useState(true);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -178,11 +180,22 @@ export default function BulkAssetAssignmentPage() {
     <div className="space-y-6 pb-8">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Bulk Asset Assignment</h1>
-          <p className="text-muted-foreground">
-            Reassign multiple assets by region, type, or depot
-          </p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/admin')}
+            className="gap-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Bulk Asset Assignment</h1>
+            <p className="text-muted-foreground">
+              Reassign multiple assets by region, type, or depot
+            </p>
+          </div>
         </div>
         <Button 
           onClick={() => setShowAssignDialog(true)}

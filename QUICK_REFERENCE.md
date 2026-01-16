@@ -1,280 +1,265 @@
-# TAMS360 Quick Reference Card
+# TAMS360 Quick Reference Guide
 
-## 🚀 Getting Started (3 Steps)
+## What Was Fixed/Added
 
-### 1. Run SQL Script
-```bash
-Open Supabase Dashboard → SQL Editor
-Paste: CREATE_TAMS360_PUBLIC_VIEWS.sql
-Click: RUN
+### ✅ 1. Viewer Role Can Now Access Map & Inspections
+**Status:** Complete - Live Now  
+**Test:** Login as viewer, check sidebar navigation
+
+### ✅ 2. "Show Assigned Assets Only" Setting Added
+**Status:** UI Complete - Filtering Logic Needs Implementation  
+**Location:** Admin Console → Tenant Settings → Data Access tab
+
+### ✅ 3. Asset Photo Import Guide Created
+**Status:** Complete Documentation  
+**Location:** `/ASSET_PHOTO_IMPORT_GUIDE.md`
+
+---
+
+## Quick Access
+
+### For Users
+
+#### Viewer Role Access
+```
+Login as: viewer
+Can access:
+  ✓ Dashboard
+  ✓ GIS Map (read-only)
+  ✓ Inspections (read-only)
+  ✓ Reports
+Cannot access:
+  ✗ Assets
+  ✗ Maintenance
+  ✗ Data Management
+  ✗ Admin Console
 ```
 
-### 2. Verify Views
+#### Assigned Assets Setting
+```
+Location: Admin Console → Tenant Settings → Data Access
+Toggle: "Show Assigned Assets Only"
+Default: OFF (all users see all tenant assets)
+When ON: Non-admin users only see assigned assets
+Admin: Always sees all assets
+```
+
+---
+
+## For Developers
+
+### Files Modified
+1. `/src/app/components/layout/AppLayout.tsx`
+   - Added viewer to Inspections roles array
+
+2. `/src/app/components/admin/TenantSettingsPage.tsx`
+   - Added missing imports
+   - Added `showAssignedAssetsOnly` setting
+   - Added "Data Access" tab with Shield icon
+
+3. `/supabase/functions/server/index.tsx`
+   - Added `show_assigned_assets_only` to dbSettings mapping
+
+### Files Created
+1. `/ASSET_PHOTO_IMPORT_GUIDE.md` - Complete photo import guide
+2. `/CHANGES_SUMMARY.md` - Detailed changes documentation
+3. `/FILTERING_IMPLEMENTATION_SNIPPETS.md` - Code snippets for filtering
+4. `/QUICK_REFERENCE.md` - This file
+
+---
+
+## Next Steps (Priority Order)
+
+### 1. Database Schema (REQUIRED)
 ```sql
-SELECT * FROM public.tams360_inspections_v LIMIT 1;
-SELECT * FROM public.tams360_assets_v LIMIT 1;
+-- Add assigned_to column if not exists
+ALTER TABLE tams360.assets 
+ADD COLUMN IF NOT EXISTS assigned_to UUID 
+REFERENCES tams360.user_profiles(id);
+
+-- Create index for performance
+CREATE INDEX IF NOT EXISTS idx_assets_assigned_to 
+ON tams360.assets(assigned_to);
+
+-- Update view to include new column
+-- (Add assigned_to to tams360_assets_v view)
 ```
 
-### 3. Test App
-```bash
-Login → Dashboard → Check counts display
-```
+### 2. Implement Filtering (Choose One Approach)
+
+#### Option A: Frontend Filtering (Quick & Easy)
+Copy snippets from `/FILTERING_IMPLEMENTATION_SNIPPETS.md`
+Apply to these files:
+- AssetsPage.tsx
+- InspectionsPage.tsx
+- MaintenancePage.tsx
+- GISMapPage.tsx
+- ReportsPage.tsx
+
+**Pros:** Quick to implement, no backend changes  
+**Cons:** Less secure, loads all data first
+
+#### Option B: Backend Filtering (Recommended)
+Update server endpoints in `/supabase/functions/server/index.tsx`
+- GET /assets
+- GET /inspections
+- GET /maintenance
+
+**Pros:** More secure, better performance, less data transfer  
+**Cons:** More code changes required
+
+### 3. Test Thoroughly
+- [ ] Test viewer role access
+- [ ] Test assigned assets filtering ON
+- [ ] Test assigned assets filtering OFF
+- [ ] Test admin sees all assets
+- [ ] Test non-admin sees only assigned
+
+### 4. Photo Import (When Ready)
+Follow guide in `/ASSET_PHOTO_IMPORT_GUIDE.md`
 
 ---
 
-## 📋 View Names (Copy/Paste Ready)
+## Testing Commands
 
-```
-public.tams360_inspections_v
-public.tams360_assets_v
-public.tams360_urgency_summary_v
-public.tams360_ci_distribution_v
-public.tams360_asset_type_summary_v
-```
-
----
-
-## 🔑 Key Column Names
-
-### Inspections
+### Quick Test Viewer Access
 ```typescript
-inspection_id           // UUID primary key
-asset_id                // UUID foreign key
-asset_ref               // "SGN-001"
-asset_type_name         // "Signage"
-inspection_date         // timestamp
-inspector_name          // varchar
-conditional_index       // 0-100 (CI Final)
-deru_value              // numeric
-calculated_urgency      // "1", "2", "3", "4"
-ci_band                 // "Excellent", "Good", "Fair", "Poor"
-total_remedial_cost     // numeric
-finding_summary         // text
+// In browser console while logged in as viewer
+console.log('Role:', JSON.parse(localStorage.getItem('tams360_user')).role);
+// Should show: "viewer"
+
+// Try accessing /inspections - should work
+// Try accessing /assets - should redirect or show unauthorized
 ```
 
-### Assets
+### Quick Test Assigned Filter
 ```typescript
-asset_id                // UUID primary key
-asset_ref               // "SGN-001"
-asset_type_name         // "Signage"
-asset_type_abbreviation // "SGN"
-gps_lat                 // numeric
-gps_lng                 // numeric
-latest_ci               // most recent CI value
-latest_deru             // most recent DERU
-latest_ci_band          // "Excellent" etc
-replacement_value       // numeric
-owned_by                // varchar
+// In browser console
+fetch('https://YOUR_PROJECT.supabase.co/functions/v1/make-server-c894a9ff/admin/tenant-settings', {
+  headers: { 'Authorization': `Bearer ${localStorage.getItem('tams360_token')}` }
+})
+.then(r => r.json())
+.then(d => console.log('show_assigned_assets_only:', d.settings.show_assigned_assets_only));
 ```
 
 ---
 
-## 🎯 API Endpoints
+## Common Issues & Solutions
 
-### Dashboard
-```
-GET /dashboard/stats
-GET /dashboard/ci-distribution
-GET /dashboard/urgency-summary
-GET /dashboard/asset-type-summary
-```
+### Issue: Viewer can't see Inspections
+**Solution:** Already fixed. Clear cache and reload.
 
-### Inspections
-```
-GET /inspections
-GET /inspections/stats
-GET /assets/:id/inspections
-```
+### Issue: Setting saves but doesn't filter
+**Solution:** Filtering logic not implemented yet. Follow `/FILTERING_IMPLEMENTATION_SNIPPETS.md`
 
-### Assets
-```
-GET /assets
-GET /assets/:id
-```
+### Issue: Photos won't upload
+**Solution:** Check:
+1. Supabase Storage bucket 'asset-photos' exists
+2. Bucket permissions are correct
+3. File size under 5MB
+4. Follow guide in `/ASSET_PHOTO_IMPORT_GUIDE.md`
 
-**All require:** `Authorization: Bearer {accessToken}`
+### Issue: Admin can't see setting
+**Solution:** 
+1. Ensure you're actually an admin: `role === 'admin'`
+2. Navigate to: `/admin` → Tenant Settings → Data Access tab
 
 ---
 
-## 🔍 Quick Debug Queries
+## Important Notes
 
-### Check view exists
-```sql
-SELECT table_name 
-FROM information_schema.tables 
-WHERE table_name = 'tams360_inspections_v';
-```
+### Viewer Role
+- ✅ Read-only access to maps and inspections
+- ✅ Cannot create, edit, or delete
+- ✅ Can view and generate reports
 
-### Count data
-```sql
-SELECT 
-  (SELECT COUNT(*) FROM tams360_inspections_v) as inspections,
-  (SELECT COUNT(*) FROM tams360_assets_v) as assets;
-```
+### Assigned Assets Filter
+- ⚠️ UI is ready, filtering needs implementation
+- ⚠️ Database column `assigned_to` must exist
+- ⚠️ Use Bulk Asset Assignment page to assign assets to users
 
-### Test CI distribution
-```sql
-SELECT ci_band, asset_count 
-FROM tams360_ci_distribution_v;
-```
-
-### Test urgency summary
-```sql
-SELECT urgency_label, inspection_count 
-FROM tams360_urgency_summary_v;
-```
-
-### Check your tenant
-```sql
-SELECT tenant_id 
-FROM tams360.user_profiles 
-WHERE id = auth.uid();
-```
+### Photo Import
+- 📁 Naming: 0.jpg (general), 1.jpg (component 1), 1.1.jpg (detail)
+- 📁 Folders: Organize by Asset Reference ID
+- 📁 Storage: Supabase Storage bucket `asset-photos`
 
 ---
 
-## ❌ Common Errors & Fixes
+## Code Snippets Quick Copy
 
-| Error | Fix |
-|-------|-----|
-| "relation does not exist" | Run CREATE_TAMS360_PUBLIC_VIEWS.sql |
-| "PGRST106" | Backend querying wrong schema |
-| No data showing | Check: `SELECT COUNT(*) FROM tams360.inspections` |
-| "Unauthorized" | User not logged in or token expired |
-| Blank dashboard | Verify RLS policies, check user has tenant_id |
-
----
-
-## 🎨 UI Field Mapping
-
-### Dashboard KPIs
+### Check if filtering should be applied
 ```typescript
-stats.totalAssets         → Total Assets card
-stats.totalInspections    → Inspections card
-stats.criticalIssues      → Critical Issues card
-stats.avgCI               → Average CI value
-stats.avgDERU             → Average DERU value
-stats.totalRemedialCost   → Sum of all costs
+import { useTenant } from "../../contexts/TenantContext";
+import { AuthContext } from "../../App";
+
+const { settings } = useTenant();
+const { user } = useContext(AuthContext);
+
+const shouldFilter = settings?.show_assigned_assets_only && user?.role !== 'admin';
 ```
 
-### Inspection Card
+### Apply filter to assets
 ```typescript
-inspection.asset_ref              → Title
-inspection.conditional_index      → CI badge
-inspection.calculated_urgency     → Urgency badge
-inspection.inspector_name         → Inspector info
-inspection.inspection_date        → Date
-inspection.deru_value             → DERU display
-inspection.finding_summary        → Description
-inspection.total_remedial_cost    → Cost display
-```
-
----
-
-## 🔐 Authentication Flow
-
-```
-1. User logs in
-2. Gets access_token
-3. Frontend: Authorization: Bearer {token}
-4. Backend: validates token
-5. Database: applies RLS filter
-6. User sees only their tenant's data
-```
-
----
-
-## 📊 Dashboard Charts
-
-### CI Distribution (Bar Chart)
-```javascript
-// Data from: tams360_ci_distribution_v
-{
-  name: "Excellent",  // ci_band
-  value: 45           // asset_count
+if (shouldFilter) {
+  assets = assets.filter(asset => asset.assigned_to === user?.id);
 }
 ```
 
-### Asset Types (Pie Chart)
-```javascript
-// Data from: tams360_asset_type_summary_v
-{
-  name: "Signage",    // asset_type_name
-  value: 120          // asset_count
+### Apply filter to related records (inspections, maintenance)
+```typescript
+if (shouldFilter) {
+  const assignedAssetIds = new Set(
+    assets.filter(a => a.assigned_to === user?.id).map(a => a.id)
+  );
+  
+  inspections = inspections.filter(i => assignedAssetIds.has(i.asset_id));
+  maintenance = maintenance.filter(m => assignedAssetIds.has(m.asset_id));
 }
 ```
 
 ---
 
-## 🧪 Testing Checklist
+## Documentation Files
 
-- [ ] Views created in database
-- [ ] Can query views in SQL Editor
-- [ ] Dashboard shows live counts
-- [ ] Charts render with data
-- [ ] Inspections list displays
-- [ ] CI/DERU values show
-- [ ] Urgency badges correct colors
-- [ ] No console errors
-- [ ] Data is tenant-filtered
+| File | Purpose |
+|------|---------|
+| `CHANGES_SUMMARY.md` | Detailed changes, context, testing checklist |
+| `ASSET_PHOTO_IMPORT_GUIDE.md` | Complete photo import guide with scripts |
+| `FILTERING_IMPLEMENTATION_SNIPPETS.md` | Copy-paste code for filtering |
+| `QUICK_REFERENCE.md` | This file - quick lookup |
 
 ---
 
-## 📞 Support Files
+## Support
 
-- **Full Guide:** `/VIEW_INTEGRATION_GUIDE.md`
-- **Setup Steps:** `/SETUP_CHECKLIST.md`
-- **Summary:** `/LIVE_DATA_SUMMARY.md`
-- **Architecture:** `/ARCHITECTURE_DIAGRAM.md`
-- **SQL Script:** `/CREATE_TAMS360_PUBLIC_VIEWS.sql`
+### Questions About:
+- **Viewer Access**: Test immediately, should work now
+- **Assigned Filter**: See `FILTERING_IMPLEMENTATION_SNIPPETS.md`
+- **Photo Import**: See `ASSET_PHOTO_IMPORT_GUIDE.md`
+- **Everything Else**: See `CHANGES_SUMMARY.md`
 
----
-
-## ⚡ Quick Commands
-
-### Check if views exist
-```sql
-\dv tams360_*
-```
-
-### Grant permissions
-```sql
-GRANT SELECT ON public.tams360_inspections_v TO authenticated;
-GRANT SELECT ON public.tams360_assets_v TO authenticated;
-```
-
-### Test RLS
-```sql
-SET ROLE authenticated;
-SET request.jwt.claim.sub = 'user-id-here';
-SELECT * FROM tams360_inspections_v;
-```
+### Need Help?
+1. Check relevant documentation file
+2. Review code comments in modified files
+3. Check browser console for errors
+4. Check server logs for backend issues
 
 ---
 
-## 🎯 Success Indicators
+## Deployment Checklist
 
-✅ Dashboard loads without errors  
-✅ Numbers are not all zeros  
-✅ Charts show colored bars/segments  
-✅ Inspections list has records  
-✅ CI badges are color-coded  
-✅ No "PGRST" errors in console  
+Before deploying to production:
 
----
-
-## 💡 Pro Tips
-
-1. **Always use view names** - Never query `tams360.*` directly
-2. **Check auth token** - Most errors are authentication issues
-3. **Verify RLS** - Data should be tenant-filtered automatically
-4. **Use exact column names** - Frontend expects specific names
-5. **Test in SQL Editor first** - Debug queries before testing UI
+- [ ] Test viewer role access thoroughly
+- [ ] Test assigned filter with multiple users
+- [ ] Verify admin always sees all assets
+- [ ] Run database migration for `assigned_to` column
+- [ ] Update database views to include `assigned_to`
+- [ ] Test photo import workflow
+- [ ] Update user documentation
+- [ ] Train users on new features
+- [ ] Monitor for issues after deployment
 
 ---
 
-**Quick Start:** Run SQL → Verify → Test App ✅
-
-**Status:** Ready for deployment  
-**Version:** 1.0  
-**Date:** Dec 31, 2025
+*Quick Reference v1.0 - January 16, 2026*

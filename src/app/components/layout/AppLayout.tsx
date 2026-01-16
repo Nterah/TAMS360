@@ -14,6 +14,7 @@ import {
   X,
   FolderOpen,
   FileBarChart,
+  Camera,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "../ui/sheet";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
@@ -23,10 +24,11 @@ import SyncStatusBadge from "../offline/SyncStatusBadge";
 import TenantBanner from "./TenantBanner";
 
 const navigation = [
+  { name: "Capture Hub", path: "/mobile/capture-hub", icon: Camera, roles: ["supervisor", "field_user"] },
   { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin", "supervisor", "field_user", "viewer"] },
   { name: "GIS Map", path: "/map", icon: Map, roles: ["admin", "supervisor", "field_user", "viewer"] },
   { name: "Assets", path: "/assets", icon: Database, roles: ["admin", "supervisor", "field_user"] },
-  { name: "Inspections", path: "/inspections", icon: ClipboardCheck, roles: ["admin", "supervisor", "field_user"] },
+  { name: "Inspections", path: "/inspections", icon: ClipboardCheck, roles: ["admin", "supervisor", "field_user", "viewer"] },
   { name: "Maintenance", path: "/maintenance", icon: Wrench, roles: ["admin", "supervisor", "field_user"] },
   { name: "Reports", path: "/reports", icon: FileBarChart, roles: ["admin", "supervisor", "viewer"] },
   { name: "Data Management", path: "/data", icon: FolderOpen, roles: ["admin", "supervisor", "field_user"] },

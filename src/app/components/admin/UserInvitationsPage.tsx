@@ -1,4 +1,5 @@
 import { useState, useEffect, useContext } from "react";
+import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { Button } from "../ui/button";
@@ -9,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
-import { UserPlus, Mail, Copy, CheckCircle, Clock, XCircle, AlertCircle, Trash2, Eye } from "lucide-react";
+import { UserPlus, Mail, Copy, CheckCircle, Clock, XCircle, AlertCircle, Trash2, Eye, ArrowLeft } from "lucide-react";
 import { Alert, AlertDescription } from "../ui/alert";
 import {
   Dialog,
@@ -33,6 +34,7 @@ interface Invitation {
 }
 
 export default function UserInvitationsPage() {
+  const navigate = useNavigate();
   const { user, accessToken } = useContext(AuthContext);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +118,7 @@ export default function UserInvitationsPage() {
   };
 
   const handleCopyInviteLink = (code: string) => {
-    const inviteLink = `${window.location.origin}/register?invite=${code}`;
+    const inviteLink = `${window.location.origin}/accept-invite?code=${code}`;
     copyToClipboard(inviteLink, "Invitation link copied to clipboard!");
   };
 
@@ -225,6 +227,16 @@ export default function UserInvitationsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Back Button */}
+      <Button
+        variant="ghost"
+        onClick={() => navigate('/admin')}
+        className="mb-4"
+      >
+        <ArrowLeft className="w-4 h-4 mr-2" />
+        Back to Admin Console
+      </Button>
+
       <div>
         <h1 className="text-3xl font-bold mb-2">User Invitations</h1>
         <p className="text-muted-foreground">

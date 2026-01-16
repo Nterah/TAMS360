@@ -1,9 +1,53 @@
+import { useState, useEffect, useContext } from "react";
+import { useNavigate } from "react-router-dom";
+import { AuthContext } from "../../App";
+import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Textarea } from "../ui/textarea";
+import { Badge } from "../ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "../ui/accordion";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
+import { 
+  Edit2, 
+  Trash2, 
+  Plus, 
+  Save, 
+  ChevronDown, 
+  ChevronUp, 
+  ArrowLeft,
+  Loader2,
+  Info,
+  Settings,
+  CheckCircle2,
+  X,
+  Edit,
+  AlertCircle
+} from "lucide-react";
+import { toast } from "sonner";
+import { Alert, AlertDescription } from "../ui/alert";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 
 interface AssetType {
   asset_type_id: string;
@@ -34,6 +78,7 @@ interface ComponentTemplateItem {
 }
 
 export default function ComponentTemplatesPage() {
+  const navigate = useNavigate();
   const { accessToken } = useContext(AuthContext);
   const [loading, setLoading] = useState(true);
   const [assetTypes, setAssetTypes] = useState<AssetType[]>([]);
@@ -264,6 +309,16 @@ export default function ComponentTemplatesPage() {
 
   return (
     <div className="space-y-6 pb-8">
+      {/* Back Button */}
+      <Button
+        variant="ghost"
+        onClick={() => navigate('/admin')}
+        className="mb-4"
+      >
+        <ArrowLeft className="w-4 h-4 mr-2" />
+        Back to Admin Console
+      </Button>
+
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold mb-2">Inspection Templates Settings</h1>
