@@ -2365,6 +2365,159 @@ app.post("/make-server-c894a9ff/admin/reorganize-data", async (c) => {
   }
 });
 
+// Helper function to generate coordinates along a road
+function generateRoadCoordinates(
+  startLat: number,
+  startLng: number,
+  endLat: number,
+  endLng: number,
+  count: number
+): Array<{ lat: number; lng: number }> {
+  const coordinates = [];
+  
+  for (let i = 0; i < count; i++) {
+    const ratio = i / (count - 1);
+    
+    // Linear interpolation with slight random variation for realism
+    const lat = startLat + (endLat - startLat) * ratio + (Math.random() - 0.5) * 0.0005;
+    const lng = startLng + (endLng - startLng) * ratio + (Math.random() - 0.5) * 0.0005;
+    
+    coordinates.push({
+      lat: parseFloat(lat.toFixed(6)),
+      lng: parseFloat(lng.toFixed(6))
+    });
+  }
+  
+  return coordinates;
+}
+
+// Update HN tenant asset coordinates to Pietermaritzburg roads
+app.post("/make-server-c894a9ff/admin/update-hn-coordinates", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabase.auth.getUser(accessToken);
+
+    if (authError || !userData?.user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    // Get user profile to check if admin
+    const userProfile = await kv.get(`user:${userData.user.id}`);
+    if (!userProfile || userProfile.role !== "admin") {
+      return c.json({ error: "Admin access required" }, 403);
+    }
+
+    console.log("📍 Updating HN tenant asset coordinates to Pietermaritzburg roads...");
+
+    // Find HN tenant
+    const allTenants = await kv.getByPrefix("tenant:");
+    const hnTenant = allTenants.find(t => t.name === "HN Consulting Engineers (Pty) Ltd");
+    
+    if (!hnTenant) {
+      return c.json({ error: "HN tenant not found" }, 404);
+    }
+
+    // Get all HN assets from database
+    const { data: hnAssets, error: assetsError } = await supabase
+      .from("tams360_assets_v")
+      .select("*")
+      .eq("tenant_id", hnTenant.id);
+
+    if (assetsError) {
+      console.error("Error fetching HN assets:", assetsError);
+      return c.json({ error: "Failed to fetch HN assets" }, 500);
+    }
+
+    if (!hnAssets || hnAssets.length === 0) {
+      return c.json({ 
+        success: false, 
+        message: "No HN assets found to update" 
+      });
+    }
+
+    console.log(`Found ${hnAssets.length} HN assets to update`);
+
+    // Generate coordinates along Pietermaritzburg roads
+    // R403: Runs east-west through Pietermaritzburg (approximately)
+    // Starting: -29.6050, 30.3500 | Ending: -29.6100, 30.4200
+    const r403Coords = generateRoadCoordinates(-29.6050, 30.3500, -29.6100, 30.4200, 70);
+
+    // M70 (Richmond Road): Runs south from Pietermaritzburg
+    // Starting: -29.6050, 30.3900 | Ending: -29.7000, 30.3850
+    const m70Coords = generateRoadCoordinates(-29.6050, 30.3900, -29.7000, 30.3850, 70);
+
+    // R33: Runs northeast from Pietermaritzburg
+    // Starting: -29.6100, 30.3950 | Ending: -29.5200, 30.4800
+    const r33Coords = generateRoadCoordinates(-29.6100, 30.3950, -29.5200, 30.4800, 60);
+
+    // Combine all coordinates
+    const allCoordinates = [
+      ...r403Coords.map(coord => ({ ...coord, road: "R403" })),
+      ...m70Coords.map(coord => ({ ...coord, road: "M70" })),
+      ...r33Coords.map(coord => ({ ...coord, road: "R33" }))
+    ];
+
+    let updatedCount = 0;
+    let failedCount = 0;
+
+    // Update each asset with new coordinates
+    for (let i = 0; i < hnAssets.length; i++) {
+      const asset = hnAssets[i];
+      const coordIndex = i % allCoordinates.length;
+      const newCoord = allCoordinates[coordIndex];
+
+      try {
+        const { error: updateError } = await supabase
+          .from("assets")
+          .update({
+            gps_lat: newCoord.lat,
+            gps_lng: newCoord.lng,
+            road_name: `HN Test Route`,
+            road_number: newCoord.road
+          })
+          .eq("asset_id", asset.asset_id);
+
+        if (updateError) {
+          console.error(`Failed to update asset ${asset.asset_ref}:`, updateError);
+          failedCount++;
+        } else {
+          updatedCount++;
+        }
+      } catch (error) {
+        console.error(`Error updating asset ${asset.asset_ref}:`, error);
+        failedCount++;
+      }
+    }
+
+    console.log(`✅ Updated ${updatedCount} HN assets with Pietermaritzburg coordinates`);
+
+    return c.json({
+      success: true,
+      message: `Successfully updated ${updatedCount} assets to Pietermaritzburg roads`,
+      updated: updatedCount,
+      failed: failedCount,
+      total: hnAssets.length,
+      roads: {
+        R403: r403Coords.length,
+        M70: m70Coords.length,
+        R33: r33Coords.length
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Error updating HN coordinates:", error);
+    return c.json({
+      error: "Failed to update coordinates",
+      details: String(error)
+    }, 500);
+  }
+});
+
 // ============================================================================
 // ASSET ROUTES
 // ============================================================================

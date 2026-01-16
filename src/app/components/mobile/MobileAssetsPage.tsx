@@ -241,9 +241,9 @@ export default function MobileAssetsPage() {
             </p>
           </div>
         ) : (
-          filteredAssets.map((asset) => (
+          filteredAssets.map((asset, index) => (
             <Card
-              key={asset.id}
+              key={asset.id || `asset-${index}`}
               className="border-2 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
               onClick={() => navigate(`/assets/${asset.id}`)}
             >

@@ -2,19 +2,14 @@ import { useState, useEffect, useContext, useRef } from "react";
 import { AuthContext } from "../../App";
 import { useTenant } from "../../contexts/TenantContext";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { 
   MapPin, 
   Navigation2, 
-  Layers,
   Crosshair,
-  ZoomIn,
-  ZoomOut,
   Loader2,
-  Package,
   ChevronRight
 } from "lucide-react";
 import { projectId } from "../../../../utils/supabase/info";
@@ -40,17 +35,6 @@ interface Asset {
   status: string;
 }
 
-// Component to handle map centering
-function MapController({ center, zoom }: { center: [number, number]; zoom: number }) {
-  const map = useMap();
-  
-  useEffect(() => {
-    map.setView(center, zoom);
-  }, [center, zoom, map]);
-  
-  return null;
-}
-
 export default function MobileMapPage() {
   const { accessToken } = useContext(AuthContext);
   const { tenantId } = useTenant();
@@ -59,11 +43,38 @@ export default function MobileMapPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([-25.7479, 28.2293]); // Pretoria default
-  const [mapZoom, setMapZoom] = useState(13);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [trackingLocation, setTrackingLocation] = useState(false);
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const markersRef = useRef<L.Marker[]>([]);
+  const userMarkerRef = useRef<L.Marker | null>(null);
+
+  // Initialize map
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return;
+
+    // Create map
+    const map = L.map(mapContainerRef.current, {
+      center: [-29.6050, 30.3900], // Pietermaritzburg default
+      zoom: 13,
+      zoomControl: false,
+    });
+
+    // Add tile layer
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(map);
+
+    mapRef.current = map;
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
 
   // Fetch assets
   useEffect(() => {
@@ -80,10 +91,13 @@ export default function MobileMapPage() {
             position.coords.longitude,
           ];
           setUserLocation(userPos);
-          setMapCenter(userPos);
+          if (mapRef.current) {
+            mapRef.current.setView(userPos, 15);
+          }
         },
         (error) => {
-          console.error("Error getting location:", error);
+          console.warn("Geolocation unavailable:", error.message || "Permission denied");
+          // Don't show error to user - it's expected that some users deny location
         },
         { enableHighAccuracy: true }
       );
@@ -95,13 +109,77 @@ export default function MobileMapPage() {
     const assetId = searchParams.get("asset");
     if (assetId && assets.length > 0) {
       const asset = assets.find(a => a.id === assetId);
-      if (asset) {
+      if (asset && mapRef.current) {
         setSelectedAsset(asset);
-        setMapCenter([asset.latitude, asset.longitude]);
-        setMapZoom(16);
+        mapRef.current.setView([asset.latitude, asset.longitude], 16);
       }
     }
   }, [searchParams, assets]);
+
+  // Update user location marker
+  useEffect(() => {
+    if (!mapRef.current || !userLocation) return;
+
+    // Remove existing user marker
+    if (userMarkerRef.current) {
+      userMarkerRef.current.remove();
+    }
+
+    // Add new user marker
+    const marker = L.marker(userLocation).addTo(mapRef.current);
+    marker.bindPopup('<div class="text-sm font-semibold">Your Location</div>');
+    userMarkerRef.current = marker;
+
+    return () => {
+      if (userMarkerRef.current) {
+        userMarkerRef.current.remove();
+        userMarkerRef.current = null;
+      }
+    };
+  }, [userLocation]);
+
+  // Update asset markers
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    // Remove existing markers
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
+
+    // Add new markers
+    assets.forEach(asset => {
+      if (!mapRef.current) return;
+
+      const icon = createCustomIcon(asset.condition);
+      const marker = L.marker([asset.latitude, asset.longitude], { icon }).addTo(mapRef.current);
+      
+      // Create popup content
+      const popupContent = `
+        <div class="min-w-[200px]">
+          <div class="font-semibold text-sm mb-1">${asset.asset_ref}</div>
+          <div class="text-xs mb-2">${asset.description}</div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold">${asset.asset_type_name}</span>
+            <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ${getConditionBgColor(asset.condition)}">${asset.condition}</span>
+          </div>
+        </div>
+      `;
+      
+      marker.bindPopup(popupContent);
+      
+      // Handle marker click
+      marker.on('click', () => {
+        setSelectedAsset(asset);
+      });
+
+      markersRef.current.push(marker);
+    });
+
+    return () => {
+      markersRef.current.forEach(marker => marker.remove());
+      markersRef.current = [];
+    };
+  }, [assets]);
 
   const fetchAssets = async () => {
     const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
@@ -115,7 +193,13 @@ export default function MobileMapPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setAssets(data.assets || []);
+        // Map gps_lat and gps_lng to latitude and longitude
+        const mappedAssets = (data.assets || []).map((asset: any) => ({
+          ...asset,
+          latitude: asset.gps_lat || asset.latitude,
+          longitude: asset.gps_lng || asset.longitude,
+        })).filter((asset: any) => asset.latitude && asset.longitude);
+        setAssets(mappedAssets);
       }
     } catch (error) {
       console.error("Failed to fetch assets:", error);
@@ -135,8 +219,9 @@ export default function MobileMapPage() {
             position.coords.longitude,
           ];
           setUserLocation(userPos);
-          setMapCenter(userPos);
-          setMapZoom(15);
+          if (mapRef.current) {
+            mapRef.current.setView(userPos, 15);
+          }
           setTrackingLocation(false);
         },
         (error) => {
@@ -145,9 +230,8 @@ export default function MobileMapPage() {
         },
         { enableHighAccuracy: true }
       );
-    } else {
-      setMapCenter(userLocation);
-      setMapZoom(15);
+    } else if (mapRef.current) {
+      mapRef.current.setView(userLocation, 15);
     }
   };
 
@@ -164,6 +248,23 @@ export default function MobileMapPage() {
         return "text-red-600";
       default:
         return "text-slate-600";
+    }
+  };
+
+  const getConditionBgColor = (condition: string) => {
+    switch (condition?.toLowerCase()) {
+      case "excellent":
+        return "bg-green-100 text-green-800";
+      case "good":
+        return "bg-blue-100 text-blue-800";
+      case "fair":
+        return "bg-yellow-100 text-yellow-800";
+      case "poor":
+        return "bg-orange-100 text-orange-800";
+      case "critical":
+        return "bg-red-100 text-red-800";
+      default:
+        return "bg-slate-100 text-slate-800";
     }
   };
 
@@ -186,62 +287,7 @@ export default function MobileMapPage() {
   return (
     <div className="relative h-screen">
       {/* Map Container */}
-      <MapContainer
-        center={mapCenter}
-        zoom={mapZoom}
-        className="h-full w-full"
-        zoomControl={false}
-        ref={mapRef}
-      >
-        <MapController center={mapCenter} zoom={mapZoom} />
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-
-        {/* User location marker */}
-        {userLocation && (
-          <Marker position={userLocation}>
-            <Popup>
-              <div className="text-sm font-semibold">Your Location</div>
-            </Popup>
-          </Marker>
-        )}
-
-        {/* Asset markers */}
-        {assets.map((asset) => (
-          <Marker
-            key={asset.id}
-            position={[asset.latitude, asset.longitude]}
-            icon={createCustomIcon(asset.condition)}
-            eventHandlers={{
-              click: () => {
-                setSelectedAsset(asset);
-              },
-            }}
-          >
-            <Popup>
-              <div className="min-w-[200px]">
-                <div className="font-semibold text-sm mb-1">{asset.asset_ref}</div>
-                <div className="text-xs mb-2">{asset.description}</div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge variant="outline" className="text-xs">{asset.asset_type_name}</Badge>
-                  <Badge className={`text-xs ${getConditionColor(asset.condition)}`}>
-                    {asset.condition}
-                  </Badge>
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() => navigate(`/assets/${asset.id}`)}
-                  className="w-full text-xs h-7"
-                >
-                  View Details
-                </Button>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
+      <div ref={mapContainerRef} className="h-full w-full" />
 
       {/* Map Controls - Right Side */}
       <div className="absolute right-4 top-20 z-[1000] flex flex-col gap-2">

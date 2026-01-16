@@ -217,9 +217,9 @@ export default function MobileInspectionsPage() {
             </p>
           </div>
         ) : (
-          filteredInspections.map((inspection) => (
+          filteredInspections.map((inspection, index) => (
             <Card
-              key={inspection.id}
+              key={inspection.id || `inspection-${index}`}
               className="border-2 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
               onClick={() => navigate(`/inspections/${inspection.id}`)}
             >

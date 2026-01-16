@@ -262,9 +262,9 @@ export default function MobileMaintenancePage() {
             </p>
           </div>
         ) : (
-          filteredRecords.map((record) => (
+          filteredRecords.map((record, index) => (
             <Card
-              key={record.id}
+              key={record.id || `maintenance-${index}`}
               className="border-2 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
               onClick={() => navigate(`/maintenance/${record.id}`)}
             >

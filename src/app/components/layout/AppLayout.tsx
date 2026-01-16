@@ -25,13 +25,13 @@ import TenantBanner from "./TenantBanner";
 
 const navigation = [
   { name: "Capture Hub", path: "/mobile/capture-hub", icon: Camera, roles: ["supervisor", "field_user"] },
-  { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin", "supervisor", "field_user", "viewer"] },
-  { name: "GIS Map", path: "/map", icon: Map, roles: ["admin", "supervisor", "field_user", "viewer"] },
-  { name: "Assets", path: "/assets", icon: Database, roles: ["admin", "supervisor", "field_user"] },
-  { name: "Inspections", path: "/inspections", icon: ClipboardCheck, roles: ["admin", "supervisor", "field_user", "viewer"] },
-  { name: "Maintenance", path: "/maintenance", icon: Wrench, roles: ["admin", "supervisor", "field_user"] },
+  { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin", "supervisor", "viewer"] },
+  { name: "GIS Map", path: "/map", icon: Map, roles: ["admin", "supervisor", "viewer"] },
+  { name: "Assets", path: "/assets", icon: Database, roles: ["admin", "supervisor"] },
+  { name: "Inspections", path: "/inspections", icon: ClipboardCheck, roles: ["admin", "supervisor", "viewer"] },
+  { name: "Maintenance", path: "/maintenance", icon: Wrench, roles: ["admin", "supervisor"] },
   { name: "Reports", path: "/reports", icon: FileBarChart, roles: ["admin", "supervisor", "viewer"] },
-  { name: "Data Management", path: "/data", icon: FolderOpen, roles: ["admin", "supervisor", "field_user"] },
+  { name: "Data Management", path: "/data", icon: FolderOpen, roles: ["admin", "supervisor"] },
   { name: "Admin Console", path: "/admin", icon: Settings, roles: ["admin"] },
 ];
 

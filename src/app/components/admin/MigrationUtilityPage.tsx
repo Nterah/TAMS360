@@ -3,7 +3,7 @@ import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { ArrowLeft, Database, RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { ArrowLeft, Database, RefreshCw, CheckCircle2, AlertCircle, Loader2, MapPin } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
@@ -15,6 +15,8 @@ export default function MigrationUtilityPage() {
   const [migrating, setMigrating] = useState(false);
   const [migrationResult, setMigrationResult] = useState<any>(null);
   const [tenantStatus, setTenantStatus] = useState<"checking" | "uuid" | "old-format" | "error">("checking");
+  const [updatingCoords, setUpdatingCoords] = useState(false);
+  const [coordsResult, setCoordsResult] = useState<any>(null);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
@@ -91,6 +93,47 @@ export default function MigrationUtilityPage() {
       setMigrationResult({ error: error.message || "Migration failed" });
     } finally {
       setMigrating(false);
+    }
+  };
+
+  const handleUpdateHNCoordinates = async () => {
+    if (!accessToken) {
+      toast.error("Not authenticated");
+      return;
+    }
+
+    if (!confirm("This will update all HN Consulting assets to have coordinates along roads in Pietermaritzburg (R403, M70, R33). Continue?")) {
+      return;
+    }
+
+    setUpdatingCoords(true);
+    setCoordsResult(null);
+
+    try {
+      const response = await fetch(`${API_URL}/admin/update-hn-coordinates`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        setCoordsResult(result);
+        toast.success(`Successfully updated ${result.updated} assets!`);
+      } else {
+        console.error("Coordinate update error:", result);
+        toast.error(`Update failed: ${result.error || "Unknown error"}`);
+        setCoordsResult({ error: result.error || "Update failed" });
+      }
+    } catch (error: any) {
+      console.error("Error updating coordinates:", error);
+      toast.error(`Error: ${error.message || "Update failed"}`);
+      setCoordsResult({ error: error.message || "Update failed" });
+    } finally {
+      setUpdatingCoords(false);
     }
   };
 
@@ -297,6 +340,100 @@ export default function MigrationUtilityPage() {
                   {migrationResult.tenantId && (
                     <div className="mt-2 font-mono text-xs">
                       New ID: {migrationResult.tenantId}
+                    </div>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Update HN Coordinates Action Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Update HN Coordinates</CardTitle>
+          <CardDescription>
+            This will update all HN Consulting assets to have coordinates along roads in Pietermaritzburg (R403, M70, R33)
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
+              What will happen:
+            </h4>
+            <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1 list-disc list-inside">
+              <li>All HN Consulting assets will be updated with new coordinates</li>
+              <li>The coordinates will be along roads in Pietermaritzburg (R403, M70, R33)</li>
+              <li>Your data will remain intact and accessible</li>
+            </ul>
+          </div>
+
+          <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+            <h4 className="font-semibold text-yellow-900 dark:text-yellow-100 mb-2">
+              ⚠️ Important Notes:
+            </h4>
+            <ul className="text-sm text-yellow-800 dark:text-yellow-200 space-y-1 list-disc list-inside">
+              <li>This operation cannot be reversed</li>
+              <li>The update typically takes less than a minute</li>
+            </ul>
+          </div>
+
+          <Button
+            onClick={handleUpdateHNCoordinates}
+            disabled={updatingCoords}
+            size="lg"
+            className="w-full"
+          >
+            {updatingCoords ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Updating...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Update Coordinates
+              </>
+            )}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Update HN Coordinates Result */}
+      {coordsResult && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              {coordsResult.error ? (
+                <>
+                  <AlertCircle className="h-5 w-5 text-destructive" />
+                  Update Failed
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-5 w-5 text-success" />
+                  Update Complete
+                </>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {coordsResult.error ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{coordsResult.error}</AlertDescription>
+              </Alert>
+            ) : (
+              <Alert>
+                <CheckCircle2 className="h-4 w-4" />
+                <AlertTitle>Success</AlertTitle>
+                <AlertDescription>
+                  {coordsResult.message || "Update completed successfully"}
+                  {coordsResult.updated && (
+                    <div className="mt-2 font-mono text-xs">
+                      Updated Assets: {coordsResult.updated}
                     </div>
                   )}
                 </AlertDescription>

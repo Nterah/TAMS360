@@ -267,38 +267,146 @@ function App() {
                   <TenantGuard>
                     <AppLayout>
                       <Routes>
-                        <Route path="/dashboard" element={<DashboardPage />} />
-                        <Route path="/map" element={<GISMapPage />} />
-                        <Route path="/assets" element={<AssetsPage />} />
-                        <Route path="/assets/map" element={<AssetsMapPage />} />
+                        <Route path="/dashboard" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor", "viewer"]} redirectTo="/mobile/capture-hub">
+                            <DashboardPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/map" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor", "viewer"]} redirectTo="/mobile/capture-hub">
+                            <GISMapPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/assets" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <AssetsPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/assets/map" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <AssetsMapPage />
+                          </RoleGuard>
+                        } />
                         <Route
                           path="/assets/inventory-log"
-                          element={<AssetInventoryLogPage />}
+                          element={
+                            <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                              <AssetInventoryLogPage />
+                            </RoleGuard>
+                          }
                         />
-                        <Route path="/assets/:assetId" element={<AssetDetailPage />} />
-                        <Route path="/inspections" element={<InspectionsPage />} />
-                        <Route path="/inspections/new" element={<NewInspectionPage />} />
-                        <Route path="/inspections/:id" element={<InspectionDetailPage />} />
-                        <Route path="/inspections/:id/edit" element={<EditInspectionPage />} />
-                        <Route path="/maintenance" element={<MaintenancePage />} />
-                        <Route path="/maintenance/:id" element={<MaintenanceDetailPage />} />
-                        <Route path="/maintenance/new" element={<NewMaintenancePage />} />
-                        <Route path="/reports" element={<ReportsPage />} />
-                        <Route path="/admin" element={<AdminConsolePage />} />
-                        <Route path="/admin/system-health" element={<SystemHealthPage />} />
-                        <Route path="/admin/component-templates" element={<ComponentTemplatesPage />} />
-                        <Route path="/admin/tenant-settings" element={<TenantSettingsPage />} />
-                        <Route path="/admin/user-invitations" element={<UserInvitationsPage />} />
-                        <Route path="/admin/users" element={<UserManagementPage />} />
-                        <Route path="/admin/diagnostics" element={<DiagnosticPage />} />
-                        <Route path="/admin/audit-log" element={<AuditLogViewer />} />
-                        <Route path="/admin/bulk-asset-assignment" element={<BulkAssetAssignmentPage />} />
-                        <Route path="/admin/migration-utility" element={<MigrationUtilityPage />} />
+                        <Route path="/assets/:assetId" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <AssetDetailPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/inspections" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor", "viewer"]} redirectTo="/mobile/capture-hub">
+                            <InspectionsPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/inspections/new" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <NewInspectionPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/inspections/:id" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor", "viewer"]} redirectTo="/mobile/capture-hub">
+                            <InspectionDetailPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/inspections/:id/edit" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <EditInspectionPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/maintenance" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <MaintenancePage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/maintenance/:id" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <MaintenanceDetailPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/maintenance/new" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <NewMaintenancePage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/reports" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor", "viewer"]} redirectTo="/mobile/capture-hub">
+                            <ReportsPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <AdminConsolePage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/system-health" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <SystemHealthPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/component-templates" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <ComponentTemplatesPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/tenant-settings" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <TenantSettingsPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/user-invitations" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <UserInvitationsPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/users" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <UserManagementPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/diagnostics" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <DiagnosticPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/audit-log" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <AuditLogViewer />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/bulk-asset-assignment" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <BulkAssetAssignmentPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/migration-utility" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <MigrationUtilityPage />
+                          </RoleGuard>
+                        } />
                         
                         {/* Data Management Routes */}
-                        <Route path="/data" element={<DataManagementPage />} />
-                        <Route path="/data/seed" element={<SeedDataPage />} />
-                        <Route path="/data/templates" element={<TemplateLibraryPage />} />
+                        <Route path="/data" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <DataManagementPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/data/seed" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <SeedDataPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/data/templates" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <TemplateLibraryPage />
+                          </RoleGuard>
+                        } />
                         
                         {/* Mobile Routes with MobileLayout */}
                         <Route 
