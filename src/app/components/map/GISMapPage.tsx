@@ -56,18 +56,8 @@ export default function GISMapPage() {
     status: "all",
   });
 
-  // Layer visibility control
-  const [assetLayerVisibility, setAssetLayerVisibility] = useState<Record<string, boolean>>({
-    "Road Sign": true,
-    Guardrail: true,
-    "Traffic Signal": true,
-    Gantry: true,
-    Fence: true,
-    "Safety Barriers": true,
-    Guidepost: true,
-    "Road Markings": true,
-    "Raised Road Markers": true,
-  });
+  // Layer visibility control - dynamically populated based on actual asset types
+  const [assetLayerVisibility, setAssetLayerVisibility] = useState<Record<string, boolean>>({});
 
   // External overlay layers (admin managed)
   const [overlayLayers, setOverlayLayers] = useState<any[]>([]);
@@ -105,6 +95,26 @@ export default function GISMapPage() {
       }
     };
   }, []);
+
+  // Dynamically initialize layer visibility when assets change
+  useEffect(() => {
+    if (assets.length > 0) {
+      const assetTypes = [...new Set(assets.map(a => a.type || a.asset_type_name).filter(Boolean))];
+      
+      setAssetLayerVisibility(prev => {
+        const updated = { ...prev };
+        
+        // Set all existing asset types to visible by default
+        assetTypes.forEach(type => {
+          if (updated[type] === undefined) {
+            updated[type] = true; // New asset types are visible by default
+          }
+        });
+        
+        return updated;
+      });
+    }
+  }, [assets]);
 
   const fetchAssets = async () => {
     try {
@@ -541,7 +551,7 @@ export default function GISMapPage() {
   };
 
   const filteredAssets = useMemo(() => {
-    return assets.filter((asset) => {
+    const filtered = assets.filter((asset) => {
       // Only show assets with coordinates
       if (!asset.latitude || !asset.longitude) return false;
 
@@ -568,11 +578,16 @@ export default function GISMapPage() {
         if (!matches) return false;
       }
       
-      // Apply layer visibility
-      if (!assetLayerVisibility[asset.type]) return false;
+      // Apply layer visibility (if layer visibility not set yet, show asset by default)
+      if (assetLayerVisibility[asset.type] === false) return false;
       
       return true;
     });
+    
+    console.log(`[GISMapPage] Filtered assets: ${filtered.length} of ${assets.length} total`);
+    console.log(`[GISMapPage] Layer visibility state:`, assetLayerVisibility);
+    
+    return filtered;
   }, [assets, filters, searchTerm, assetLayerVisibility]);
 
   // Get unique values for filter dropdowns

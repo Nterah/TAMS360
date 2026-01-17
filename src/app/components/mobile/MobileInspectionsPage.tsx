@@ -29,8 +29,7 @@ import {
 } from "../ui/select";
 
 interface Inspection {
-  id: string;
-  inspection_id: string;
+  inspection_id: string;  // Primary ID field
   asset_ref: string;
   asset_description: string;
   inspection_date: string;
@@ -164,7 +163,7 @@ export default function MobileInspectionsPage() {
           </Button>
           <Button
             size="sm"
-            onClick={() => navigate("/inspections/new")}
+            onClick={() => navigate("/mobile/inspections/new")}
             className="gap-2 flex-1"
           >
             <Plus className="w-4 h-4" />
@@ -219,9 +218,9 @@ export default function MobileInspectionsPage() {
         ) : (
           filteredInspections.map((inspection, index) => (
             <Card
-              key={inspection.id || `inspection-${index}`}
+              key={inspection.inspection_id || `inspection-${index}`}
               className="border-2 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
-              onClick={() => navigate(`/inspections/${inspection.id}`)}
+              onClick={() => navigate(`/mobile/inspections/${inspection.inspection_id}`)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-3">

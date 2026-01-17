@@ -245,7 +245,7 @@ export default function MobileAssetsPage() {
             <Card
               key={asset.id || `asset-${index}`}
               className="border-2 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
-              onClick={() => navigate(`/assets/${asset.id}`)}
+              onClick={() => navigate(`/mobile/assets/${asset.id}`)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
@@ -275,7 +275,7 @@ export default function MobileAssetsPage() {
                   <div className="flex items-center gap-1">
                     <MapPin className="w-3.5 h-3.5" />
                     <span>
-                      {asset.latitude?.toFixed(4)}, {asset.longitude?.toFixed(4)}
+                      {(asset.gps_lat || asset.latitude)?.toFixed(4)}, {(asset.gps_lng || asset.longitude)?.toFixed(4)}
                     </span>
                   </div>
                   <Button

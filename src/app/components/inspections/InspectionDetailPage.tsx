@@ -39,9 +39,13 @@ export default function InspectionDetailPage() {
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   useEffect(() => {
-    if (id) {
+    if (id && id !== 'undefined') {
       fetchInspection();
       fetchMaintenanceRecords();
+    } else {
+      console.error('Invalid inspection ID:', id);
+      toast.error('Invalid inspection ID');
+      navigate('/mobile/inspections');
     }
   }, [id]);
 

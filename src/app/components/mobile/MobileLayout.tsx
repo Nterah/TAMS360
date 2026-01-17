@@ -76,11 +76,13 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" className="h-9 w-9 p-0 relative">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-9 w-9 p-0"
+                onClick={() => navigate("/mobile/notifications")}
+              >
                 <Bell className="w-5 h-5" />
-                <Badge className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center text-[10px]">
-                  3
-                </Badge>
               </Button>
               <Button 
                 variant="ghost" 

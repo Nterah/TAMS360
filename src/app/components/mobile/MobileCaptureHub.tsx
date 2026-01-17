@@ -1,5 +1,5 @@
 import { useContext, useState } from "react";
-import { Camera, ClipboardCheck, MapPin, Plus, ScanLine, Navigation, CheckCircle2, Clock, AlertCircle, Loader2 } from "lucide-react";
+import { Camera, ClipboardCheck, MapPin, Plus, ScanLine, Navigation, CheckCircle2, Clock, AlertCircle, Loader2, Wrench } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { AuthContext } from "../../App";
@@ -95,46 +95,64 @@ export default function MobileCaptureHub() {
         </Card>
       )}
 
-      {/* Quick Actions Grid */}
-      <div className="grid grid-cols-1 gap-4 mb-6">
+      {/* Quick Actions Grid - 2x2 Layout */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        {/* New Inspection */}
+        <Card 
+          className="border-2 border-green-500 hover:shadow-lg transition-all cursor-pointer active:scale-95"
+          onClick={() => navigate("/mobile/inspections/new")}
+        >
+          <CardHeader className="pb-3">
+            <div className="flex flex-col items-center text-center gap-2">
+              <div className="w-14 h-14 rounded-full bg-green-500/10 flex items-center justify-center">
+                <ClipboardCheck className="w-7 h-7 text-green-600" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Inspection</CardTitle>
+                <CardDescription className="text-xs">
+                  DERU assessment
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+        </Card>
+
+        {/* Mobile Maintenance */}
+        <Card 
+          className="border-2 border-amber-500 hover:shadow-lg transition-all cursor-pointer active:scale-95"
+          onClick={() => navigate("/mobile/maintenance")}
+        >
+          <CardHeader className="pb-3">
+            <div className="flex flex-col items-center text-center gap-2">
+              <div className="w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center">
+                <Wrench className="w-7 h-7 text-amber-600" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Maintenance</CardTitle>
+                <CardDescription className="text-xs">
+                  Work orders
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+        </Card>
+
         {/* Capture New Asset */}
         <Card 
           className="border-2 border-primary hover:shadow-lg transition-all cursor-pointer active:scale-95"
           onClick={() => navigate("/mobile/field-capture")}
         >
           <CardHeader className="pb-3">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                <Camera className="w-6 h-6 text-primary" />
+            <div className="flex flex-col items-center text-center gap-2">
+              <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+                <Camera className="w-7 h-7 text-primary" />
               </div>
-              <div className="flex-1">
-                <CardTitle className="text-lg">Capture New Asset</CardTitle>
+              <div>
+                <CardTitle className="text-base">Assets</CardTitle>
                 <CardDescription className="text-xs">
-                  Record road sign, guardrail, or barrier
+                  Capture new
                 </CardDescription>
               </div>
-              <Plus className="w-5 h-5 text-primary" />
-            </div>
-          </CardHeader>
-        </Card>
-
-        {/* New Inspection */}
-        <Card 
-          className="border-2 border-green-500 hover:shadow-lg transition-all cursor-pointer active:scale-95"
-          onClick={() => navigate("/inspections/new")}
-        >
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-green-500/10 flex items-center justify-center">
-                <ClipboardCheck className="w-6 h-6 text-green-600" />
-              </div>
-              <div className="flex-1">
-                <CardTitle className="text-lg">New Inspection</CardTitle>
-                <CardDescription className="text-xs">
-                  Inspect existing asset condition
-                </CardDescription>
-              </div>
-              <Plus className="w-5 h-5 text-green-600" />
             </div>
           </CardHeader>
         </Card>
@@ -142,20 +160,19 @@ export default function MobileCaptureHub() {
         {/* View Nearby Assets (Map) */}
         <Card 
           className="border-2 border-blue-500 hover:shadow-lg transition-all cursor-pointer active:scale-95"
-          onClick={() => navigate("/map")}
+          onClick={() => navigate("/mobile/map")}
         >
           <CardHeader className="pb-3">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <MapPin className="w-6 h-6 text-blue-600" />
+            <div className="flex flex-col items-center text-center gap-2">
+              <div className="w-14 h-14 rounded-full bg-blue-500/10 flex items-center justify-center">
+                <MapPin className="w-7 h-7 text-blue-600" />
               </div>
-              <div className="flex-1">
-                <CardTitle className="text-lg">Nearby Assets</CardTitle>
+              <div>
+                <CardTitle className="text-base">Nearby Assets</CardTitle>
                 <CardDescription className="text-xs">
-                  View assets on map
+                  View on map
                 </CardDescription>
               </div>
-              <Navigation className="w-5 h-5 text-blue-600" />
             </div>
           </CardHeader>
         </Card>

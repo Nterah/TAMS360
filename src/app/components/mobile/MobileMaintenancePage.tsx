@@ -17,10 +17,10 @@ import {
   ChevronRight,
   Loader2,
   Calendar,
-  DollarSign,
+  Banknote,
   User
 } from "lucide-react";
-import { projectId } from "../../../../utils/supabase/info";
+import { api } from "@/app/utils/api";
 import {
   Select,
   SelectContent,
@@ -30,8 +30,7 @@ import {
 } from "../ui/select";
 
 interface MaintenanceRecord {
-  id: string;
-  maintenance_id: string;
+  maintenance_id: string;  // Primary ID field
   asset_ref: string;
   asset_description: string;
   maintenance_type: string;
@@ -88,22 +87,23 @@ export default function MobileMaintenancePage() {
   }, [searchQuery, filterStatus, filterPriority, records]);
 
   const fetchMaintenanceRecords = async () => {
-    const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
-
     try {
-      const response = await fetch(`${API_URL}/maintenance?limit=100`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setRecords(data.records || []);
-        setFilteredRecords(data.records || []);
+      const data = await api.get<{ records: MaintenanceRecord[] }>("/maintenance?limit=100");
+      
+      console.log('📊 Fetched maintenance records:', data.records?.length || 0);
+      // Debug: Check if records have maintenance_id
+      if (data.records && data.records.length > 0) {
+        console.log('🔍 First record:', data.records[0]);
+        const recordsWithoutId = data.records.filter((r: any) => !r.maintenance_id);
+        if (recordsWithoutId.length > 0) {
+          console.error('⚠️ Found records without maintenance_id:', recordsWithoutId);
+        }
       }
+      setRecords(data.records || []);
+      setFilteredRecords(data.records || []);
     } catch (error) {
       console.error("Failed to fetch maintenance records:", error);
+      // Error is already handled by the API utility (toast + logout if needed)
     } finally {
       setLoading(false);
     }
@@ -264,9 +264,16 @@ export default function MobileMaintenancePage() {
         ) : (
           filteredRecords.map((record, index) => (
             <Card
-              key={record.id || `maintenance-${index}`}
+              key={record.maintenance_id || `maintenance-${index}`}
               className="border-2 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
-              onClick={() => navigate(`/maintenance/${record.id}`)}
+              onClick={() => {
+                if (!record.maintenance_id) {
+                  console.error('❌ Cannot navigate - record has no maintenance_id:', record);
+                  return;
+                }
+                console.log('✅ Navigating to maintenance:', record.maintenance_id);
+                navigate(`/mobile/maintenance/${record.maintenance_id}`);
+              }}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-3">
@@ -302,7 +309,7 @@ export default function MobileMaintenancePage() {
                   </div>
                   {record.estimated_cost && (
                     <div className="flex items-center gap-1">
-                      <DollarSign className="w-3.5 h-3.5" />
+                      <Banknote className="w-3.5 h-3.5" />
                       <span>R {record.estimated_cost.toLocaleString()}</span>
                     </div>
                   )}

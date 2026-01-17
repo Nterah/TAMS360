@@ -33,8 +33,12 @@ export default function MaintenanceDetailPage() {
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   useEffect(() => {
-    if (id) {
+    if (id && id !== 'undefined') {
       fetchMaintenance();
+    } else {
+      console.error('Invalid maintenance ID:', id);
+      toast.error('Invalid maintenance record ID');
+      navigate('/mobile/maintenance');
     }
   }, [id]);
 
@@ -55,12 +59,15 @@ export default function MaintenanceDetailPage() {
           fetchInspectionDetails(data.maintenance.inspection_id);
         }
       } else {
+        const errorData = await response.json();
+        console.error('Error fetching maintenance record:', errorData);
         toast.error("Failed to load maintenance record");
-        navigate("/maintenance");
+        navigate("/mobile/maintenance");
       }
     } catch (error) {
-      console.error("Error fetching maintenance:", error);
+      console.error("Error fetching maintenance record:", error);
       toast.error("Error loading maintenance record");
+      navigate("/mobile/maintenance");
     } finally {
       setLoading(false);
     }
@@ -94,7 +101,7 @@ export default function MaintenanceDetailPage() {
 
       if (response.ok) {
         toast.success("Maintenance record deleted successfully");
-        navigate("/maintenance");
+        navigate("/mobile/maintenance");
       } else {
         toast.error("Failed to delete maintenance record");
       }

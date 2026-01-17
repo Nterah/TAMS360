@@ -24,12 +24,13 @@ import SyncStatusBadge from "../offline/SyncStatusBadge";
 import TenantBanner from "./TenantBanner";
 
 const navigation = [
-  { name: "Capture Hub", path: "/mobile/capture-hub", icon: Camera, roles: ["supervisor", "field_user"] },
+  { name: "Capture Hub", path: "/mobile/capture-hub", icon: Camera, roles: ["supervisor", "field_user"], mobileOnly: true },
   { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin", "supervisor", "viewer"] },
   { name: "GIS Map", path: "/map", icon: Map, roles: ["admin", "supervisor", "viewer"] },
   { name: "Assets", path: "/assets", icon: Database, roles: ["admin", "supervisor"] },
   { name: "Inspections", path: "/inspections", icon: ClipboardCheck, roles: ["admin", "supervisor", "viewer"] },
   { name: "Maintenance", path: "/maintenance", icon: Wrench, roles: ["admin", "supervisor"] },
+  { name: "Mobile Maintenance", path: "/mobile/maintenance", icon: Wrench, roles: ["field_user"], mobileOnly: true },
   { name: "Reports", path: "/reports", icon: FileBarChart, roles: ["admin", "supervisor", "viewer"] },
   { name: "Data Management", path: "/data", icon: FolderOpen, roles: ["admin", "supervisor"] },
   { name: "Admin Console", path: "/admin", icon: Settings, roles: ["admin"] },
@@ -69,123 +70,127 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col bg-sidebar border-r border-sidebar-border">
-        <div className="flex flex-col flex-1 min-h-0">
-          {/* Logo */}
-          <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
-            <Logo width={48} height={48} />
-            <div>
-              <h1 className="text-lg font-bold text-sidebar-foreground">TAMS360</h1>
-              <p className="text-xs text-sidebar-foreground/70">Road & Traffic Asset Management Suite</p>
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-            <NavLinks />
-          </nav>
-
-          {/* User Section */}
-          <div className="p-4 border-t border-sidebar-border">
-            <div className="mb-3">
-              <SyncStatusBadge />
-            </div>
-            <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-sidebar-accent">
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
-                {user?.name?.[0]?.toUpperCase() || "U"}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-sidebar-foreground truncate">{user?.name}</p>
-                <p className="text-xs text-sidebar-foreground/70 truncate capitalize">{user?.role.replace("_", " ")}</p>
+      {/* Desktop Sidebar - Hidden for field_user role */}
+      {user?.role !== "field_user" && (
+        <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col bg-sidebar border-r border-sidebar-border">
+          <div className="flex flex-col flex-1 min-h-0">
+            {/* Logo */}
+            <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
+              <Logo width={48} height={48} />
+              <div>
+                <h1 className="text-lg font-bold text-sidebar-foreground">TAMS360</h1>
+                <p className="text-xs text-sidebar-foreground/70">Road & Traffic Asset Management Suite</p>
               </div>
             </div>
-            <Button
-              onClick={logout}
-              variant="ghost"
-              className="w-full mt-2 text-sidebar-foreground hover:bg-sidebar-accent"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
+
+            {/* Navigation */}
+            <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+              <NavLinks />
+            </nav>
+
+            {/* User Section */}
+            <div className="p-4 border-t border-sidebar-border">
+              <div className="mb-3">
+                <SyncStatusBadge />
+              </div>
+              <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-sidebar-accent">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+                  {user?.name?.[0]?.toUpperCase() || "U"}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-sidebar-foreground truncate">{user?.name}</p>
+                  <p className="text-xs text-sidebar-foreground/70 truncate capitalize">{user?.role.replace("_", " ")}</p>
+                </div>
+              </div>
+              <Button
+                onClick={logout}
+                variant="ghost"
+                className="w-full mt-2 text-sidebar-foreground hover:bg-sidebar-accent"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout
+              </Button>
+            </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      )}
 
       {/* Main Content */}
-      <div className="md:pl-64">
+      <div className={user?.role === "field_user" ? "" : "md:pl-64"}>
         {/* Tenant Banner */}
         <TenantBanner />
         
         {/* Offline Banner */}
         <OfflineBanner />
         
-        {/* Mobile Header */}
-        <header className="sticky top-0 z-40 flex items-center gap-4 px-4 py-3 bg-card border-b md:hidden">
-          <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <Menu className="w-6 h-6" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-64 p-0 bg-sidebar">
-              <VisuallyHidden.Root>
-                <SheetTitle>Navigation Menu</SheetTitle>
-                <SheetDescription>
-                  Access different sections of TAMS360 application
-                </SheetDescription>
-              </VisuallyHidden.Root>
-              <div className="flex flex-col h-full">
-                {/* Logo */}
-                <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
-                  <Logo width={40} height={40} />
-                  <div>
-                    <h1 className="text-lg font-bold text-sidebar-foreground">TAMS360</h1>
-                    <p className="text-xs text-sidebar-foreground/70">Road & Traffic Asset Management Suite</p>
-                  </div>
-                </div>
-
-                {/* Navigation */}
-                <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-                  <NavLinks />
-                </nav>
-
-                {/* User Section */}
-                <div className="p-4 border-t border-sidebar-border">
-                  <div className="mb-3">
-                    <SyncStatusBadge />
-                  </div>
-                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-sidebar-accent">
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
-                      {user?.name?.[0]?.toUpperCase() || "U"}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-sidebar-foreground truncate">{user?.name}</p>
-                      <p className="text-xs text-sidebar-foreground/70 truncate capitalize">{user?.role.replace("_", " ")}</p>
+        {/* Mobile Header - Hidden for field_user on mobile (they have MobileLayout) */}
+        {user?.role !== "field_user" && (
+          <header className="sticky top-0 z-40 flex items-center gap-4 px-4 py-3 bg-card border-b md:hidden">
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <Menu className="w-6 h-6" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-64 p-0 bg-sidebar">
+                <VisuallyHidden.Root>
+                  <SheetTitle>Navigation Menu</SheetTitle>
+                  <SheetDescription>
+                    Access different sections of TAMS360 application
+                  </SheetDescription>
+                </VisuallyHidden.Root>
+                <div className="flex flex-col h-full">
+                  {/* Logo */}
+                  <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
+                    <Logo width={40} height={40} />
+                    <div>
+                      <h1 className="text-lg font-bold text-sidebar-foreground">TAMS360</h1>
+                      <p className="text-xs text-sidebar-foreground/70">Road & Traffic Asset Management Suite</p>
                     </div>
                   </div>
-                  <Button
-                    onClick={() => {
-                      logout();
-                      setMobileMenuOpen(false);
-                    }}
-                    variant="ghost"
-                    className="w-full mt-2 text-sidebar-foreground hover:bg-sidebar-accent"
-                  >
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Logout
-                  </Button>
-                </div>
-              </div>
-            </SheetContent>
-          </Sheet>
 
-          <div className="flex items-center gap-3 flex-1">
-            <Logo width={32} height={32} />
-            <h1 className="text-lg font-bold">TAMS360</h1>
-          </div>
-          <SyncStatusBadge />
-        </header>
+                  {/* Navigation */}
+                  <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+                    <NavLinks />
+                  </nav>
+
+                  {/* User Section */}
+                  <div className="p-4 border-t border-sidebar-border">
+                    <div className="mb-3">
+                      <SyncStatusBadge />
+                    </div>
+                    <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-sidebar-accent">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+                        {user?.name?.[0]?.toUpperCase() || "U"}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-sidebar-foreground truncate">{user?.name}</p>
+                        <p className="text-xs text-sidebar-foreground/70 truncate capitalize">{user?.role.replace("_", " ")}</p>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => {
+                        logout();
+                        setMobileMenuOpen(false);
+                      }}
+                      variant="ghost"
+                      className="w-full mt-2 text-sidebar-foreground hover:bg-sidebar-accent"
+                    >
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Logout
+                    </Button>
+                  </div>
+                </div>
+              </SheetContent>
+            </Sheet>
+
+            <div className="flex items-center gap-3 flex-1">
+              <Logo width={32} height={32} />
+              <h1 className="text-lg font-bold">TAMS360</h1>
+            </div>
+            <SyncStatusBadge />
+          </header>
+        )}
 
         {/* Page Content */}
         <main className="p-4 md:p-6 lg:p-8">

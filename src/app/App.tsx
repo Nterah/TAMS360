@@ -48,7 +48,11 @@ import MobileLayout from "./components/mobile/MobileLayout";
 import MobileAssetsPage from "./components/mobile/MobileAssetsPage";
 import MobileInspectionsPage from "./components/mobile/MobileInspectionsPage";
 import MobileMaintenancePage from "./components/mobile/MobileMaintenancePage";
+import MobileNewInspectionPage from "./components/mobile/MobileNewInspectionPage";
 import MobileMapPage from "./components/mobile/MobileMapPage";
+import MobileProfilePage from "./components/mobile/MobileProfilePage";
+import MobileNotificationsPage from "./components/mobile/MobileNotificationsPage";
+import MobileAssetDetailPage from "./components/mobile/MobileAssetDetailPage";
 
 // Data Management Pages
 import DataManagementPage from "./components/data/DataManagementPage";
@@ -421,9 +425,15 @@ function App() {
                         />
                         <Route path="/mobile/field-capture" element={<FieldCapturePage />} />
                         <Route path="/mobile/assets" element={<MobileLayout><MobileAssetsPage /></MobileLayout>} />
+                        <Route path="/mobile/assets/:assetId" element={<MobileLayout><MobileAssetDetailPage /></MobileLayout>} />
                         <Route path="/mobile/inspections" element={<MobileLayout><MobileInspectionsPage /></MobileLayout>} />
+                        <Route path="/mobile/inspections/new" element={<MobileLayout><MobileNewInspectionPage /></MobileLayout>} />
+                        <Route path="/mobile/inspections/:id" element={<MobileLayout><InspectionDetailPage /></MobileLayout>} />
                         <Route path="/mobile/maintenance" element={<MobileLayout><MobileMaintenancePage /></MobileLayout>} />
+                        <Route path="/mobile/maintenance/:id" element={<MobileLayout><MaintenanceDetailPage /></MobileLayout>} />
                         <Route path="/mobile/map" element={<MobileLayout><MobileMapPage /></MobileLayout>} />
+                        <Route path="/mobile/profile" element={<MobileLayout><MobileProfilePage /></MobileLayout>} />
+                        <Route path="/mobile/notifications" element={<MobileLayout><MobileNotificationsPage /></MobileLayout>} />
                         
                         <Route path="*" element={
                           <Navigate to={getDefaultLandingPage(user?.role || "viewer")} />

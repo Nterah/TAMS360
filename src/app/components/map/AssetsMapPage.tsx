@@ -240,10 +240,10 @@ export default function AssetsMapPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-[#010D13]">
-                {assets.filter(a => a.gps_latitude && a.gps_longitude).length}
+                {assets.filter(a => a.gps_lat && a.gps_lng).length}
               </div>
               <p className="text-xs text-[#455B5E] mt-1">
-                {Math.round((assets.filter(a => a.gps_latitude && a.gps_longitude).length / Math.max(assets.length, 1)) * 100)}% coverage
+                {Math.round((assets.filter(a => a.gps_lat && a.gps_lng).length / Math.max(assets.length, 1)) * 100)}% coverage
               </p>
             </CardContent>
           </Card>

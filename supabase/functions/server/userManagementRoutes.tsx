@@ -292,8 +292,8 @@ export async function toggleUserStatus(c: Context) {
       return c.json({ error: "Cannot modify users from another organization" }, 403);
     }
 
-    // Toggle status
-    const newStatus = userToUpdate.status === 'active' ? 'inactive' : 'active';
+    // Toggle status - Valid values: pending, approved, suspended
+    const newStatus = userToUpdate.status === 'approved' ? 'suspended' : 'approved';
 
     console.log("🔄 Updating status to:", newStatus, "using:", successfulSource);
 
@@ -530,7 +530,7 @@ export async function createUserDirect(c: Context) {
       email,
       name,
       role,
-      status: 'active',
+      status: 'approved',  // Valid values: pending, approved, suspended
       tier: 'basic',
       organization: adminProfile.organization || '',
       created_at: new Date().toISOString(),

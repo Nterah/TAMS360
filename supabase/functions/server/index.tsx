@@ -3907,6 +3907,14 @@ app.get("/make-server-c894a9ff/maintenance/:id", async (c) => {
     }
 
     const maintenanceId = c.req.param("id");
+    
+    // Add detailed logging
+    console.log(`🔍 GET /maintenance/:id - Requested ID: "${maintenanceId}", type: ${typeof maintenanceId}`);
+    
+    if (!maintenanceId || maintenanceId === 'undefined' || maintenanceId === 'null') {
+      console.error(`❌ Invalid maintenance ID received: "${maintenanceId}"`);
+      return c.json({ error: "Invalid maintenance ID" }, 400);
+    }
 
     // Get the maintenance record first
     const { data: record, error } = await supabase

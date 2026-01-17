@@ -74,39 +74,50 @@ export default function FieldCapturePage() {
 
   // Get current GPS location
   const getCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error("GPS not supported on this device");
-      return;
-    }
-
-    setGettingLocation(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setFormData({
-          ...formData,
-          latitude: position.coords.latitude.toFixed(6),
-          longitude: position.coords.longitude.toFixed(6),
-        });
-        setLocationAccuracy(position.coords.accuracy);
-        setGettingLocation(false);
-        toast.success("Location captured");
-      },
-      (error) => {
-        console.error("GPS error:", error);
-        toast.error("Could not get location. Enable GPS and try again.");
-        setGettingLocation(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
+    // Completely suppress geolocation errors
+    try {
+      if (!navigator.geolocation) {
+        return;
       }
-    );
+
+      setGettingLocation(true);
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setFormData({
+            ...formData,
+            latitude: position.coords.latitude.toFixed(6),
+            longitude: position.coords.longitude.toFixed(6),
+          });
+          setLocationAccuracy(position.coords.accuracy);
+          setGettingLocation(false);
+          toast.success("Location captured");
+        },
+        (error) => {
+          // Completely silent - no warnings, no errors
+          setGettingLocation(false);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        }
+      );
+    } catch (error) {
+      // Suppress all geolocation errors completely
+      setGettingLocation(false);
+    }
   };
 
-  // Auto-capture location on mount
+  // Auto-capture location on mount (optional)
   useEffect(() => {
-    getCurrentLocation();
+    // Silently attempt location - completely suppress all errors
+    try {
+      if (navigator.geolocation) {
+        getCurrentLocation();
+      }
+    } catch (error) {
+      // Suppress completely
+    }
   }, []);
 
   // Handle photo selection
@@ -138,9 +149,9 @@ export default function FieldCapturePage() {
       toast.error("Please enter description");
       return;
     }
+    // GPS is optional - warn if missing but allow save
     if (!formData.latitude || !formData.longitude) {
-      toast.error("Please capture GPS location");
-      return;
+      toast.warning("GPS location not captured. Asset will be saved without coordinates.");
     }
 
     setSaving(true);
