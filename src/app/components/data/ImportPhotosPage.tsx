@@ -202,8 +202,8 @@ export function ImportPhotosPage() {
       return;
     }
 
-    // Check if user is logged in
-    let accessToken = localStorage.getItem("access_token");
+    // Check if user is logged in (FIXED: use correct token key!)
+    let accessToken = localStorage.getItem("tams360_token");
     if (!accessToken) {
       toast.error("You must be logged in to upload photos. Please log in and try again.");
       return;
@@ -223,7 +223,7 @@ export function ImportPhotosPage() {
       // Refresh token every 20 uploads to prevent expiration
       if (i % 20 === 0 && i > 0) {
         console.log("🔄 Refreshing access token...");
-        const refreshedToken = localStorage.getItem("access_token");
+        const refreshedToken = localStorage.getItem("tams360_token");
         if (refreshedToken) {
           accessToken = refreshedToken;
         }
