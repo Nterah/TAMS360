@@ -7284,18 +7284,30 @@ app.post("/make-server-c894a9ff/photos/get-upload-url", async (c) => {
       // Asset doesn't exist - create placeholder asset for photo import
       console.log(`📸 Auto-creating asset for photo import: ${assetRef}`);
       
+      // Try to infer asset type from reference (e.g., "GS-M2-WB..." -> Gantry Structures)
+      let assetTypeId = null;
+      const assetTypePrefix = assetRef.split('-')[0]; // Extract "GS", "GR", etc.
+      
+      const { data: assetType } = await supabase
+        .from("asset_types")
+        .select("asset_type_id")
+        .eq("abbreviation", assetTypePrefix)
+        .single();
+      
+      if (assetType) {
+        assetTypeId = assetType.asset_type_id;
+        console.log(`✅ Matched asset type: ${assetTypePrefix} -> ${assetTypeId}`);
+      }
+      
       const { data: newAsset, error: createError } = await supabase
         .from("assets")
         .insert({
           asset_ref: assetRef,
           tenant_id: tenantId,
-          asset_type_id: null,
+          asset_type_id: assetTypeId,
           description: `Auto-created from photo import - ${assetRef}`,
           location_description: assetRef.split(/[-_]/)[0] || "Unknown",
           status: "active",
-          latitude: null,
-          longitude: null,
-          created_at: new Date().toISOString(),
         })
         .select("asset_id")
         .single();
