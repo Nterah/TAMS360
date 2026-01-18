@@ -7271,19 +7271,47 @@ app.post("/make-server-c894a9ff/photos/get-upload-url", async (c) => {
       return c.json({ error: "Missing required fields: assetRef, photoNumber, fileExt" }, 400);
     }
 
-    // Get asset_id from asset_ref
-    const { data: asset, error: assetError } = await supabase
+    // Get asset_id from asset_ref, or create if it doesn't exist
+    let asset;
+    const { data: existingAsset, error: assetError } = await supabase
       .from("assets")
       .select("asset_id")
       .eq("asset_ref", assetRef)
       .eq("tenant_id", tenantId)
       .single();
 
-    if (assetError || !asset) {
-      return c.json({ 
-        error: `Asset not found: ${assetRef}`,
-        hint: "Make sure the asset exists in the database with this reference number"
-      }, 404);
+    if (assetError || !existingAsset) {
+      // Asset doesn't exist - create placeholder asset for photo import
+      console.log(`📸 Auto-creating asset for photo import: ${assetRef}`);
+      
+      const { data: newAsset, error: createError } = await supabase
+        .from("assets")
+        .insert({
+          asset_ref: assetRef,
+          tenant_id: tenantId,
+          asset_type_id: null,
+          description: `Auto-created from photo import - ${assetRef}`,
+          location_description: assetRef.split(/[-_]/)[0] || "Unknown",
+          status: "active",
+          latitude: null,
+          longitude: null,
+          created_at: new Date().toISOString(),
+        })
+        .select("asset_id")
+        .single();
+
+      if (createError || !newAsset) {
+        console.error(`❌ Failed to create asset ${assetRef}:`, createError);
+        return c.json({ 
+          error: `Failed to create asset: ${assetRef}`,
+          details: createError?.message
+        }, 500);
+      }
+
+      asset = newAsset;
+      console.log(`✅ Created asset ${assetRef} with ID: ${newAsset.asset_id}`);
+    } else {
+      asset = existingAsset;
     }
 
     // Ensure inspection-photos bucket exists
