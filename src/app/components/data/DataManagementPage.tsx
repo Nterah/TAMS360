@@ -439,6 +439,32 @@ export default function DataManagementPage() {
             </CardContent>
           </Card>
 
+          {/* Import Photos Banner */}
+          <Card className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-green-200 dark:border-green-800">
+            <CardContent className="pt-6">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  <Upload className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0 mt-1" />
+                  <div>
+                    <h4 className="font-semibold mb-1 text-green-900 dark:text-green-100">
+                      📸 Bulk Import Inspection Photos
+                    </h4>
+                    <p className="text-sm text-green-800 dark:text-green-200 mb-3">
+                      Import thousands of inspection photos from your local folder structure. 
+                      Automatically matches photos to assets and classifies by component number.
+                    </p>
+                    <Link to="/data/import-photos">
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white">
+                        <Upload className="w-4 h-4 mr-2" />
+                        Import Photos (3,310 files ready)
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Import Data</CardTitle>

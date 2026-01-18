@@ -7064,4 +7064,196 @@ const withTimeout = (handler: any) => {
   };
 };
 
+// ============================================================================
+// PHOTO UPLOAD ROUTES
+// ============================================================================
+
+// Upload inspection photo
+app.post("/make-server-c894a9ff/photos/upload", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Missing authorization header" }, 401);
+    }
+
+    const accessToken = authHeader.replace("Bearer ", "");
+    
+    // Verify user and get tenant_id
+    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    // Get user's tenant_id
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("tenant_id")
+      .eq("auth_id", user.id)
+      .single();
+
+    if (userError || !userData?.tenant_id) {
+      return c.json({ error: "User not found or no tenant assigned" }, 404);
+    }
+
+    const tenantId = userData.tenant_id;
+
+    // Parse multipart form data
+    const formData = await c.req.formData();
+    const file = formData.get("file") as File;
+    const assetRef = formData.get("assetRef") as string;
+    const photoNumber = formData.get("photoNumber") as string;
+    const photoType = formData.get("photoType") as string;
+    const componentNumber = formData.get("componentNumber") as string | null;
+    const subNumber = formData.get("subNumber") as string | null;
+
+    if (!file || !assetRef || !photoNumber || !photoType) {
+      return c.json({ error: "Missing required fields" }, 400);
+    }
+
+    // Get asset_id from asset_ref
+    const { data: asset, error: assetError } = await supabase
+      .from("assets")
+      .select("asset_id")
+      .eq("asset_ref", assetRef)
+      .eq("tenant_id", tenantId)
+      .single();
+
+    if (assetError || !asset) {
+      return c.json({ 
+        error: `Asset not found: ${assetRef}`,
+        hint: "Make sure the asset exists in the database with this reference number"
+      }, 404);
+    }
+
+    // Ensure inspection-photos bucket exists
+    const bucketName = "make-c894a9ff-inspection-photos";
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
+    
+    if (!bucketExists) {
+      await supabase.storage.createBucket(bucketName, { public: false });
+    }
+
+    // Generate file path: tenant_id/asset_ref/photo_number.ext
+    const fileExt = file.name.split(".").pop();
+    const filePath = `${tenantId}/${assetRef}/${photoNumber}.${fileExt}`;
+
+    // Upload file to Supabase Storage
+    const fileBuffer = await file.arrayBuffer();
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(bucketName)
+      .upload(filePath, fileBuffer, {
+        contentType: file.type,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error("Upload error:", uploadError);
+      return c.json({ error: "Failed to upload file", details: uploadError.message }, 500);
+    }
+
+    // Get signed URL
+    const { data: urlData } = await supabase.storage
+      .from(bucketName)
+      .createSignedUrl(filePath, 31536000);
+
+    if (!urlData) {
+      return c.json({ error: "Failed to generate signed URL" }, 500);
+    }
+
+    // Store photo metadata in database
+    const photoMetadata = {
+      photo_id: uuidv4(),
+      asset_id: asset.asset_id,
+      tenant_id: tenantId,
+      photo_url: filePath,
+      photo_number: photoNumber,
+      photo_type: photoType,
+      component_number: componentNumber ? parseInt(componentNumber) : null,
+      sub_number: subNumber ? parseInt(subNumber) : null,
+      file_size: file.size,
+      file_type: file.type,
+      uploaded_at: new Date().toISOString(),
+      uploaded_by: user.id,
+    };
+
+    const { error: insertError } = await supabase
+      .from("asset_photos")
+      .insert(photoMetadata);
+
+    if (insertError) {
+      console.error("Database insert error:", insertError);
+      return c.json({ error: "Failed to save photo metadata", details: insertError.message }, 500);
+    }
+
+    // If this is the main photo, update asset
+    if (photoType === "main") {
+      await supabase
+        .from("assets")
+        .update({ main_photo_url: filePath })
+        .eq("asset_id", asset.asset_id);
+    }
+
+    return c.json({
+      success: true,
+      url: urlData.signedUrl,
+      photoId: photoMetadata.photo_id,
+      message: `Photo ${photoNumber} uploaded for ${assetRef}`,
+    });
+
+  } catch (error: any) {
+    console.error("Photo upload error:", error);
+    return c.json({ error: "Internal server error", details: error.message }, 500);
+  }
+});
+
+// Get photos for an asset
+app.get("/make-server-c894a9ff/photos/:assetId", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Missing authorization header" }, 401);
+    }
+
+    const accessToken = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
+    
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const assetId = c.req.param("assetId");
+
+    const { data: photos, error } = await supabase
+      .from("asset_photos")
+      .select("*")
+      .eq("asset_id", assetId)
+      .order("photo_number", { ascending: true });
+
+    if (error) {
+      return c.json({ error: "Failed to fetch photos", details: error.message }, 500);
+    }
+
+    const bucketName = "make-c894a9ff-inspection-photos";
+    const photosWithUrls = await Promise.all(
+      photos.map(async (photo) => {
+        const { data: urlData } = await supabase.storage
+          .from(bucketName)
+          .createSignedUrl(photo.photo_url, 3600);
+
+        return {
+          ...photo,
+          signedUrl: urlData?.signedUrl || null,
+        };
+      })
+    );
+
+    return c.json({ photos: photosWithUrls });
+
+  } catch (error: any) {
+    console.error("Fetch photos error:", error);
+    return c.json({ error: "Internal server error", details: error.message }, 500);
+  }
+});
+
 Deno.serve(withTimeout(app.fetch));

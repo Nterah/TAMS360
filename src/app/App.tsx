@@ -8,6 +8,11 @@ import { TenantProvider } from "./contexts/TenantContext";
 // Debug utilities
 import './utils/checkDatabase';
 
+// Version: 2.1.0 - Photo Import Feature Added
+import { DEPLOYMENT_VERSION } from '../FORCE_DEPLOY_TRIGGER';
+
+console.log(`[TAMS360] Running version ${DEPLOYMENT_VERSION}`);
+
 // Auth Pages
 import LoginPage from "./components/auth/LoginPage";
 import RegisterPage from "./components/auth/RegisterPage";
@@ -58,6 +63,7 @@ import MobileAssetDetailPage from "./components/mobile/MobileAssetDetailPage";
 import DataManagementPage from "./components/data/DataManagementPage";
 import SeedDataPage from "./components/data/SeedDataPage";
 import TemplateLibraryPage from "./components/data/TemplateLibraryPage";
+import { ImportPhotosPage } from "./components/data/ImportPhotosPage";
 
 // Layout
 import AppLayout from "./components/layout/AppLayout";
@@ -409,6 +415,11 @@ function App() {
                         <Route path="/data/templates" element={
                           <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
                             <TemplateLibraryPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/data/import-photos" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <ImportPhotosPage />
                           </RoleGuard>
                         } />
                         
