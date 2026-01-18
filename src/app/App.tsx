@@ -9,7 +9,7 @@ import { TenantProvider } from "./contexts/TenantContext";
 import './utils/checkDatabase';
 
 // Version: 2.1.0 - Photo Import Feature Added
-import { DEPLOYMENT_VERSION } from '../FORCE_DEPLOY_TRIGGER';
+const DEPLOYMENT_VERSION = '2.1.0';
 
 console.log(`[TAMS360] Running version ${DEPLOYMENT_VERSION}`);
 

@@ -233,8 +233,16 @@ export function ImportPhotosPage() {
         console.log(`📤 Uploading ${i + 1}/${selectedFiles.length}: ${photo.assetRef}/${photo.photoNumber}`);
 
         // 🔧 FIX: Convert folder naming (R01, R02, etc.) to database naming (001, 002, etc.)
-        const normalizedAssetRef = photo.assetRef.replace(/-R(\d+)$/i, '-$1');
-        console.log(`🔄 Asset ref: ${photo.assetRef} → ${normalizedAssetRef}`);
+        let normalizedAssetRef = photo.assetRef;
+        
+        // Check if asset ref ends with -R## (e.g., -R01, -R1, -R001)
+        const rMatch = photo.assetRef.match(/-R(\d+)$/i);
+        if (rMatch) {
+          const number = rMatch[1]; // "01" or "1" or "001"
+          const paddedNumber = number.padStart(3, '0'); // Ensure 3 digits: "001"
+          normalizedAssetRef = photo.assetRef.replace(/-R\d+$/i, `-${paddedNumber}`);
+          console.log(`🔄 Asset ref normalized: ${photo.assetRef} → ${normalizedAssetRef}`);
+        }
 
         // Step 1: Compress the image in the browser
         let fileToUpload: Blob;
@@ -447,6 +455,10 @@ export function ImportPhotosPage() {
                 directory=""
                 multiple
                 onChange={handleFolderSelect}
+                onClick={(e) => {
+                  // Reset the input so the same folder can be selected again
+                  e.currentTarget.value = '';
+                }}
                 className="hidden"
                 disabled={uploading}
               />

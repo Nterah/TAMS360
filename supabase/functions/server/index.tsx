@@ -7232,21 +7232,34 @@ app.post("/make-server-c894a9ff/photos/get-upload-url", async (c) => {
       tenantId = kvUser.tenantId;
       console.log(`✅ Found user in KV store: ${user.email}, tenant: ${tenantId}`);
     } else {
-      // Fallback to database table
+      // Fallback to database view (same as login route)
       const { data: userData, error: userError } = await supabase
-        .from("users")
+        .from("tams360_user_profiles_v")
         .select("tenant_id")
-        .eq("auth_id", user.id)
+        .eq("id", user.id)
         .single();
 
       if (!userError && userData?.tenant_id) {
         tenantId = userData.tenant_id;
-        console.log(`✅ Found user in database: ${user.email}, tenant: ${tenantId}`);
+        console.log(`✅ Found user in database view: ${user.email}, tenant: ${tenantId}`);
+      } else {
+        // Final fallback to users table
+        const { data: userTableData, error: userTableError } = await supabase
+          .from("users")
+          .select("tenant_id")
+          .eq("auth_id", user.id)
+          .single();
+
+        if (!userTableError && userTableData?.tenant_id) {
+          tenantId = userTableData.tenant_id;
+          console.log(`✅ Found user in users table: ${user.email}, tenant: ${tenantId}`);
+        }
       }
     }
 
     if (!tenantId) {
       console.error(`❌ User not found: ${user.email} (${user.id})`);
+      console.error(`Checked: KV store, tams360_user_profiles_v, users table`);
       return c.json({ error: "User not found or no tenant assigned" }, 404);
     }
 
