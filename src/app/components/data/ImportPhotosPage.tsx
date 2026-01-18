@@ -232,6 +232,10 @@ export function ImportPhotosPage() {
       try {
         console.log(`📤 Uploading ${i + 1}/${selectedFiles.length}: ${photo.assetRef}/${photo.photoNumber}`);
 
+        // 🔧 FIX: Convert folder naming (R01, R02, etc.) to database naming (001, 002, etc.)
+        const normalizedAssetRef = photo.assetRef.replace(/-R(\d+)$/i, '-$1');
+        console.log(`🔄 Asset ref: ${photo.assetRef} → ${normalizedAssetRef}`);
+
         // Step 1: Compress the image in the browser
         let fileToUpload: Blob;
         const originalSize = photo.file.size;
@@ -255,7 +259,7 @@ export function ImportPhotosPage() {
             Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
-            assetRef: photo.assetRef,
+            assetRef: normalizedAssetRef,  // Use normalized name for lookup!
             photoNumber: photo.photoNumber,
             fileExt: fileExt,
             fileType: photo.file.type,

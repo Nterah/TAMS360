@@ -7223,18 +7223,32 @@ app.post("/make-server-c894a9ff/photos/get-upload-url", async (c) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // Get user's tenant_id
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("tenant_id")
-      .eq("auth_id", user.id)
-      .single();
+    // Get user's tenant_id (CHECK BOTH KV STORE AND DATABASE!)
+    let tenantId: string | null = null;
 
-    if (userError || !userData?.tenant_id) {
-      return c.json({ error: "User not found or no tenant assigned" }, 404);
+    // First, try KV store (where most users exist)
+    const kvUser = await kv.get(`user:${user.id}`);
+    if (kvUser && kvUser.tenantId) {
+      tenantId = kvUser.tenantId;
+      console.log(`✅ Found user in KV store: ${user.email}, tenant: ${tenantId}`);
+    } else {
+      // Fallback to database table
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("tenant_id")
+        .eq("auth_id", user.id)
+        .single();
+
+      if (!userError && userData?.tenant_id) {
+        tenantId = userData.tenant_id;
+        console.log(`✅ Found user in database: ${user.email}, tenant: ${tenantId}`);
+      }
     }
 
-    const tenantId = userData.tenant_id;
+    if (!tenantId) {
+      console.error(`❌ User not found: ${user.email} (${user.id})`);
+      return c.json({ error: "User not found or no tenant assigned" }, 404);
+    }
 
     // Parse request body
     const body = await c.req.json();
