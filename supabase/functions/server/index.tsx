@@ -7207,6 +7207,183 @@ app.post("/make-server-c894a9ff/photos/upload", async (c) => {
   }
 });
 
+// NEW: Generate signed upload URL for direct browser-to-storage uploads
+app.post("/make-server-c894a9ff/photos/get-upload-url", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Missing authorization header" }, 401);
+    }
+
+    const accessToken = authHeader.replace("Bearer ", "");
+    
+    // Verify user and get tenant_id
+    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    // Get user's tenant_id
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("tenant_id")
+      .eq("auth_id", user.id)
+      .single();
+
+    if (userError || !userData?.tenant_id) {
+      return c.json({ error: "User not found or no tenant assigned" }, 404);
+    }
+
+    const tenantId = userData.tenant_id;
+
+    // Parse request body
+    const body = await c.req.json();
+    const { assetRef, photoNumber, fileExt, fileType } = body;
+
+    if (!assetRef || !photoNumber || !fileExt) {
+      return c.json({ error: "Missing required fields: assetRef, photoNumber, fileExt" }, 400);
+    }
+
+    // Get asset_id from asset_ref
+    const { data: asset, error: assetError } = await supabase
+      .from("assets")
+      .select("asset_id")
+      .eq("asset_ref", assetRef)
+      .eq("tenant_id", tenantId)
+      .single();
+
+    if (assetError || !asset) {
+      return c.json({ 
+        error: `Asset not found: ${assetRef}`,
+        hint: "Make sure the asset exists in the database with this reference number"
+      }, 404);
+    }
+
+    // Ensure inspection-photos bucket exists
+    const bucketName = "make-c894a9ff-inspection-photos";
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
+    
+    if (!bucketExists) {
+      await supabase.storage.createBucket(bucketName, { public: false });
+    }
+
+    // Generate file path: tenant_id/asset_ref/photo_number.ext
+    const filePath = `${tenantId}/${assetRef}/${photoNumber}.${fileExt}`;
+
+    // Generate signed upload URL (valid for 1 hour)
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(bucketName)
+      .createSignedUploadUrl(filePath);
+
+    if (uploadError || !uploadData) {
+      console.error("Failed to create signed upload URL:", uploadError);
+      return c.json({ error: "Failed to generate upload URL", details: uploadError?.message }, 500);
+    }
+
+    return c.json({
+      success: true,
+      uploadUrl: uploadData.signedUrl,
+      filePath: filePath,
+      token: uploadData.token,
+      assetId: asset.asset_id,
+      tenantId: tenantId,
+    });
+
+  } catch (error: any) {
+    console.error("Get upload URL error:", error);
+    return c.json({ error: "Internal server error", details: error.message }, 500);
+  }
+});
+
+// NEW: Save photo metadata after direct upload
+app.post("/make-server-c894a9ff/photos/save-metadata", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Missing authorization header" }, 401);
+    }
+
+    const accessToken = authHeader.replace("Bearer ", "");
+    
+    // Verify user
+    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    // Parse request body
+    const body = await c.req.json();
+    const { 
+      assetId, 
+      tenantId, 
+      filePath, 
+      photoNumber, 
+      photoType, 
+      componentNumber, 
+      subNumber,
+      fileSize,
+      fileType 
+    } = body;
+
+    if (!assetId || !tenantId || !filePath || !photoNumber || !photoType) {
+      return c.json({ error: "Missing required fields" }, 400);
+    }
+
+    // Ensure inspection-photos bucket exists
+    const bucketName = "make-c894a9ff-inspection-photos";
+
+    // Get signed URL for viewing
+    const { data: urlData } = await supabase.storage
+      .from(bucketName)
+      .createSignedUrl(filePath, 31536000);
+
+    // Store photo metadata in database
+    const photoMetadata = {
+      photo_id: uuidv4(),
+      asset_id: assetId,
+      tenant_id: tenantId,
+      photo_url: filePath,
+      photo_number: photoNumber,
+      photo_type: photoType,
+      component_number: componentNumber ? parseInt(componentNumber) : null,
+      sub_number: subNumber ? parseInt(subNumber) : null,
+      file_size: fileSize || null,
+      file_type: fileType || null,
+      uploaded_at: new Date().toISOString(),
+      uploaded_by: user.id,
+    };
+
+    const { error: insertError } = await supabase
+      .from("asset_photos")
+      .insert(photoMetadata);
+
+    if (insertError) {
+      console.error("Database insert error:", insertError);
+      return c.json({ error: "Failed to save photo metadata", details: insertError.message }, 500);
+    }
+
+    // If this is the main photo, update asset
+    if (photoType === "main") {
+      await supabase
+        .from("assets")
+        .update({ main_photo_url: filePath })
+        .eq("asset_id", assetId);
+    }
+
+    return c.json({
+      success: true,
+      url: urlData?.signedUrl,
+      photoId: photoMetadata.photo_id,
+      message: `Photo ${photoNumber} metadata saved`,
+    });
+
+  } catch (error: any) {
+    console.error("Save metadata error:", error);
+    return c.json({ error: "Internal server error", details: error.message }, 500);
+  }
+});
+
 // Get photos for an asset
 app.get("/make-server-c894a9ff/photos/:assetId", async (c) => {
   try {

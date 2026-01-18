@@ -10,6 +10,56 @@ import { publicAnonKey, projectId } from "/utils/supabase/info";
 
 const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
+// Helper function to compress images in the browser
+async function compressImage(file: File, maxSizeMB = 1): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        // Calculate new dimensions (max 1920x1920)
+        const maxDim = 1920;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = (height / width) * maxDim;
+            width = maxDim;
+          } else {
+            width = (width / height) * maxDim;
+            height = maxDim;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Compress to JPEG with quality adjustment
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to compress image'));
+            }
+          },
+          'image/jpeg',
+          0.8 // 80% quality
+        );
+      };
+      img.onerror = reject;
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 interface ParsedPhoto {
   file: File;
   assetRef: string;
@@ -152,87 +202,155 @@ export function ImportPhotosPage() {
       return;
     }
 
+    // Check if user is logged in
+    let accessToken = localStorage.getItem("access_token");
+    if (!accessToken) {
+      toast.error("You must be logged in to upload photos. Please log in and try again.");
+      return;
+    }
+
     setUploading(true);
     setUploadProgress(0);
     setUploadResults([]);
 
-    const accessToken = localStorage.getItem("access_token");
     const results: UploadResult[] = [];
 
-    // Upload in batches of 10
-    const batchSize = 10;
-    for (let i = 0; i < selectedFiles.length; i += batchSize) {
-      const batch = selectedFiles.slice(i, i + batchSize);
-      
-      const batchPromises = batch.map(async (photo) => {
-        try {
-          // Create form data
-          const formData = new FormData();
-          formData.append("file", photo.file);
-          formData.append("assetRef", photo.assetRef);
-          formData.append("photoNumber", photo.photoNumber);
-          formData.append("photoType", photo.photoType);
-          if (photo.componentNumber !== undefined) {
-            formData.append("componentNumber", photo.componentNumber.toString());
-          }
-          if (photo.subNumber !== undefined) {
-            formData.append("subNumber", photo.subNumber.toString());
-          }
+    // 🚀 NEW: Upload ONE photo at a time with compression
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const photo = selectedFiles[i];
+      let lastError: any = null;
 
-          const response = await fetch(`${API_URL}/photos/upload`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken || publicAnonKey}`,
-            },
-            body: formData,
-          });
-
-          if (!response.ok) {
-            let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-            try {
-              const errorData = await response.json();
-              errorMessage = errorData.error || errorData.message || errorMessage;
-              if (errorData.hint) {
-                errorMessage += ` (${errorData.hint})`;
-              }
-            } catch {
-              // If JSON parsing fails, try text
-              const errorText = await response.text();
-              if (errorText) {
-                errorMessage = errorText;
-              }
-            }
-            throw new Error(errorMessage);
-          }
-
-          const data = await response.json();
-
-          return {
-            assetRef: photo.assetRef,
-            photoNumber: photo.photoNumber,
-            success: true,
-            url: data.url,
-          };
-        } catch (error: any) {
-          console.error(`❌ Failed to upload ${photo.assetRef}/${photo.photoNumber}:`, error);
-          return {
-            assetRef: photo.assetRef,
-            photoNumber: photo.photoNumber,
-            success: false,
-            error: error.message || String(error),
-          };
+      // Refresh token every 20 uploads to prevent expiration
+      if (i % 20 === 0 && i > 0) {
+        console.log("🔄 Refreshing access token...");
+        const refreshedToken = localStorage.getItem("access_token");
+        if (refreshedToken) {
+          accessToken = refreshedToken;
         }
-      });
+      }
 
-      const batchResults = await Promise.all(batchPromises);
-      results.push(...batchResults);
+      try {
+        console.log(`📤 Uploading ${i + 1}/${selectedFiles.length}: ${photo.assetRef}/${photo.photoNumber}`);
 
-      // Update progress
-      const progress = Math.round(((i + batch.length) / selectedFiles.length) * 100);
+        // Step 1: Compress the image in the browser
+        let fileToUpload: Blob;
+        const originalSize = photo.file.size;
+        
+        try {
+          console.log(`🗜️ Compressing ${photo.file.name} (${(originalSize / 1024 / 1024).toFixed(2)}MB)`);
+          fileToUpload = await compressImage(photo.file);
+          const compressedSize = fileToUpload.size;
+          console.log(`✅ Compressed to ${(compressedSize / 1024 / 1024).toFixed(2)}MB (${((1 - compressedSize / originalSize) * 100).toFixed(0)}% reduction)`);
+        } catch (compressionError) {
+          console.warn(`⚠️ Compression failed, using original file:`, compressionError);
+          fileToUpload = photo.file;
+        }
+
+        // Step 2: Get signed upload URL from backend
+        const fileExt = photo.file.name.split(".").pop() || "jpg";
+        const urlResponse = await fetch(`${API_URL}/photos/get-upload-url`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            assetRef: photo.assetRef,
+            photoNumber: photo.photoNumber,
+            fileExt: fileExt,
+            fileType: photo.file.type,
+          }),
+        });
+
+        if (!urlResponse.ok) {
+          const errorData = await urlResponse.json();
+          
+          // If unauthorized, session expired - stop and ask user to re-login
+          if (urlResponse.status === 401) {
+            toast.error("Session expired. Please log in again and retry failed uploads.");
+            throw new Error("Session expired - please log in again");
+          }
+          
+          throw new Error(errorData.error || errorData.message || `HTTP ${urlResponse.status}`);
+        }
+
+        const { uploadUrl, filePath, assetId, tenantId } = await urlResponse.json();
+
+        // Step 3: Upload directly to Supabase Storage (bypasses Edge Function!)
+        console.log(`☁️ Uploading to storage...`);
+        const uploadResponse = await fetch(uploadUrl, {
+          method: "PUT",
+          body: fileToUpload,
+          headers: {
+            "Content-Type": photo.file.type,
+            "x-upsert": "true",
+          },
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error(`Storage upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+        }
+
+        // Step 4: Save metadata in database
+        const metadataResponse = await fetch(`${API_URL}/photos/save-metadata`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            assetId,
+            tenantId,
+            filePath,
+            photoNumber: photo.photoNumber,
+            photoType: photo.photoType,
+            componentNumber: photo.componentNumber,
+            subNumber: photo.subNumber,
+            fileSize: fileToUpload.size,
+            fileType: photo.file.type,
+          }),
+        });
+
+        if (!metadataResponse.ok) {
+          const errorData = await metadataResponse.json();
+          throw new Error(errorData.error || "Failed to save metadata");
+        }
+
+        const { url } = await metadataResponse.json();
+
+        // ✅ Success!
+        console.log(`✅ Success: ${photo.assetRef}/${photo.photoNumber}`);
+        results.push({
+          assetRef: photo.assetRef,
+          photoNumber: photo.photoNumber,
+          success: true,
+          url: url,
+        });
+
+      } catch (error: any) {
+        lastError = error;
+        console.error(`❌ Failed: ${photo.assetRef}/${photo.photoNumber}:`, error);
+        results.push({
+          assetRef: photo.assetRef,
+          photoNumber: photo.photoNumber,
+          success: false,
+          error: error.message || String(error),
+        });
+
+        // If session expired, stop uploading
+        if (error.message?.includes("Session expired")) {
+          setUploadResults([...results]);
+          setUploading(false);
+          return;
+        }
+      }
+
+      // Update progress after each photo
+      const progress = Math.round(((i + 1) / selectedFiles.length) * 100);
       setUploadProgress(progress);
+      setUploadResults([...results]); // Update results in real-time
     }
 
-    setUploadResults(results);
     setUploading(false);
 
     // Show summary
@@ -284,6 +402,17 @@ export function ImportPhotosPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {/* Session Warning */}
+            {failedCount > 200 && uploadResults.some(r => r.error?.includes("Unauthorized")) && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Session Expired:</strong> Your login session has expired. Please{" "}
+                  <strong>log out and log back in</strong>, then click "Retry Failed Photos" to continue.
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* Folder Structure Info */}
             <Alert>
               <AlertCircle className="h-4 w-4" />
@@ -418,30 +547,136 @@ export function ImportPhotosPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="max-h-96 overflow-y-auto space-y-2">
-              {uploadResults.map((result, index) => (
-                <div
-                  key={index}
-                  className={`flex items-center justify-between p-2 rounded border ${
-                    result.success ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    {result.success ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-red-600" />
-                    )}
-                    <span className="font-mono text-sm">
-                      {result.assetRef} / {result.photoNumber}
-                    </span>
+            {/* Asset Summary Stats */}
+            {(() => {
+              const assetGroups = uploadResults.reduce((acc, result) => {
+                if (!acc[result.assetRef]) {
+                  acc[result.assetRef] = [];
+                }
+                acc[result.assetRef].push(result);
+                return acc;
+              }, {} as Record<string, UploadResult[]>);
+
+              const completeAssets = Object.values(assetGroups).filter(
+                results => results.every(r => r.success)
+              ).length;
+              const partialAssets = Object.values(assetGroups).filter(
+                results => results.some(r => r.success) && results.some(r => !r.success)
+              ).length;
+              const failedAssets = Object.values(assetGroups).filter(
+                results => results.every(r => !r.success)
+              ).length;
+
+              return (
+                <div className="grid grid-cols-3 gap-4 mb-4 p-4 bg-muted/30 rounded-lg">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-600">{completeAssets}</div>
+                    <div className="text-xs text-muted-foreground">✅ Complete Assets</div>
                   </div>
-                  {result.error && (
-                    <span className="text-xs text-red-600">{result.error}</span>
-                  )}
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-yellow-600">{partialAssets}</div>
+                    <div className="text-xs text-muted-foreground">⚠️ Partial Assets</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-red-600">{failedAssets}</div>
+                    <div className="text-xs text-muted-foreground">❌ Failed Assets</div>
+                  </div>
                 </div>
-              ))}
+              );
+            })()}
+
+            {/* Grouped by Asset View */}
+            <div className="max-h-96 overflow-y-auto space-y-3">
+              {Object.entries(
+                uploadResults.reduce((acc, result) => {
+                  if (!acc[result.assetRef]) {
+                    acc[result.assetRef] = [];
+                  }
+                  acc[result.assetRef].push(result);
+                  return acc;
+                }, {} as Record<string, UploadResult[]>)
+              ).map(([assetRef, results]) => {
+                const assetSuccess = results.filter(r => r.success).length;
+                const assetFailed = results.filter(r => !r.success).length;
+                const isComplete = assetFailed === 0;
+
+                return (
+                  <div
+                    key={assetRef}
+                    className={`border rounded-lg p-3 ${
+                      isComplete ? "bg-green-50 border-green-200" : "bg-yellow-50 border-yellow-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        {isComplete ? (
+                          <CheckCircle2 className="h-5 w-5 text-green-600" />
+                        ) : (
+                          <AlertCircle className="h-5 w-5 text-yellow-600" />
+                        )}
+                        <span className="font-semibold font-mono">{assetRef}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Badge variant="outline" className="bg-white">
+                          ✅ {assetSuccess}
+                        </Badge>
+                        {assetFailed > 0 && (
+                          <Badge variant="outline" className="bg-white text-red-600">
+                            ❌ {assetFailed}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Show failed photos only */}
+                    {assetFailed > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {results
+                          .filter(r => !r.success)
+                          .map((result, idx) => (
+                            <div
+                              key={idx}
+                              className="text-xs bg-white p-2 rounded border border-red-200"
+                            >
+                              <span className="font-mono text-red-700">
+                                Photo {result.photoNumber}
+                              </span>
+                              {": "}
+                              <span className="text-red-600">{result.error}</span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+
+            {/* Retry Failed Button */}
+            {failedCount > 0 && !uploading && (
+              <div className="mt-4 pt-4 border-t">
+                <Button
+                  onClick={() => {
+                    // Filter to only failed photos
+                    const failedPhotos = uploadResults
+                      .filter(r => !r.success)
+                      .map(r => selectedFiles.find(
+                        f => f.assetRef === r.assetRef && f.photoNumber === r.photoNumber
+                      ))
+                      .filter(Boolean) as ParsedPhoto[];
+                    
+                    setSelectedFiles(failedPhotos);
+                    setUploadResults([]);
+                    toast.info(`Retrying ${failedPhotos.length} failed photos...`);
+                  }}
+                  variant="outline"
+                  className="w-full"
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Retry {failedCount} Failed Photos Only
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
