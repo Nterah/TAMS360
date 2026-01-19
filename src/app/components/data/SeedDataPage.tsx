@@ -69,7 +69,7 @@ export default function SeedDataPage() {
             <li>Asset Status (Active, Damaged, Missing, Repaired, Replaced, Decommissioned)</li>
             <li>Urgency Levels (Immediate, High, Medium, Low)</li>
             <li>Inspection Types (Routine, Incident, Verification, Compliance, Safety Audit)</li>
-            <li>Component-based Inspection Templates for each asset type with D/E/R rubrics</li>
+            <li>Inspection Templates for each asset type with D/E/R rubrics</li>
           </ul>
 
           <div className="pt-4">

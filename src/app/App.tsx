@@ -47,6 +47,7 @@ import { DiagnosticPage } from "./components/admin/DiagnosticPage";
 import { AuditLogViewer } from "./components/admin/AuditLogViewer";
 import BulkAssetAssignmentPage from "./components/admin/BulkAssetAssignmentPage";
 import MigrationUtilityPage from "./components/admin/MigrationUtilityPage";
+import UnassignedAssetsPage from "./components/admin/UnassignedAssetsPage";
 import MobileCaptureHub from "./components/mobile/MobileCaptureHub";
 import FieldCapturePage from "./components/mobile/FieldCapturePage";
 import MobileLayout from "./components/mobile/MobileLayout";
@@ -398,6 +399,11 @@ function App() {
                         <Route path="/admin/migration-utility" element={
                           <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
                             <MigrationUtilityPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/admin/unassigned-assets" element={
+                          <RoleGuard allowedRoles={["admin"]} redirectTo="/mobile/capture-hub">
+                            <UnassignedAssetsPage />
                           </RoleGuard>
                         } />
                         

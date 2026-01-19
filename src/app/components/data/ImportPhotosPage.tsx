@@ -7,8 +7,10 @@ import { Alert, AlertDescription } from "@/app/components/ui/alert";
 import { Upload, FolderOpen, Image as ImageIcon, CheckCircle2, XCircle, AlertCircle, FileImage } from "lucide-react";
 import { toast } from "sonner";
 import { publicAnonKey, projectId } from "/utils/supabase/info";
+import { createClient } from "@supabase/supabase-js";
 
 const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+const supabase = createClient(`https://${projectId}.supabase.co`, publicAnonKey);
 
 // Helper function to compress images in the browser
 async function compressImage(file: File, maxSizeMB = 1): Promise<Blob> {
@@ -202,12 +204,16 @@ export function ImportPhotosPage() {
       return;
     }
 
-    // Check if user is logged in (FIXED: use correct token key!)
-    let accessToken = localStorage.getItem("tams360_token");
-    if (!accessToken) {
+    // Get fresh access token from Supabase session
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError || !session?.access_token) {
       toast.error("You must be logged in to upload photos. Please log in and try again.");
       return;
     }
+    
+    let accessToken = session.access_token;
+    console.log("🔑 Using fresh access token from Supabase session");
 
     setUploading(true);
     setUploadProgress(0);

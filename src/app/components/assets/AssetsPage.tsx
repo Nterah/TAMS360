@@ -4,7 +4,7 @@ import { AuthContext } from "../../App";
 import { 
   Plus, Search, LayoutGrid, List, Download, Upload, Settings2, Filter, 
   Database, MapPin, TrendingUp, CheckCircle2, AlertTriangle, Clock, 
-  Banknote, Eye, Edit, Trash2, MoreVertical, X, Table as TableIcon
+  Banknote, Eye, Edit, Trash2, MoreVertical, X, TableIcon
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../ui/button";
@@ -38,7 +38,7 @@ const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"];
 const STATUSES = ["Active", "Inactive", "Needs Maintenance", "Scheduled for Replacement"];
 
 export default function AssetsPage() {
-  const { accessToken } = useContext(AuthContext);
+  const { accessToken, user } = useContext(AuthContext);
   const [assets, setAssets] = useState<any[]>([]);
   const [totalAssetCount, setTotalAssetCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
@@ -721,7 +721,31 @@ export default function AssetsPage() {
           {loading ? (
             <div className="text-center py-8">Loading assets...</div>
           ) : filteredAssets.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">No assets found</div>
+            <div className="text-center py-12">
+              <Database className="w-16 h-16 mx-auto text-muted-foreground mb-4 opacity-50" />
+              <h3 className="text-lg font-semibold mb-2">No Assets Found</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                {assets.length === 0 
+                  ? "No assets returned for this tenant."
+                  : "No assets match your current filters."
+                }
+              </p>
+              {assets.length === 0 && user?.role === "admin" && (
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/admin/unassigned-assets")}
+                >
+                  <AlertTriangle className="w-4 h-4 mr-2" />
+                  Check Unassigned Assets
+                </Button>
+              )}
+              {assets.length > 0 && (
+                <Button variant="outline" onClick={clearAllFilters}>
+                  <X className="w-4 h-4 mr-2" />
+                  Clear Filters
+                </Button>
+              )}
+            </div>
           ) : viewMode === "table" ? (
             // TABLE VIEW
             <Table>

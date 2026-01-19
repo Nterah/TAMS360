@@ -66,7 +66,7 @@ export default function SystemHealthPage() {
     // 3. Asset Types Seeded
     checks.push(await checkAssetTypes());
 
-    // 4. Component Templates
+    // 4. Inspection Templates
     checks.push(await checkComponentTemplates());
 
     // 5. User System
@@ -246,15 +246,15 @@ export default function SystemHealthPage() {
         
         if (count >= 50) {
           return {
-            name: "Component Templates",
+            name: "Inspection Templates",
             status: "pass",
-            message: `${count} component templates loaded`,
+            message: `${count} inspection templates loaded`,
             details: "All asset types have component definitions",
             critical: false,
           };
         } else if (count > 0) {
           return {
-            name: "Component Templates",
+            name: "Inspection Templates",
             status: "warning",
             message: `Only ${count} templates found`,
             details: "Some asset types may be missing components",
@@ -262,16 +262,16 @@ export default function SystemHealthPage() {
           };
         } else {
           return {
-            name: "Component Templates",
+            name: "Inspection Templates",
             status: "fail",
-            message: "No component templates found",
+            message: "No inspection templates found",
             details: "Component-based inspections require templates",
             critical: false,
           };
         }
       } else {
         return {
-          name: "Component Templates",
+          name: "Inspection Templates",
           status: "warning",
           message: "Cannot fetch templates",
           details: "Templates endpoint may not be available",
@@ -280,7 +280,7 @@ export default function SystemHealthPage() {
       }
     } catch (error) {
       return {
-        name: "Component Templates",
+        name: "Inspection Templates",
         status: "warning",
         message: "Error checking templates",
         details: error instanceof Error ? error.message : "Unknown error",

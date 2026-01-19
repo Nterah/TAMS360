@@ -323,7 +323,7 @@ export default function ComponentTemplatesPage() {
       <div>
         <h1 className="text-3xl font-bold mb-2">Inspection Templates Settings</h1>
         <p className="text-muted-foreground">
-          Configure inspection component templates for each asset type with D/E/R scoring rubrics
+          Configure inspection templates for each asset type with D/E/R scoring rubrics
         </p>
       </div>
 
@@ -335,13 +335,13 @@ export default function ComponentTemplatesPage() {
           Templates define what to inspect, how to score (Degree/Extent/Relevancy), and how to calculate urgency. 
           <br /><br />
           <strong>⚠️ Removing Unwanted Components:</strong> If you see too many generic or irrelevant components when creating a new inspection, 
-          use the delete button below to remove unwanted component template items. This will prevent them from appearing in future inspections.
+          use the delete button below to remove unwanted template items. This will prevent them from appearing in future inspections.
         </AlertDescription>
       </Alert>
 
       <Tabs defaultValue="templates" className="space-y-6">
         <TabsList>
-          <TabsTrigger value="templates">Component Templates</TabsTrigger>
+          <TabsTrigger value="templates">Inspection Templates</TabsTrigger>
           <TabsTrigger value="guide">Inspector Guide Reference</TabsTrigger>
         </TabsList>
 
@@ -351,9 +351,9 @@ export default function ComponentTemplatesPage() {
             <Card>
               <CardContent className="py-12 text-center">
                 <AlertCircle className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                <h3 className="font-semibold mb-2">No Component Templates Found</h3>
+                <h3 className="font-semibold mb-2">No Inspection Templates Found</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Component templates need to be initialized first.
+                  Inspection templates need to be initialized first.
                 </p>
                 <Button
                   onClick={async () => {
@@ -834,7 +834,7 @@ export default function ComponentTemplatesPage() {
               <div className="space-y-4 pt-4 border-t">
                 <h3 className="text-lg font-semibold">Common Asset Components by Type</h3>
                 <p className="text-sm text-muted-foreground">
-                  Each asset type has unique components to inspect. Refer to the Component Templates tab for detailed lists.
+                  Each asset type has unique components to inspect. Refer to the Inspection Templates tab for detailed lists.
                 </p>
                 
                 <div className="grid gap-3 md:grid-cols-2">
@@ -906,11 +906,11 @@ export default function ComponentTemplatesPage() {
 
               {/* How to Use Templates */}
               <div className="pt-4 border-t">
-                <h3 className="font-semibold mb-3">How to Customize Component Templates</h3>
+                <h3 className="font-semibold mb-3">How to Customize Inspection Templates</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex gap-2">
                     <Badge variant="outline" className="mt-0.5">1</Badge>
-                    <p>Go to the <strong>Component Templates</strong> tab above</p>
+                    <p>Go to the <strong>Inspection Templates</strong> tab above</p>
                   </div>
                   <div className="flex gap-2">
                     <Badge variant="outline" className="mt-0.5">2</Badge>

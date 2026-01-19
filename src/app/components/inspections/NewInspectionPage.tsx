@@ -101,10 +101,35 @@ export default function NewInspectionPage() {
 
       if (response.ok) {
         const data = await response.json();
+        
+        // Check if template is null (missing template)
+        if (!data.template) {
+          toast.error(
+            data.error || "No Inspection Template found for this Asset Type. Please contact an administrator.",
+            { duration: 8000 }
+          );
+          setComponentTemplate(null);
+          return;
+        }
+        
         setComponentTemplate(data.template);
+      } else if (response.status === 404) {
+        // Template not found
+        const data = await response.json();
+        toast.error(
+          data.error || "No Inspection Template found for this Asset Type.",
+          { duration: 8000 }
+        );
+        setComponentTemplate(null);
+      } else {
+        // Other errors
+        toast.error("Failed to load inspection template. Please try again.");
+        setComponentTemplate(null);
       }
     } catch (error) {
       console.error("Error fetching component template:", error);
+      toast.error("Failed to load inspection template. Please try again.");
+      setComponentTemplate(null);
     }
   };
 
@@ -124,7 +149,13 @@ export default function NewInspectionPage() {
 
   const handleSubmit = async () => {
     if (!formData.asset_id) {
-      alert("Please select an asset");
+      toast.error("Please select an asset");
+      return;
+    }
+    
+    // Check template exists
+    if (!componentTemplate || !componentTemplate.items || componentTemplate.items.length === 0) {
+      toast.error("Cannot save inspection - no template loaded. Please select a different asset or contact an administrator.");
       return;
     }
 
@@ -328,6 +359,31 @@ export default function NewInspectionPage() {
           repairThreshold={60}
           onScoresChange={handleComponentScoresChange}
         />
+      ) : selectedAsset && !componentTemplate ? (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="py-6">
+            <div className="flex items-center gap-3 text-red-800">
+              <AlertCircle className="h-6 w-6 flex-shrink-0" />
+              <div>
+                <h3 className="font-semibold">No Inspection Template Found</h3>
+                <p className="text-sm mt-1">
+                  No inspection template exists for asset type "{selectedAsset.asset_type_name}". 
+                  Please contact an administrator to configure the template for this asset type.
+                </p>
+                {user?.role === "admin" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => navigate("/admin/component-templates")}
+                  >
+                    Open Inspection Templates Settings
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       ) : (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">

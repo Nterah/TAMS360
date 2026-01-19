@@ -4807,7 +4807,26 @@ app.get("/make-server-c894a9ff/component-templates/:assetType", async (c) => {
       }
       
       // Define default component templates
+      /**
+       * INSPECTION TEMPLATE DEFINITIONS (User-facing name: "Inspection Templates")
+       * 
+       * Defines component lists for auto-creating templates when first accessed.
+       * 
+       * CRITICAL RULES:
+       * 1. Use ACTIVE SINGULAR asset type names as keys (e.g., "Fence", not "Fencing")
+       * 2. Deprecated names exist as aliases for backwards compatibility
+       * 3. ALL active asset types MUST have an entry here
+       * 4. Component counts must match requirements:
+       *    - Fence = 5
+       *    - Traffic Signal = 5
+       *    - Road Marking = 2
+       *    - Raised Road Marker = 2
+       *    - Others = 6
+       * 5. Never use generic names like "Component 1" - always be specific
+       */
       const defaultTemplates: Record<string, Array<{ name: string; description: string }>> = {
+        // ===== ACTIVE ASSET TYPES (Singular Names) =====
+        
         "Gantry": [
           { name: "Structural Support", description: "Gantry posts, beams, and foundations" },
           { name: "Sign Panels", description: "Sign face condition and visibility" },
@@ -4824,15 +4843,7 @@ app.get("/make-server-c894a9ff/component-templates/:assetType", async (c) => {
           { name: "Face Fasteners", description: "Loose, missing, rusted brackets or fixings" },
           { name: "Nearby Vegetation", description: "Grass, bushes, trees blocking or partially obscuring sign" },
         ],
-        "Traffic Sign": [
-          { name: "Foundation", description: "Cracks, erosion, movement, exposed base" },
-          { name: "Holding Bolts / Base Plates", description: "Loose, missing, corroded bolts/plates" },
-          { name: "Post / Vertical Member", description: "Leaning, bent, corroded, impact damaged posts" },
-          { name: "Face / Panel", description: "Fading, damage, peeling, vandalism, unreadable message" },
-          { name: "Face Fasteners", description: "Loose, missing, rusted brackets or fixings" },
-          { name: "Nearby Vegetation", description: "Grass, bushes, trees blocking or partially obscuring sign" },
-        ],
-        "Road Signage & Guide Post": [
+        "Road Sign": [
           { name: "Foundation", description: "Cracks, erosion, movement, exposed base" },
           { name: "Holding Bolts / Base Plates", description: "Loose, missing, corroded bolts/plates" },
           { name: "Post / Vertical Member", description: "Leaning, bent, corroded, impact damaged posts" },
@@ -4863,7 +4874,7 @@ app.get("/make-server-c894a9ff/component-templates/:assetType", async (c) => {
           { name: "Steel Railings (Top element)", description: "Look for rust, dents, bending, breaks, disjointed sections or any missing parts" },
           { name: "Railing Fasteners / Joints", description: "Look for sections with multiple missing, loose, rusted or broken fasteners, bolts, clips, welds or connectors" },
         ],
-        "Fencing": [
+        "Fence": [
           { name: "Foundation", description: "Check for recurring signs of cracks, leaning posts, or unstable footing" },
           { name: "Posts / Vertical Members", description: "Check for multiple posts which are bent, leaning, broken, missing, or rusted" },
           { name: "Fence Face (wire mesh, palisade, panels)", description: "Check for broken holes, mesh/panels, sagging, or large gaps" },
@@ -4874,21 +4885,83 @@ app.get("/make-server-c894a9ff/component-templates/:assetType", async (c) => {
           { name: "Line / Marking Condition", description: "Check for fading, cracking, missing lines, or loss of retro-reflectivity. Evaluate all types: centreline, edge lines, stop lines, arrows, etc." },
           { name: "Nearby Vegetation", description: "Check for grass, shrubs, or tree shadows obscuring markings. Including growth from road shoulders and medians" },
         ],
-        "Road Paint Markings": [
-          { name: "Line / Marking Condition", description: "Check for fading, cracking, missing lines, or loss of retro-reflectivity. Evaluate all types: centreline, edge lines, stop lines, arrows, etc." },
-          { name: "Nearby Vegetation", description: "Check for grass, shrubs, or tree shadows obscuring markings. Including growth from road shoulders and medians" },
-        ],
-        "Raised Road Markers": [
+        "Raised Road Marker": [
           { name: "Face (Marker condition)", description: "Inspect Raised Road Markers (RRM) for visibility, physical damage, detachment, fading, or missing reflectors. Includes both centreline and lane markings" },
           { name: "Nearby Vegetation", description: "Look for encroaching grass, debris, or shrubs that cover or obscure RRMs" },
         ],
+        "Guidepost": [
+          { name: "Foundation", description: "Cracks, erosion, movement, exposed base" },
+          { name: "Holding Bolts / Base Plates", description: "Loose, missing, corroded bolts/plates" },
+          { name: "Post / Vertical Member", description: "Leaning, bent, corroded, impact damaged posts" },
+          { name: "Reflective Markers", description: "Missing, damaged, or faded reflective elements" },
+          { name: "Face Fasteners", description: "Loose, missing, rusted brackets or fixings" },
+          { name: "Nearby Vegetation", description: "Grass, bushes, trees blocking or partially obscuring guidepost" },
+        ],
+        
+        // ===== DEPRECATED NAMES (Aliases for Backwards Compatibility) =====
+        
+        "Fencing": [ // DEPRECATED - Use "Fence"
+          { name: "Foundation", description: "Check for recurring signs of cracks, leaning posts, or unstable footing" },
+          { name: "Posts / Vertical Members", description: "Check for multiple posts which are bent, leaning, broken, missing, or rusted" },
+          { name: "Fence Face (wire mesh, palisade, panels)", description: "Check for broken holes, mesh/panels, sagging, or large gaps" },
+          { name: "Face Fasteners (clips, brackets, ties)", description: "Check if there are connecting bolts, clips, or ties missing or loose in many places" },
+          { name: "Nearby Vegetation", description: "Check if sections are blocked, damaged, or hidden by trees, shrubs, or grass" },
+        ],
+        "Road Paint Markings": [ // DEPRECATED - Use "Road Marking"
+          { name: "Line / Marking Condition", description: "Check for fading, cracking, missing lines, or loss of retro-reflectivity. Evaluate all types: centreline, edge lines, stop lines, arrows, etc." },
+          { name: "Nearby Vegetation", description: "Check for grass, shrubs, or tree shadows obscuring markings. Including growth from road shoulders and medians" },
+        ],
+        "Raised Road Markers": [ // DEPRECATED - Use "Raised Road Marker" (singular)
+          { name: "Face (Marker condition)", description: "Inspect Raised Road Markers (RRM) for visibility, physical damage, detachment, fading, or missing reflectors. Includes both centreline and lane markings" },
+          { name: "Nearby Vegetation", description: "Look for encroaching grass, debris, or shrubs that cover or obscure RRMs" },
+        ],
+        "Traffic Sign": [ // DEPRECATED - Use "Road Sign" or "Signage"
+          { name: "Foundation", description: "Cracks, erosion, movement, exposed base" },
+          { name: "Holding Bolts / Base Plates", description: "Loose, missing, corroded bolts/plates" },
+          { name: "Post / Vertical Member", description: "Leaning, bent, corroded, impact damaged posts" },
+          { name: "Face / Panel", description: "Fading, damage, peeling, vandalism, unreadable message" },
+          { name: "Face Fasteners", description: "Loose, missing, rusted brackets or fixings" },
+          { name: "Nearby Vegetation", description: "Grass, bushes, trees blocking or partially obscuring sign" },
+        ],
+        "Road Signage & Guide Post": [ // DEPRECATED - Use "Road Sign" and "Guidepost" separately
+          { name: "Foundation", description: "Cracks, erosion, movement, exposed base" },
+          { name: "Holding Bolts / Base Plates", description: "Loose, missing, corroded bolts/plates" },
+          { name: "Post / Vertical Member", description: "Leaning, bent, corroded, impact damaged posts" },
+          { name: "Face / Panel", description: "Fading, damage, peeling, vandalism, unreadable message" },
+          { name: "Face Fasteners", description: "Loose, missing, rusted brackets or fixings" },
+          { name: "Nearby Vegetation", description: "Grass, bushes, trees blocking or partially obscuring sign" },
+        ],
       };
 
-      const components = defaultTemplates[assetTypeName] || [
-        { name: "Component 1", description: "Primary component" },
-        { name: "Component 2", description: "Secondary component" },
-        { name: "Component 3", description: "Tertiary component" },
-      ];
+      // Try exact match first
+      let components = defaultTemplates[assetTypeName];
+
+      // If not found, try case-insensitive match
+      if (!components) {
+        const assetTypeNameLower = assetTypeName.toLowerCase();
+        const matchedKey = Object.keys(defaultTemplates).find(
+          key => key.toLowerCase() === assetTypeNameLower
+        );
+        if (matchedKey) {
+          components = defaultTemplates[matchedKey];
+          console.log(`[Template] Matched "${assetTypeName}" to "${matchedKey}" (case-insensitive)`);
+        }
+      }
+
+      // CRITICAL: Do NOT create generic "Component 1" templates
+      // If we reach here, it means an asset type is missing from defaultTemplates
+      // Return 404 so admins can add proper template definition
+      if (!components) {
+        console.error(`[Template] ❌ CRITICAL: No template definition found for "${assetTypeName}"`);
+        console.error(`[Template] Available templates: ${Object.keys(defaultTemplates).join(", ")}`);
+        
+        return c.json({ 
+          template: null, 
+          error: `No Inspection Template found for "${assetTypeName}". Please contact an administrator to add template definitions for this asset type.`,
+          missingAssetType: assetTypeName,
+          availableTypes: Object.keys(defaultTemplates)
+        }, 404);
+      }
 
       // Create the template - FIXED: removed schema prefix for PostgREST compatibility
       console.log(`[Template] Creating template for ${assetTypeName} with asset_type_id: ${assetTypeId}`);
@@ -5151,11 +5224,29 @@ app.post("/make-server-c894a9ff/component-templates/initialize", async (c) => {
       }
 
       // Get default components for this asset type
-      const components = defaultTemplates[assetType.name] || [
-        { name: "Component 1", description: "Primary component" },
-        { name: "Component 2", description: "Secondary component" },
-        { name: "Component 3", description: "Tertiary component" },
-      ];
+      let components = defaultTemplates[assetType.name];
+
+      // If not found, try case-insensitive match
+      if (!components) {
+        const assetTypeNameLower = assetType.name.toLowerCase();
+        const matchedKey = Object.keys(defaultTemplates).find(
+          key => key.toLowerCase() === assetTypeNameLower
+        );
+        if (matchedKey) {
+          components = defaultTemplates[matchedKey];
+          console.log(`[Template Init] Matched "${assetType.name}" to "${matchedKey}" (case-insensitive)`);
+        }
+      }
+
+      // If still no match, log warning and skip (do not create generic template)
+      if (!components) {
+        console.warn(`[Template Init] ⚠️ No template definition found for "${assetType.name}" - skipping. Add to defaultTemplates to enable.`);
+        errors.push({ 
+          assetType: assetType.name, 
+          error: `No template definition found. Add "${assetType.name}" to defaultTemplates in code.` 
+        });
+        continue;
+      }
 
       // Create template - FIXED: removed schema prefix for PostgREST compatibility
       const { data: template, error: templateError } = await supabase
@@ -5695,13 +5786,21 @@ app.get("/make-server-c894a9ff/maintenance", async (c) => {
 // ENHANCED INSPECTION ROUTES
 // ============================================================================
 
-// Get component template by asset type name (legacy endpoint - redirects to new endpoint)
+// Get component template by asset type name (legacy endpoint - DEPRECATED)
 app.get("/make-server-c894a9ff/inspections/component-template", async (c) => {
+  console.warn("⚠️ DEPRECATED ENDPOINT: /inspections/component-template - Use GET /component-templates/:assetType instead");
+  
   try {
     const assetTypeName = c.req.query("assetType");
     
     if (!assetTypeName) {
-      return c.json({ error: "assetType query parameter required" }, 400);
+      return c.json({ 
+        error: "assetType query parameter required",
+        _deprecation: {
+          message: "This endpoint is deprecated. Use GET /component-templates/:assetType instead",
+          sunset: "2026-12-31"
+        }
+      }, 400);
     }
 
     // Redirect to the new endpoint logic
@@ -7161,43 +7260,38 @@ app.post("/make-server-c894a9ff/photos/upload", async (c) => {
       return c.json({ error: "Failed to generate signed URL" }, 500);
     }
 
-    // Store photo metadata in database
-    const photoMetadata = {
-      photo_id: uuidv4(),
-      asset_id: asset.asset_id,
-      tenant_id: tenantId,
-      photo_url: filePath,
-      photo_number: photoNumber,
-      photo_type: photoType,
-      component_number: componentNumber ? parseInt(componentNumber) : null,
-      sub_number: subNumber ? parseInt(subNumber) : null,
-      file_size: file.size,
-      file_type: file.type,
-      uploaded_at: new Date().toISOString(),
-      uploaded_by: user.id,
-    };
+    // Store photo metadata using RPC (upsert behavior)
+    const { data: photoId, error: rpcError } = await supabase.rpc(
+      "tams360_upsert_asset_photo",
+      {
+        p_reference_number: assetRef,
+        p_tenant_id: tenantId,
+        p_photo_url: filePath,
+        p_photo_number: String(photoNumber),
+        p_photo_type: photoType,
+        p_component_number: componentNumber ? parseInt(componentNumber) : null,
+        p_sub_number: subNumber ? parseInt(subNumber) : null,
+        p_file_size: file.size,
+        p_file_type: file.type,
+        p_caption: null,
+        p_uploaded_by: user.id,
+      }
+    );
 
-    const { error: insertError } = await supabase
-      .from("asset_photos")
-      .insert(photoMetadata);
-
-    if (insertError) {
-      console.error("Database insert error:", insertError);
-      return c.json({ error: "Failed to save photo metadata", details: insertError.message }, 500);
+    if (rpcError) {
+      console.error("Photo RPC error:", rpcError);
+      return c.json({ 
+        error: "Failed to save photo metadata", 
+        details: rpcError.message
+      }, 500);
     }
 
-    // If this is the main photo, update asset
-    if (photoType === "main") {
-      await supabase
-        .from("assets")
-        .update({ main_photo_url: filePath })
-        .eq("asset_id", asset.asset_id);
-    }
+    console.log(`Photo saved successfully - ID: ${photoId}`);
 
     return c.json({
       success: true,
       url: urlData.signedUrl,
-      photoId: photoMetadata.photo_id,
+      photo_id: photoId,
       message: `Photo ${photoNumber} uploaded for ${assetRef}`,
     });
 
@@ -7276,7 +7370,7 @@ app.post("/make-server-c894a9ff/photos/get-upload-url", async (c) => {
     const { data: existingAsset, error: assetError } = await supabase
       .from("assets")
       .select("asset_id")
-      .eq("asset_ref", assetRef)
+      .eq("reference_number", assetRef)
       .eq("tenant_id", tenantId)
       .single();
 
@@ -7299,24 +7393,31 @@ app.post("/make-server-c894a9ff/photos/get-upload-url", async (c) => {
         console.log(`✅ Matched asset type: ${assetTypePrefix} -> ${assetTypeId}`);
       }
       
+      // Get the default "Active" status_id
+      const { data: activeStatus } = await supabase
+        .from("asset_status")
+        .select("status_id")
+        .eq("name", "Active")
+        .single();
+      
       const { data: newAsset, error: createError } = await supabase
         .from("assets")
         .insert({
-          asset_ref: assetRef,
+          reference_number: assetRef,
           tenant_id: tenantId,
           asset_type_id: assetTypeId,
-          description: `Auto-created from photo import - ${assetRef}`,
-          location_description: assetRef.split(/[-_]/)[0] || "Unknown",
-          status: "active",
+          status_id: activeStatus?.status_id || 1,
         })
         .select("asset_id")
         .single();
 
       if (createError || !newAsset) {
-        console.error(`❌ Failed to create asset ${assetRef}:`, createError);
+        console.error(`❌ Failed to create asset ${assetRef}:`, JSON.stringify(createError, null, 2));
         return c.json({ 
           error: `Failed to create asset: ${assetRef}`,
-          details: createError?.message
+          details: createError?.message,
+          code: createError?.code,
+          hint: createError?.hint
         }, 500);
       }
 
@@ -7496,6 +7597,143 @@ app.get("/make-server-c894a9ff/photos/:assetId", async (c) => {
 
   } catch (error: any) {
     console.error("Fetch photos error:", error);
+    return c.json({ error: "Internal server error", details: error.message }, 500);
+  }
+});
+
+// ============================================================================
+// ADMIN ROUTES - Unassigned Assets (Tenant Migration)
+// ============================================================================
+
+// Get unassigned assets (admin only)
+app.get("/make-server-c894a9ff/admin/unassigned-assets", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile to check role
+    const { data: userProfile, error: profileError } = await supabase
+      .from('tams360_user_profiles_v')
+      .select('id, tenant_id, role')
+      .eq('id', userData.user.id)
+      .single();
+
+    if (profileError || !userProfile) {
+      return c.json({ error: "User profile not found" }, 403);
+    }
+
+    // Only admins can access unassigned assets
+    if (userProfile.role !== 'admin') {
+      return c.json({ error: "Admin access required" }, 403);
+    }
+
+    // Call RPC to get unassigned assets
+    const { data: unassignedAssets, error: rpcError } = await supabase
+      .rpc('tams360_get_unassigned_assets');
+
+    if (rpcError) {
+      console.error("RPC error getting unassigned assets:", rpcError);
+      return c.json({ 
+        error: "Failed to fetch unassigned assets", 
+        details: rpcError.message,
+        hint: "Ensure the RPC function tams360_get_unassigned_assets exists in the database"
+      }, 500);
+    }
+
+    return c.json({ 
+      assets: unassignedAssets || [],
+      count: unassignedAssets?.length || 0
+    });
+
+  } catch (error: any) {
+    console.error("Error fetching unassigned assets:", error);
+    return c.json({ error: "Internal server error", details: error.message }, 500);
+  }
+});
+
+// Claim unassigned assets (admin only)
+app.post("/make-server-c894a9ff/admin/claim-assets", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile to check role and tenant_id
+    const { data: userProfile, error: profileError } = await supabase
+      .from('tams360_user_profiles_v')
+      .select('id, tenant_id, role')
+      .eq('id', userData.user.id)
+      .single();
+
+    if (profileError || !userProfile || !userProfile.tenant_id) {
+      return c.json({ error: "User profile not found or no tenant assigned" }, 403);
+    }
+
+    // Only admins can claim assets
+    if (userProfile.role !== 'admin') {
+      return c.json({ error: "Admin access required" }, 403);
+    }
+
+    // Get asset IDs from request body
+    const body = await c.req.json();
+    const { assetIds } = body;
+
+    if (!assetIds || !Array.isArray(assetIds) || assetIds.length === 0) {
+      return c.json({ error: "assetIds array required" }, 400);
+    }
+
+    console.log(`Admin ${userData.user.id} claiming ${assetIds.length} assets to tenant ${userProfile.tenant_id}`);
+
+    // Call RPC to claim assets
+    const { data: claimResults, error: rpcError } = await supabase
+      .rpc('tams360_claim_assets', {
+        p_asset_ids: assetIds,
+        p_tenant_id: userProfile.tenant_id,
+        p_claimed_by: userData.user.id
+      });
+
+    if (rpcError) {
+      console.error("RPC error claiming assets:", rpcError);
+      return c.json({ 
+        error: "Failed to claim assets", 
+        details: rpcError.message,
+        hint: "Ensure the RPC function tams360_claim_assets exists in the database"
+      }, 500);
+    }
+
+    // Count successes and failures
+    const results = claimResults || [];
+    const successful = results.filter((r: any) => r.success);
+    const failed = results.filter((r: any) => !r.success);
+
+    console.log(`Claimed ${successful.length} assets successfully, ${failed.length} failed`);
+
+    return c.json({ 
+      success: true,
+      claimed: successful.length,
+      failed: failed.length,
+      results: results
+    });
+
+  } catch (error: any) {
+    console.error("Error claiming assets:", error);
     return c.json({ error: "Internal server error", details: error.message }, 500);
   }
 });
