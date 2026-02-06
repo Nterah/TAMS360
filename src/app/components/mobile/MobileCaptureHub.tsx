@@ -110,7 +110,7 @@ export default function MobileCaptureHub() {
               <div>
                 <CardTitle className="text-base">Inspection</CardTitle>
                 <CardDescription className="text-xs">
-                  DERU assessment
+                  Component-based assessment
                 </CardDescription>
               </div>
             </div>

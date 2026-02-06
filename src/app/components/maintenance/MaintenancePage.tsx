@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { Wrench, Plus, TrendingUp, Calendar, User, Filter, X, Banknote, LayoutGrid, Table as TableIcon, Eye, Edit, Trash2, MoreVertical } from "lucide-react";
+import { Wrench, Plus, TrendingUp, Calendar, User, Filter, X, Banknote, LayoutGrid, Table as TableIcon, Eye, Edit, Trash2, MoreVertical, Search } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Label } from "../ui/label";
@@ -42,6 +42,7 @@ export default function MaintenancePage() {
 
   // Filter states
   const [showFilters, setShowFilters] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterDateFrom, setFilterDateFrom] = useState<string>("");
   const [filterDateTo, setFilterDateTo] = useState<string>("");
@@ -140,6 +141,16 @@ export default function MaintenancePage() {
 
   // Filter logic
   const filteredRecords = maintenanceRecords.filter((record) => {
+    // Search term filter
+    const matchesSearch = 
+      record.asset_ref?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.maintenance_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.technician_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.asset_type_name?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    if (searchTerm && !matchesSearch) return false;
+
     // Status filter
     if (filterStatus !== "all" && record.status !== filterStatus) return false;
 
@@ -272,6 +283,11 @@ export default function MaintenancePage() {
               {viewMode === "table" && (
                 <ColumnCustomizer columns={columns} onColumnsChange={setColumns} />
               )}
+
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search maintenance..." className="pl-8 w-[300px]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              </div>
 
               <Button
                 variant={showFilters ? "default" : "outline"}

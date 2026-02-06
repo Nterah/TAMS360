@@ -4,7 +4,7 @@ import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { ClipboardCheck, Plus, Calendar, User, FileText, AlertTriangle, TrendingUp, MoreVertical, Eye, Edit, Trash2, Clock, Banknote, Filter, X, LayoutGrid, Table as TableIcon } from "lucide-react";
+import { ClipboardCheck, Plus, Calendar, User, FileText, AlertTriangle, TrendingUp, MoreVertical, Eye, Edit, Trash2, Clock, Banknote, Filter, X, LayoutGrid, Table as TableIcon, Search } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator } from "../ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Label } from "../ui/label";
@@ -47,6 +47,7 @@ export default function InspectionsPage() {
 
   // Filter states
   const [showFilters, setShowFilters] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState<string>("");
   const [filterDateTo, setFilterDateTo] = useState<string>("");
   const [filterInspector, setFilterInspector] = useState<string>("all");
@@ -217,6 +218,16 @@ export default function InspectionsPage() {
 
   // Filter logic
   const filteredInspections = inspections.filter((inspection) => {
+    // Search term filter
+    const matchesSearch = 
+      inspection.asset_ref?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      inspection.inspector_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      inspection.asset_type_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      inspection.finding_summary?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      inspection.inspection_type?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    if (searchTerm && !matchesSearch) return false;
+
     // Date range filter
     if (filterDateFrom) {
       const inspectionDate = new Date(inspection.inspection_date);
@@ -284,7 +295,7 @@ export default function InspectionsPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold mb-2">Asset Inspections</h1>
-          <p className="text-muted-foreground">Component-based inspections with CI/DERU scoring (Defect-Extent-Relevancy-Urgency)</p>
+          <p className="text-muted-foreground">Component-based inspections with Conditional Index scoring and urgency assessment</p>
         </div>
         <Button onClick={() => navigate("/inspections/new")}>
           <Plus className="w-4 h-4 mr-2" />
@@ -348,7 +359,7 @@ export default function InspectionsPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <CardTitle>Recent Inspections</CardTitle>
-              <CardDescription>{filteredInspections.length} of {inspections.length} inspections • Latest inspection records with CI/DERU scoring</CardDescription>
+              <CardDescription>{filteredInspections.length} of {inspections.length} inspections • Component-based condition assessment</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               {/* View Toggle */}
@@ -370,6 +381,11 @@ export default function InspectionsPage() {
               {viewMode === "table" && (
                 <ColumnCustomizer columns={columns} onColumnsChange={setColumns} />
               )}
+
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search inspections..." className="pl-8 w-[300px]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              </div>
 
               <Button
                 variant={showFilters ? "default" : "outline"}

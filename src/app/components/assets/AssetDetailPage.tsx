@@ -22,7 +22,8 @@ import {
   CheckCircle2,
   Clock,
   TrendingDown,
-  Loader2
+  Loader2,
+  Image as ImageIcon
 } from "lucide-react";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
@@ -35,6 +36,8 @@ export default function AssetDetailPage() {
   const [inspections, setInspections] = useState<any[]>([]);
   const [maintenance, setMaintenance] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [photos, setPhotos] = useState<any[]>([]);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
@@ -43,6 +46,7 @@ export default function AssetDetailPage() {
       fetchAssetDetails();
       fetchAssetInspections();
       fetchAssetMaintenance();
+      fetchAssetPhotos();
     }
   }, [assetId]);
 
@@ -114,6 +118,37 @@ export default function AssetDetailPage() {
     }
   };
 
+  const fetchAssetPhotos = async () => {
+    try {
+      console.log(`[Photos] Fetching photos for asset ${assetId}...`);
+      console.log(`[Photos] Asset ref: ${asset?.asset_ref || 'unknown'}`);
+      
+      const response = await fetch(`${API_URL}/assets/${assetId}/photos`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      console.log(`[Photos] Response status: ${response.status}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`[Photos] Response data:`, data);
+        console.log(`[Photos] Found ${data.photos?.length || 0} photos`);
+        setPhotos(data.photos || []);
+      } else {
+        const error = await response.json();
+        console.error(`[Photos] Error response:`, error);
+        console.error(`[Photos] Error code:`, error.errorCode);
+        console.error(`[Photos] Error details:`, error.errorDetails);
+        setPhotoError(error.error || 'Failed to load photos');
+      }
+    } catch (error) {
+      console.error("[Photos] Exception fetching photos:", error);
+      setPhotoError('Failed to load photos');
+    }
+  };
+
   const handleDelete = async () => {
     if (!confirm("Are you sure you want to delete this asset?")) return;
 
@@ -150,12 +185,24 @@ export default function AssetDetailPage() {
   };
 
   const getUrgencyBadge = (urgency: any) => {
-    if (!urgency) return <Badge variant="outline">No Data</Badge>;
+    if (!urgency) return <Badge variant="outline">No Data</Badge>; 
+    
+    // Handle "R" (Record Only) - should be light grey
+    if (urgency === "R") return <Badge className="bg-slate-300 text-slate-800">Record Only</Badge>;
+    
+    // Handle "U" (Unable to Inspect)
+    if (urgency === "U") return <Badge className="bg-slate-400 text-white">Unable to Inspect</Badge>;
+    
+    // Handle numeric urgency levels
     const urgencyNum = typeof urgency === 'string' ? parseInt(urgency) : urgency;
     if (urgencyNum === 4) return <Badge variant="destructive">4 - Immediate</Badge>;
-    if (urgencyNum === 3) return <Badge className="bg-orange-500">3 - High</Badge>;
-    if (urgencyNum === 2) return <Badge className="bg-blue-500">2 - Medium</Badge>;
-    return <Badge className="bg-green-600">1 - Low</Badge>;
+    if (urgencyNum === 3) return <Badge className="bg-warning text-black">3 - High</Badge>;
+    if (urgencyNum === 2) return <Badge className="bg-info">2 - Medium</Badge>;
+    if (urgencyNum === 1) return <Badge className="bg-slate-500">1 - Low</Badge>;
+    if (urgencyNum === 0) return <Badge className="bg-success">0 - Routine</Badge>;
+    
+    // Default fallback
+    return <Badge variant="outline">{urgency}</Badge>;
   };
 
   // Get the latest CI from the most recent inspection
@@ -163,7 +210,8 @@ export default function AssetDetailPage() {
     if (!inspections || inspections.length === 0) return null;
     // Inspections are already sorted by date (descending) from the API
     const latestInspection = inspections[0];
-    return latestInspection.ci_final || latestInspection.conditional_index || null;
+    // Prioritize calculation_metadata (authoritative stored values)
+    return latestInspection.calculation_metadata?.ci_final ?? latestInspection.ci_final ?? latestInspection.conditional_index ?? null;
   };
 
   // Get the latest urgency from the most recent inspection
@@ -171,7 +219,8 @@ export default function AssetDetailPage() {
     if (!inspections || inspections.length === 0) return null;
     // Inspections are already sorted by date (descending) from the API
     const latestInspection = inspections[0];
-    return latestInspection.calculated_urgency || latestInspection.urgency || null;
+    // Prioritize calculation_metadata (authoritative stored values)
+    return latestInspection.calculation_metadata?.worst_urgency ?? latestInspection.calculated_urgency ?? latestInspection.urgency ?? null;
   };
 
   if (loading) {
@@ -222,9 +271,9 @@ export default function AssetDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => navigate(`/assets/${assetId}/edit`)}>
+          <Button variant="outline" onClick={() => navigate(`/assets`)}>
             <Edit className="w-4 h-4 mr-2" />
-            Edit
+            Back to Assets
           </Button>
           <Button variant="destructive" onClick={handleDelete}>
             <Trash2 className="w-4 h-4 mr-2" />
@@ -524,6 +573,89 @@ export default function AssetDetailPage() {
               </Link>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Photo Gallery */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Main Asset Photo</CardTitle>
+              <CardDescription>
+                {photos.filter(p => p.photo_number === '0' || p.photo_number === 0).length} main photo{photos.filter(p => p.photo_number === '0' || p.photo_number === 0).length !== 1 ? 's' : ''} from Supabase Storage
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {(() => {
+            // Filter for main photos only (photo_number = 0)
+            const mainPhotos = photos.filter(p => p.photo_number === '0' || p.photo_number === 0);
+            
+            return mainPhotos.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {mainPhotos.map((photo, index) => (
+                  <div
+                    key={`${photo.photo_id}-${photo.path || index}`}
+                    className="relative group cursor-pointer rounded-lg overflow-hidden border hover:border-primary transition-colors"
+                    onClick={() => window.open(photo.signedUrl || photo.url, '_blank')}
+                  >
+                    <div className="aspect-square relative">
+                      {photo.signedUrl || photo.url ? (
+                        <img
+                          src={photo.signedUrl || photo.url}
+                          alt={`Photo ${photo.photo_number || ''}`}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E';
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-muted">
+                          <ImageIcon className="w-12 h-12 text-muted-foreground" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-2 text-white text-xs">
+                      {photo.caption || `Photo ${photo.photo_number || ''}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <ImageIcon className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p className="font-medium text-lg">No photos found in storage</p>
+                <div className="mt-4 max-w-2xl mx-auto">
+                  {photoError ? (
+                    <div className="bg-red-50 border border-red-200 rounded p-4 text-red-700">
+                      <p className="font-semibold">Error: {photoError}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="bg-blue-50 border border-blue-200 rounded p-4 text-blue-800 text-sm">
+                        <p className="font-semibold mb-2">📸 Photo Storage</p>
+                        <p>Photos are stored in Supabase Storage under folder: <code className="bg-blue-100 px-1 rounded">{asset?.asset_ref || 'unknown'}</code></p>
+                      </div>
+                      
+                      <div className="text-xs bg-muted/50 p-4 rounded border space-y-2 text-left">
+                        <p className="font-semibold">Expected file naming:</p>
+                        <ul className="list-disc list-inside space-y-1 ml-2">
+                          <li><code>0.jpg</code> - Main asset photo</li>
+                          <li><code>1.jpg</code> to <code>6.jpg</code> - Component photos</li>
+                          <li><code>1_1.jpg</code>, <code>1_2.jpg</code>, etc. - Sub-component photos</li>
+                        </ul>
+                        <p className="italic mt-3 pt-2 border-t">
+                          Upload photos to: <code className="text-blue-600">tams360-inspection-photos/{asset?.asset_ref || 'unknown'}/</code>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
     </div>

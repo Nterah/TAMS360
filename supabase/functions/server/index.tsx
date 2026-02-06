@@ -9,6 +9,7 @@ import * as emailService from "./emailService.ts";
 import * as userMgmt from "./userManagementRoutes.tsx";
 import * as auditLogger from "./auditLogger.tsx";
 import { quickSetup } from "./quickSetup.tsx";
+// import { registerPreflightRoutes } from "./photo-preflight.tsx"; // TEMPORARILY DISABLED for debugging
 
 /**
  * TAMS360 Backend Server
@@ -98,6 +99,45 @@ function isValidUuid(str: string): boolean {
   return uuidRegex.test(str);
 }
 
+// Helper to safely send JSON response (handles broken pipe errors)
+function safeJsonResponse(c: any, data: any, status = 200) {
+  try {
+    return c.json(data, status);
+  } catch (error) {
+    // Log broken pipe errors but don't throw - client already disconnected
+    if (error?.code === 'EPIPE' || error?.message?.includes('broken pipe') || 
+        error?.message?.includes('connection closed')) {
+      console.log('⚠️ Client disconnected before response completed');
+      return new Response(null, { status: 499 }); // Client Closed Request
+    }
+    throw error;
+  }
+}
+
+// Timeout wrapper for database queries
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number = 30000,
+  timeoutMessage: string = 'Operation timed out'
+): Promise<T> {
+  let timeoutId: number;
+  
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timeoutId!);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutId!);
+    throw error;
+  }
+}
+
 // Enable logger
 app.use("*", logger(console.log));
 
@@ -113,10 +153,34 @@ app.use(
   }),
 );
 
+// Global error handler for broken pipe and connection errors
+app.onError((err, c) => {
+  // Handle broken pipe errors gracefully
+  if (err?.code === 'EPIPE' || 
+      err?.message?.includes('broken pipe') || 
+      err?.message?.includes('connection closed')) {
+    console.log('⚠️ Client connection closed:', err.message);
+    return new Response(null, { status: 499 }); // Client Closed Request
+  }
+  
+  // Handle timeout errors
+  if (err?.message?.includes('timed out')) {
+    console.error('⏱️ Request timed out:', err.message);
+    return c.json({ error: 'Request timed out' }, 504);
+  }
+  
+  // Log other errors and return 500
+  console.error('❌ Unhandled error:', err);
+  return c.json({ error: 'Internal server error' }, 500);
+});
+
 // Health check endpoint
 app.get("/make-server-c894a9ff/health", (c) => {
   return c.json({ status: "ok" });
 });
+
+// Register photo preflight routes (validation + asset creation)
+// registerPreflightRoutes(app); // TEMPORARILY DISABLED for debugging
 
 // Database diagnostics endpoint
 app.get("/make-server-c894a9ff/diagnostics", async (c) => {
@@ -3230,6 +3294,151 @@ app.post("/make-server-c894a9ff/assets/:id/fix-gps", async (c) => {
   }
 });
 
+// Get photos for a specific asset
+app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    const token = getBearerToken(authHeader);
+    
+    if (!token) {
+      return c.json({ error: "No Authorization token provided" }, 401);
+    }
+
+    const { data: authData, error: authError } = await supabaseAuth.auth.getUser(token);
+    if (authError || !authData?.user) {
+      return c.json({ error: "Invalid token" }, 401);
+    }
+
+    const assetId = c.req.param("id");
+    console.log(`[PHOTOS] Fetching photos for asset ID: ${assetId}`);
+
+    // Get user profile for tenant_id
+    const { data: userProfile, error: profileError } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("tenant_id")
+      .eq("id", authData.user.id)
+      .maybeSingle();
+
+    if (profileError || !userProfile) {
+      console.error(`[PHOTOS] Failed to get user profile:`, profileError);
+      return c.json({ error: "User profile not found" }, 404);
+    }
+
+    console.log(`[PHOTOS] User tenant_id: ${userProfile.tenant_id}`);
+
+    // Verify asset exists and belongs to the user's tenant
+    const { data: asset, error: assetError } = await supabase
+      .from("tams360_assets_v")
+      .select("asset_id, asset_ref")
+      .eq("asset_id", assetId)
+      .eq("tenant_id", userProfile.tenant_id)
+      .maybeSingle();
+
+    if (assetError) {
+      console.error(`[PHOTOS] Database error checking asset: ${assetId}`, assetError);
+      return c.json({ error: "Database error" }, 500);
+    }
+    
+    if (!asset) {
+      console.error(`[PHOTOS] Asset not found: ${assetId}`);
+      return c.json({ error: "Asset not found" }, 404);
+    }
+
+    console.log(`[PHOTOS] Asset found with asset_id: ${assetId}, asset_ref: ${asset.asset_ref}`);
+
+    // List files from Supabase Storage bucket using asset_ref as folder name
+    // Photos are stored as: {asset_ref}/0.jpg (main), {asset_ref}/1.jpg, {asset_ref}/1_1.jpg, etc.
+    const folderPath = asset.asset_ref;
+    console.log(`[PHOTOS] Listing files in folder: ${folderPath}`);
+    console.log(`[PHOTOS] Full storage path: ${PHOTO_BUCKET}/${folderPath}`);
+
+    const { data: files, error: listError } = await supabase.storage
+      .from(PHOTO_BUCKET)
+      .list(folderPath, {
+        limit: 100,
+        sortBy: { column: 'name', order: 'asc' }
+      });
+
+    console.log(`[PHOTOS] Storage list result:`, { 
+      filesCount: files?.length || 0, 
+      files: files?.map(f => f.name),
+      error: listError 
+    });
+    
+    if (listError) {
+      console.error("[PHOTOS] Error listing files from storage:", listError);
+      return c.json({ 
+        error: `Storage error: ${listError.message}`, 
+        errorCode: listError.name 
+      }, 500);
+    }
+    
+    // Filter for image files only
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    const imageFiles = (files || []).filter(file => 
+      imageExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
+    );
+
+    console.log(`[PHOTOS] Filtered to ${imageFiles.length} image files`);
+    
+    // Generate signed URLs for each photo
+    const photosWithUrls = await Promise.all(
+      imageFiles.map(async (file) => {
+        const filePath = `${folderPath}/${file.name}`;
+        
+        console.log(`[PHOTOS] Generating signed URL for: ${filePath}`);
+        
+        // Generate signed URL (valid for 1 hour)
+        const { data: signedData, error: signedError } = await supabase.storage
+          .from(PHOTO_BUCKET)
+          .createSignedUrl(filePath, 3600);
+        
+        if (signedError) {
+          // Only log as warning if photo doesn't exist (404), not as error
+          if (signedError.message?.includes('not found') || signedError.statusCode === '404') {
+            console.log(`[PHOTOS] Photo not found (skipping): ${filePath}`);
+          } else {
+            console.error(`[PHOTOS] Error generating signed URL for ${filePath}:`, signedError);
+          }
+          return null;
+        }
+        
+        // Parse photo number from filename (e.g., "0.jpg" -> 0, "1_1.jpg" -> "1_1")
+        const photoNumber = file.name.replace(/\.[^.]+$/, ''); // Remove extension
+        
+        return { 
+          photo_id: `${assetId}_${photoNumber}`, // Generate unique ID
+          asset_id: assetId,
+          asset_ref: asset.asset_ref,
+          photo_number: photoNumber,
+          file_path: filePath,
+          file_name: file.name,
+          name: file.name, // Add name field for popup compatibility
+          signedUrl: signedData.signedUrl,
+          url: signedData.signedUrl, // Backward compatibility
+          created_at: file.created_at,
+          updated_at: file.updated_at,
+          caption: photoNumber === '0' ? 'Main Asset Photo' : 
+                   photoNumber.includes('_') ? `Sub-component Photo ${photoNumber}` :
+                   `Component Photo ${photoNumber}`
+        };
+      })
+    );
+
+    // Filter out any nulls from failed URL generation
+    const validPhotos = photosWithUrls.filter(photo => photo !== null);
+
+    console.log(`[PHOTOS] Returning ${validPhotos.length} photos with URLs`);
+    
+    // NOTE: Broken pipe errors (EPIPE) may appear in logs when clients disconnect before response completes.
+    // These are logged by Deno's HTTP runtime and cannot be prevented. They are informational only.
+    return c.json({ photos: validPhotos });
+  } catch (error: any) {
+    console.error("[PHOTOS] Error in assets/:id/photos endpoint:", error);
+    return c.json({ error: error?.message || "Unknown error" }, 500);
+  }
+});
+
 // Seed database with default data
 app.post("/make-server-c894a9ff/seed-data", async (c) => {
   try {
@@ -3561,7 +3770,8 @@ app.get("/make-server-c894a9ff/assets/:id/inspections", async (c) => {
       .select("*")
       .eq("asset_id", assetId)
       .eq("tenant_id", userProfile.tenant_id)
-      .order("inspection_date", { ascending: false });
+      .order("inspection_date", { ascending: false })
+      .limit(100); // Add limit to prevent excessive data
 
     if (error) {
       console.error("Error fetching asset inspections:", error);
@@ -3569,7 +3779,7 @@ app.get("/make-server-c894a9ff/assets/:id/inspections", async (c) => {
     }
 
     return c.json({ inspections: inspections || [] });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fetching asset inspections:", error);
     return c.json({ error: "Failed to fetch inspections" }, 500);
   }
@@ -3723,7 +3933,8 @@ app.get("/make-server-c894a9ff/assets/:id/maintenance", async (c) => {
       .from("tams360_maintenance_v")
       .select("*")
       .eq("asset_id", assetId)
-      .order("maintenance_id", { ascending: false });
+      .order("maintenance_id", { ascending: false })
+      .limit(100); // Limit to prevent excessive data
 
     if (error) {
       console.error("Error fetching maintenance for asset:", error);
@@ -3731,7 +3942,8 @@ app.get("/make-server-c894a9ff/assets/:id/maintenance", async (c) => {
     }
 
     return c.json({ maintenance: records });
-  } catch (error) {
+  } catch (error: any) {
+    console.error("Error fetching maintenance for asset:", error);
     return c.json({ error: "Failed to fetch maintenance records" }, 500);
   }
 });
@@ -4224,18 +4436,22 @@ app.get("/make-server-c894a9ff/dashboard/summary", async (c) => {
 
     const tenantId = userProfile.tenant_id;
 
-    // Fetch all counts and stats in parallel with tenant filtering
-    const [assetsCount, inspectionsCount, maintenanceCount, ciDistribution, urgencySummary, allAssets, uniqueInspectedAssets] = await Promise.all([
-      supabase.from("tams360_assets_v").select("asset_id", { count: 'exact', head: true }).eq("tenant_id", tenantId),
-      supabase.from("tams360_inspections_v").select("inspection_id", { count: 'exact', head: true }).eq("tenant_id", tenantId),
-      supabase.from("tams360_maintenance_v").select("maintenance_id", { count: 'exact', head: true }).eq("tenant_id", tenantId),
-      supabase.from("tams360_ci_distribution_v").select("*").eq("tenant_id", tenantId),
-      supabase.from("tams360_urgency_summary_v").select("*").eq("tenant_id", tenantId),
-      // Get all asset IDs
-      supabase.from("tams360_assets_v").select("asset_id").eq("tenant_id", tenantId).limit(25000),
-      // Get unique asset IDs that have been inspected
-      supabase.from("tams360_inspections_v").select("asset_id").eq("tenant_id", tenantId).limit(25000),
-    ]);
+    // Fetch all counts and stats in parallel with tenant filtering and timeout protection
+    const [assetsCount, inspectionsCount, maintenanceCount, ciDistribution, urgencySummary, allAssets, uniqueInspectedAssets] = await withTimeout(
+      Promise.all([
+        supabase.from("tams360_assets_v").select("asset_id", { count: 'exact', head: true }).eq("tenant_id", tenantId),
+        supabase.from("tams360_inspections_v").select("inspection_id", { count: 'exact', head: true }).eq("tenant_id", tenantId),
+        supabase.from("tams360_maintenance_v").select("maintenance_id", { count: 'exact', head: true }).eq("tenant_id", tenantId),
+        supabase.from("tams360_ci_distribution_v").select("*").eq("tenant_id", tenantId),
+        supabase.from("tams360_urgency_summary_v").select("*").eq("tenant_id", tenantId),
+        // Get all asset IDs (reduced limit for faster response)
+        supabase.from("tams360_assets_v").select("asset_id").eq("tenant_id", tenantId).limit(10000),
+        // Get unique asset IDs that have been inspected (reduced limit)
+        supabase.from("tams360_inspections_v").select("asset_id").eq("tenant_id", tenantId).limit(10000),
+      ]),
+      25000, // 25 second timeout
+      'Dashboard summary query timed out'
+    );
 
     const totalAssets = assetsCount.count || 0;
     const totalInspections = inspectionsCount.count || 0;
@@ -4272,7 +4488,7 @@ app.get("/make-server-c894a9ff/dashboard/summary", async (c) => {
       .filter((item: any) => item.calculated_urgency === 'Immediate' || item.calculated_urgency === 'High')
       .reduce((sum: number, item: any) => sum + (item.count || 0), 0);
 
-    return c.json({
+    return safeJsonResponse(c, {
       totalAssets,
       totalInspections,
       totalMaintenance,
@@ -4286,7 +4502,7 @@ app.get("/make-server-c894a9ff/dashboard/summary", async (c) => {
     });
   } catch (error) {
     console.error("Error fetching dashboard summary:", error);
-    return c.json({ error: "Failed to fetch dashboard summary" }, 500);
+    return safeJsonResponse(c, { error: "Failed to fetch dashboard summary" }, 500);
   }
 });
 
@@ -4323,12 +4539,16 @@ app.get("/make-server-c894a9ff/dashboard/critical-alerts", async (c) => {
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
-    // Query latest inspections to identify critical issues with reasonable limit
-    const { data: inspections, error } = await supabase
-      .from("tams360_inspections_v")
-      .select("inspection_id, asset_id, asset_ref, asset_type_name, calculated_urgency, conditional_index, total_remedial_cost, tenant_id")
-      .eq("tenant_id", userProfile.tenant_id)
-      .limit(25000);
+    // Query latest inspections to identify critical issues with timeout protection
+    const { data: inspections, error } = await withTimeout(
+      supabase
+        .from("tams360_inspections_v")
+        .select("inspection_id, asset_id, asset_ref, asset_type_name, calculated_urgency, conditional_index, total_remedial_cost, tenant_id")
+        .eq("tenant_id", userProfile.tenant_id)
+        .limit(10000), // Reduced limit for faster response
+      20000, // 20 second timeout
+      'Critical alerts query timed out'
+    );
 
     if (error) {
       console.error("Error fetching inspections for critical alerts:", error);
@@ -4380,10 +4600,10 @@ app.get("/make-server-c894a9ff/dashboard/critical-alerts", async (c) => {
       });
     }
 
-    return c.json({ alerts });
+    return safeJsonResponse(c, { alerts });
   } catch (error) {
     console.error("Error fetching critical alerts:", error);
-    return c.json({ alerts: [] }, 200);
+    return safeJsonResponse(c, { alerts: [] }, 200);
   }
 });
 
@@ -4414,13 +4634,17 @@ app.get("/make-server-c894a9ff/dashboard/asset-type-summary", async (c) => {
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
-    // Query inspections grouped by asset to get latest data per asset with reasonable limit
-    const { data: inspections, error: inspError} = await supabase
-      .from("tams360_inspections_v")
-      .select("asset_id, asset_type_name, conditional_index, calculated_urgency, total_remedial_cost, inspection_date, tenant_id")
-      .eq("tenant_id", userProfile.tenant_id)
-      .order("inspection_date", { ascending: false })
-      .limit(25000);
+    // Query inspections grouped by asset to get latest data per asset with timeout protection
+    const { data: inspections, error: inspError} = await withTimeout(
+      supabase
+        .from("tams360_inspections_v")
+        .select("asset_id, asset_type_name, conditional_index, calculated_urgency, total_remedial_cost, inspection_date, tenant_id")
+        .eq("tenant_id", userProfile.tenant_id)
+        .order("inspection_date", { ascending: false })
+        .limit(10000), // Reduced limit
+      20000,
+      'Asset type summary inspections query timed out'
+    );
 
     if (inspError) {
       console.error("Error fetching inspections for asset type summary:", inspError);
@@ -4435,12 +4659,16 @@ app.get("/make-server-c894a9ff/dashboard/asset-type-summary", async (c) => {
       }
     });
 
-    // Also get all assets (including those without inspections) with reasonable limit
-    const { data: allAssets } = await supabase
-      .from("tams360_assets_v")
-      .select("asset_id, asset_type_name")
-      .eq("tenant_id", userProfile.tenant_id)
-      .limit(25000);
+    // Also get all assets (including those without inspections) with timeout protection
+    const { data: allAssets } = await withTimeout(
+      supabase
+        .from("tams360_assets_v")
+        .select("asset_id, asset_type_name")
+        .eq("tenant_id", userProfile.tenant_id)
+        .limit(10000), // Reduced limit
+      15000,
+      'All assets query timed out'
+    );
 
     // Group by asset type
     const typeMap = new Map();
@@ -4488,10 +4716,10 @@ app.get("/make-server-c894a9ff/dashboard/asset-type-summary", async (c) => {
       avg_ci: item.ci_count > 0 ? Math.round(item.total_ci / item.ci_count) : null,
     })).sort((a, b) => b.total_assets - a.total_assets);
 
-    return c.json({ summary: summaryArray });
+    return safeJsonResponse(c, { summary: summaryArray });
   } catch (error) {
     console.error("Error fetching asset type summary:", error);
-    return c.json({ error: "Failed to fetch asset type summary" }, 500);
+    return safeJsonResponse(c, { error: "Failed to fetch asset type summary" }, 500);
   }
 });
 
@@ -6452,6 +6680,84 @@ app.get("/make-server-c894a9ff/inspections/stats", async (c) => {
   }
 });
 
+// Get DERU analytics data (lightweight - only metadata and asset type)
+app.get("/make-server-c894a9ff/inspections/deru-analytics", async (c) => {
+  try {
+    // Get user context for tenant filtering
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile from Postgres view to retrieve tenant_id
+    const { data: userProfile, error: profileError } = await supabase
+      .from('tams360_user_profiles_v')
+      .select('id, tenant_id, role')
+      .eq('id', userData.user.id)
+      .single();
+
+    if (profileError || !userProfile || !userProfile.tenant_id) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
+    // Select only the fields needed for DERU analytics
+    const { data: inspections, error } = await supabase
+      .from("tams360_inspections_v")
+      .select("inspection_id, asset_type_name, metadata, calculation_metadata, conditional_index")
+      .eq("tenant_id", userProfile.tenant_id)
+      .order("inspection_date", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching DERU analytics data:", error);
+      return c.json({ error: "Failed to fetch DERU analytics data" }, 500);
+    }
+
+    console.log(`Fetched ${inspections?.length || 0} inspections for DERU analytics`);
+    
+    // Extract only DERU fields to reduce payload size
+    const lightweightInspections = (inspections || []).map(insp => {
+      const metadata = insp.metadata || {};
+      const extractedData: any = {
+        asset_type_name: insp.asset_type_name,
+        conditional_index: insp.conditional_index
+      };
+      
+      // Extract only DERU component fields (not full metadata)
+      const deruFields = ['Degree_1', 'Degree_2', 'Degree_3', 'Degree_4', 'Degree_5', 'Degree_6',
+                          'Extent_1', 'Extent_2', 'Extent_3', 'Extent_4', 'Extent_5', 'Extent_6',
+                          'Relevancy_1', 'Relevancy_2', 'Relevancy_3', 'Relevancy_4', 'Relevancy_5', 'Relevancy_6',
+                          'U - Comp 1', 'U - Comp 2', 'U - Comp 3', 'U - Comp 4', 'U - Comp 5', 'U - Comp 6'];
+      
+      deruFields.forEach(field => {
+        if (metadata[field] !== undefined) {
+          extractedData[field] = metadata[field];
+        }
+      });
+      
+      // Add CI from calculation_metadata if available
+      if (insp.calculation_metadata?.ci_final_raw !== undefined) {
+        extractedData.CI_Final = insp.calculation_metadata.ci_final_raw;
+      }
+      
+      return extractedData;
+    });
+    
+    return c.json({ 
+      inspections: lightweightInspections
+    });
+  } catch (error) {
+    console.error("Error fetching DERU analytics:", error);
+    return c.json({ error: "Failed to fetch DERU analytics" }, 500);
+  }
+});
+
 // Get single inspection by ID (Detail page)
 app.get("/make-server-c894a9ff/inspections/:id", async (c) => {
   try {
@@ -6486,11 +6792,21 @@ app.get("/make-server-c894a9ff/inspections/:id", async (c) => {
     }
 
     // Fetch asset info to get asset type for template lookup
+    // Extract asset_id and tenant_id from inspection data
+    const assetId = inspection.asset_id;
+    const tenantId = inspection.tenant_id;
+    
     const { data: asset, error: assetError } = await supabase
       .from("tams360_assets_v")
-      .select("asset_type_name, asset_type_id")
-      .eq("asset_id", inspection.asset_id)
-      .single();
+      .select("asset_id, asset_type_id, asset_ref")
+      .eq("asset_id", assetId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (assetError) {
+      console.warn("Error fetching asset for template lookup:", assetError);
+    }
+
 
     // Fetch component template items for rubric info
     let templateItems: any[] = [];
@@ -6745,12 +7061,16 @@ app.get("/make-server-c894a9ff/dashboard/ci-distribution", async (c) => {
     // Calculate distribution directly from inspections app view (tenant-filtered)
     // The tams360_ci_distribution_v view doesn't have tenant_id, so we build it ourselves
     {
-      // Calculate distribution from inspections app view with reasonable limit
-      const { data: inspections, error: inspError } = await supabase
-        .from("tams360_inspections_v")
-        .select("ci_band, conditional_index")
-        .eq("tenant_id", userProfile.tenant_id)
-        .limit(25000);
+      // Calculate distribution from inspections app view with timeout protection
+      const { data: inspections, error: inspError } = await withTimeout(
+        supabase
+          .from("tams360_inspections_v")
+          .select("ci_band, conditional_index")
+          .eq("tenant_id", userProfile.tenant_id)
+          .limit(10000), // Reduced limit for faster response
+        15000, // 15 second timeout
+        'CI distribution query timed out'
+      );
       
       if (inspError) {
         console.error("Error fetching inspections for CI distribution:", inspError);
@@ -6773,11 +7093,11 @@ app.get("/make-server-c894a9ff/dashboard/ci-distribution", async (c) => {
       }));
       
       console.log(`Returning ${distribution.length} CI distribution bands (tenant-filtered)`);
-      return c.json({ distribution });
+      return safeJsonResponse(c, { distribution });
     }
   } catch (error) {
     console.error("Error fetching CI distribution:", error);
-    return c.json({ distribution: [] });
+    return safeJsonResponse(c, { distribution: [] });
   }
 });
 
@@ -6917,10 +7237,15 @@ app.get("/make-server-c894a9ff/dashboard/urgency-summary", async (c) => {
     }
 
     // Use inspections app view directly (tenant-filtered) instead of urgency summary view
-    const { data: inspections } = await supabase
-      .from("tams360_inspections_v")
-      .select("calculated_urgency, conditional_index")
-      .eq("tenant_id", userProfile.tenant_id);
+    const { data: inspections } = await withTimeout(
+      supabase
+        .from("tams360_inspections_v")
+        .select("calculated_urgency, conditional_index")
+        .eq("tenant_id", userProfile.tenant_id)
+        .limit(10000), // Add limit for performance
+      15000, // 15 second timeout
+      'Urgency summary query timed out'
+    );
     
     const urgencyGroups = (inspections || []).reduce((acc: any, insp: any) => {
       const urgency = insp.calculated_urgency || "Low";
@@ -6936,10 +7261,10 @@ app.get("/make-server-c894a9ff/dashboard/urgency-summary", async (c) => {
       return (urgencyOrder[b.calculated_urgency] || 0) - (urgencyOrder[a.calculated_urgency] || 0);
     });
 
-    return c.json({ summary });
+    return safeJsonResponse(c, { summary });
   } catch (error) {
     console.error("Error fetching urgency summary:", error);
-    return c.json({ summary: [] });
+    return safeJsonResponse(c, { summary: [] });
   }
 });
 
@@ -6970,11 +7295,15 @@ app.get("/make-server-c894a9ff/dashboard/asset-type-summary", async (c) => {
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
-    const { data: summary, error } = await supabase
-      .from("tams360_asset_type_summary_v")
-      .select("*")
-      .eq("tenant_id", userProfile.tenant_id)
-      .order("asset_count", { ascending: false });
+    const { data: summary, error } = await withTimeout(
+      supabase
+        .from("tams360_asset_type_summary_v")
+        .select("*")
+        .eq("tenant_id", userProfile.tenant_id)
+        .order("asset_count", { ascending: false }),
+      15000,
+      'Asset type summary query timed out'
+    );
 
     if (error) {
       console.error("Error fetching asset type summary:", error);
@@ -6999,13 +7328,13 @@ app.get("/make-server-c894a9ff/dashboard/asset-type-summary", async (c) => {
         b.asset_count - a.asset_count
       );
       
-      return c.json({ summary: fallbackSummary });
+      return safeJsonResponse(c, { summary: fallbackSummary });
     }
 
-    return c.json({ summary });
+    return safeJsonResponse(c, { summary });
   } catch (error) {
     console.error("Error fetching asset type summary:", error);
-    return c.json({ summary: [] });
+    return safeJsonResponse(c, { summary: [] });
   }
 });
 
@@ -7126,7 +7455,7 @@ app.get("/make-server-c894a9ff/dashboard/stats", async (c) => {
 });
 
 // Wrap app with timeout protection to prevent hanging connections
-const withTimeout = (handler: any) => {
+const wrapWithTimeout = (handler: any) => {
   return async (request: Request) => {
     // Create a timeout promise (140 seconds - leave 10s buffer before 150s edge function limit)
     const timeoutPromise = new Promise((_, reject) => {
@@ -7142,6 +7471,16 @@ const withTimeout = (handler: any) => {
       
       return response;
     } catch (error: any) {
+      // Handle broken pipe errors gracefully - client disconnected
+      if (error?.code === 'EPIPE' || 
+          error?.name === 'Http' || 
+          error?.message?.includes('pipe') || 
+          error?.message?.includes('connection closed')) {
+        console.log(`[HTTP] Client disconnected: ${request.method} ${new URL(request.url).pathname}`);
+        // Return 499 Client Closed Request (non-standard but descriptive)
+        return new Response(null, { status: 499 });
+      }
+      
       console.error('Request handler error:', error?.message || error);
       
       // Return a proper error response instead of letting connection hang
@@ -7163,443 +7502,450 @@ const withTimeout = (handler: any) => {
   };
 };
 
-// ============================================================================
-// PHOTO UPLOAD ROUTES
-// ============================================================================
 
-// Upload inspection photo
-app.post("/make-server-c894a9ff/photos/upload", async (c) => {
+// ==============================================
+// PHOTO UPLOAD ENDPOINTS (SUPABASE) - ROUTE + TENANT + ASSET LOOKUP FIX
+// ==============================================
+
+const PHOTO_BUCKET = "tams360-inspection-photos";
+
+function getBearerToken(authHeader: string | null) {
+  if (!authHeader) return null;
+  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+async function safeMaybeSingle<T>(
+  q: Promise<{ data: T | null; error: any }>
+): Promise<{ data: T | null; error: any | null }> {
   try {
-    const authHeader = c.req.header("Authorization");
-    if (!authHeader) {
-      return c.json({ error: "Missing authorization header" }, 401);
-    }
-
-    const accessToken = authHeader.replace("Bearer ", "");
-    
-    // Verify user and get tenant_id
-    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
-    if (authError || !user) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-
-    // Get user's tenant_id
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("tenant_id")
-      .eq("auth_id", user.id)
-      .single();
-
-    if (userError || !userData?.tenant_id) {
-      return c.json({ error: "User not found or no tenant assigned" }, 404);
-    }
-
-    const tenantId = userData.tenant_id;
-
-    // Parse multipart form data
-    const formData = await c.req.formData();
-    const file = formData.get("file") as File;
-    const assetRef = formData.get("assetRef") as string;
-    const photoNumber = formData.get("photoNumber") as string;
-    const photoType = formData.get("photoType") as string;
-    const componentNumber = formData.get("componentNumber") as string | null;
-    const subNumber = formData.get("subNumber") as string | null;
-
-    if (!file || !assetRef || !photoNumber || !photoType) {
-      return c.json({ error: "Missing required fields" }, 400);
-    }
-
-    // Get asset_id from asset_ref
-    const { data: asset, error: assetError } = await supabase
-      .from("assets")
-      .select("asset_id")
-      .eq("asset_ref", assetRef)
-      .eq("tenant_id", tenantId)
-      .single();
-
-    if (assetError || !asset) {
-      return c.json({ 
-        error: `Asset not found: ${assetRef}`,
-        hint: "Make sure the asset exists in the database with this reference number"
-      }, 404);
-    }
-
-    // Ensure inspection-photos bucket exists
-    const bucketName = "make-c894a9ff-inspection-photos";
-    const { data: buckets } = await supabase.storage.listBuckets();
-    const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
-    
-    if (!bucketExists) {
-      await supabase.storage.createBucket(bucketName, { public: false });
-    }
-
-    // Generate file path: tenant_id/asset_ref/photo_number.ext
-    const fileExt = file.name.split(".").pop();
-    const filePath = `${tenantId}/${assetRef}/${photoNumber}.${fileExt}`;
-
-    // Upload file to Supabase Storage
-    const fileBuffer = await file.arrayBuffer();
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(bucketName)
-      .upload(filePath, fileBuffer, {
-        contentType: file.type,
-        upsert: true,
-      });
-
-    if (uploadError) {
-      console.error("Upload error:", uploadError);
-      return c.json({ error: "Failed to upload file", details: uploadError.message }, 500);
-    }
-
-    // Get signed URL
-    const { data: urlData } = await supabase.storage
-      .from(bucketName)
-      .createSignedUrl(filePath, 31536000);
-
-    if (!urlData) {
-      return c.json({ error: "Failed to generate signed URL" }, 500);
-    }
-
-    // Store photo metadata using RPC (upsert behavior)
-    const { data: photoId, error: rpcError } = await supabase.rpc(
-      "tams360_upsert_asset_photo",
-      {
-        p_reference_number: assetRef,
-        p_tenant_id: tenantId,
-        p_photo_url: filePath,
-        p_photo_number: String(photoNumber),
-        p_photo_type: photoType,
-        p_component_number: componentNumber ? parseInt(componentNumber) : null,
-        p_sub_number: subNumber ? parseInt(subNumber) : null,
-        p_file_size: file.size,
-        p_file_type: file.type,
-        p_caption: null,
-        p_uploaded_by: user.id,
-      }
-    );
-
-    if (rpcError) {
-      console.error("Photo RPC error:", rpcError);
-      return c.json({ 
-        error: "Failed to save photo metadata", 
-        details: rpcError.message
-      }, 500);
-    }
-
-    console.log(`Photo saved successfully - ID: ${photoId}`);
-
-    return c.json({
-      success: true,
-      url: urlData.signedUrl,
-      photo_id: photoId,
-      message: `Photo ${photoNumber} uploaded for ${assetRef}`,
-    });
-
-  } catch (error: any) {
-    console.error("Photo upload error:", error);
-    return c.json({ error: "Internal server error", details: error.message }, 500);
+    const { data, error } = await q;
+    // swallow “relation/column does not exist” so we can try fallbacks
+    if (error?.code === "42P01" || error?.code === "42703") return { data: null, error: null };
+    return { data, error: error ?? null };
+  } catch (e: any) {
+    return { data: null, error: e };
   }
-});
+}
 
-// NEW: Generate signed upload URL for direct browser-to-storage uploads
-app.post("/make-server-c894a9ff/photos/get-upload-url", async (c) => {
-  try {
-    const authHeader = c.req.header("Authorization");
-    if (!authHeader) {
-      return c.json({ error: "Missing authorization header" }, 401);
-    }
+async function resolveTenantIdForUser(user: { id: string; email?: string | null }) {
+  // IMPORTANT: your own codebase uses tams360_user_profiles_v.id as the auth user id
+  // (see diagnostics endpoint), so try id first.
+  const tryCols = [
+    { col: "id", val: user.id },
+    { col: "user_id", val: user.id },     // legacy/fallback
+    { col: "auth_id", val: user.id },     // fallback
+    ...(user.email ? [{ col: "email", val: user.email }] : []),
+  ];
 
-    const accessToken = authHeader.replace("Bearer ", "");
-    
-    // Verify user and get tenant_id
-    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
-    if (authError || !user) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-
-    // Get user's tenant_id (CHECK BOTH KV STORE AND DATABASE!)
-    let tenantId: string | null = null;
-
-    // First, try KV store (where most users exist)
-    const kvUser = await kv.get(`user:${user.id}`);
-    if (kvUser && kvUser.tenantId) {
-      tenantId = kvUser.tenantId;
-      console.log(`✅ Found user in KV store: ${user.email}, tenant: ${tenantId}`);
-    } else {
-      // Fallback to database view (same as login route)
-      const { data: userData, error: userError } = await supabase
+  for (const t of tryCols) {
+    const { data, error } = await safeMaybeSingle<{ tenant_id: string }>(
+      supabase
         .from("tams360_user_profiles_v")
         .select("tenant_id")
-        .eq("id", user.id)
-        .single();
+        .eq(t.col as any, t.val)
+        .maybeSingle()
+    );
 
-      if (!userError && userData?.tenant_id) {
-        tenantId = userData.tenant_id;
-        console.log(`✅ Found user in database view: ${user.email}, tenant: ${tenantId}`);
-      } else {
-        // Final fallback to users table
-        const { data: userTableData, error: userTableError } = await supabase
-          .from("users")
-          .select("tenant_id")
-          .eq("auth_id", user.id)
-          .single();
+    if (error) throw error;
+    if (data?.tenant_id) return data.tenant_id;
+  }
 
-        if (!userTableError && userTableData?.tenant_id) {
-          tenantId = userTableData.tenant_id;
-          console.log(`✅ Found user in users table: ${user.email}, tenant: ${tenantId}`);
-        }
-      }
-    }
+  return null;
+}
 
-    if (!tenantId) {
-      console.error(`❌ User not found: ${user.email} (${user.id})`);
-      console.error(`Checked: KV store, tams360_user_profiles_v, users table`);
-      return c.json({ error: "User not found or no tenant assigned" }, 404);
-    }
+async function lookupAssetIdByRef(tenantId: string, assetRef: string) {
+  // Prefer tenant-safe view first (it’s used all over your server already)
+  // Then fall back to base table with id/asset_id variations.
+  const attempts: Array<{ table: string; idCol: string }> = [
+    { table: "tams360_assets_v", idCol: "asset_id" },
+    { table: "assets", idCol: "asset_id" },
+    { table: "assets", idCol: "id" },
+  ];
 
-    // Parse request body
-    const body = await c.req.json();
-    const { assetRef, photoNumber, fileExt, fileType } = body;
+  for (const a of attempts) {
+    const { data, error } = await safeMaybeSingle<any>(
+      supabase
+        .from(a.table)
+        .select(`${a.idCol}`)
+        .eq("tenant_id", tenantId)
+        .eq("asset_ref", assetRef)
+        .maybeSingle()
+    );
 
-    if (!assetRef || !photoNumber || !fileExt) {
-      return c.json({ error: "Missing required fields: assetRef, photoNumber, fileExt" }, 400);
-    }
+    if (error) throw error;
+    if (data?.[a.idCol]) return String(data[a.idCol]);
+  }
 
-    // Get asset_id from asset_ref, or create if it doesn't exist
-    let asset;
-    const { data: existingAsset, error: assetError } = await supabase
+  return null;
+}
+
+async function insertAssetIfMissing(
+  tenantId: string,
+  assetRef: string,
+  createdByUserId: string,
+  assetTypeName: string
+) {
+  // Lookup asset type + status (kept from your existing logic)
+  const { data: assetTypeData, error: assetTypeError } = await supabase
+    .from("asset_types")
+    .select("asset_type_id, id")
+    .eq("name", assetTypeName)
+    .maybeSingle();
+
+  if (assetTypeError) throw assetTypeError;
+  const assetTypeId = assetTypeData?.asset_type_id ?? assetTypeData?.id ?? null;
+
+  const { data: statusData, error: statusError } = await supabase
+    .from("asset_status")
+    .select("status_id, id")
+    .eq("name", "Active")
+    .maybeSingle();
+
+  if (statusError) throw statusError;
+  const statusId = statusData?.status_id ?? statusData?.id ?? null;
+
+  if (!assetTypeId || !statusId) {
+    throw new Error("Missing asset_type_id or status_id for auto-create asset.");
+  }
+
+  const now = new Date().toISOString();
+  const newUuid = crypto.randomUUID();
+
+  const base = {
+    tenant_id: tenantId,
+    asset_ref: assetRef,
+    name: assetRef,
+    description: `Auto-created from photo import for ${assetRef}`,
+    asset_type_id: assetTypeId,
+    status_id: statusId,
+    created_by: createdByUserId,
+    updated_by: createdByUserId,
+    created_at: now,
+    updated_at: now,
+  };
+
+  // Try insert using asset_id first, then id (because your DB seems inconsistent here)
+  const tryInserts = [
+    { pk: "asset_id", row: { asset_id: newUuid, ...base } as any },
+    { pk: "id", row: { id: newUuid, ...base } as any },
+  ];
+
+  for (const t of tryInserts) {
+    const { data, error } = await supabase
       .from("assets")
-      .select("asset_id")
-      .eq("reference_number", assetRef)
-      .eq("tenant_id", tenantId)
-      .single();
+      .insert([t.row])
+      .select(t.pk)
+      .maybeSingle();
 
-    if (assetError || !existingAsset) {
-      // Asset doesn't exist - create placeholder asset for photo import
-      console.log(`📸 Auto-creating asset for photo import: ${assetRef}`);
-      
-      // Try to infer asset type from reference (e.g., "GS-M2-WB..." -> Gantry Structures)
-      let assetTypeId = null;
-      const assetTypePrefix = assetRef.split('-')[0]; // Extract "GS", "GR", etc.
-      
-      const { data: assetType } = await supabase
-        .from("asset_types")
-        .select("asset_type_id")
-        .eq("abbreviation", assetTypePrefix)
-        .single();
-      
-      if (assetType) {
-        assetTypeId = assetType.asset_type_id;
-        console.log(`✅ Matched asset type: ${assetTypePrefix} -> ${assetTypeId}`);
-      }
-      
-      // Get the default "Active" status_id
-      const { data: activeStatus } = await supabase
-        .from("asset_status")
-        .select("status_id")
-        .eq("name", "Active")
-        .single();
-      
-      const { data: newAsset, error: createError } = await supabase
-        .from("assets")
-        .insert({
-          reference_number: assetRef,
-          tenant_id: tenantId,
-          asset_type_id: assetTypeId,
-          status_id: activeStatus?.status_id || 1,
-        })
-        .select("asset_id")
-        .single();
+    if (error?.code === "42703") continue; // pk column doesn’t exist, try next
+    if (error) throw error;
 
-      if (createError || !newAsset) {
-        console.error(`❌ Failed to create asset ${assetRef}:`, JSON.stringify(createError, null, 2));
-        return c.json({ 
-          error: `Failed to create asset: ${assetRef}`,
-          details: createError?.message,
-          code: createError?.code,
-          hint: createError?.hint
-        }, 500);
-      }
-
-      asset = newAsset;
-      console.log(`✅ Created asset ${assetRef} with ID: ${newAsset.asset_id}`);
-    } else {
-      asset = existingAsset;
-    }
-
-    // Ensure inspection-photos bucket exists
-    const bucketName = "make-c894a9ff-inspection-photos";
-    const { data: buckets } = await supabase.storage.listBuckets();
-    const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
-    
-    if (!bucketExists) {
-      await supabase.storage.createBucket(bucketName, { public: false });
-    }
-
-    // Generate file path: tenant_id/asset_ref/photo_number.ext
-    const filePath = `${tenantId}/${assetRef}/${photoNumber}.${fileExt}`;
-
-    // Generate signed upload URL (valid for 1 hour)
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(bucketName)
-      .createSignedUploadUrl(filePath);
-
-    if (uploadError || !uploadData) {
-      console.error("Failed to create signed upload URL:", uploadError);
-      return c.json({ error: "Failed to generate upload URL", details: uploadError?.message }, 500);
-    }
-
-    return c.json({
-      success: true,
-      uploadUrl: uploadData.signedUrl,
-      filePath: filePath,
-      token: uploadData.token,
-      assetId: asset.asset_id,
-      tenantId: tenantId,
-    });
-
-  } catch (error: any) {
-    console.error("Get upload URL error:", error);
-    return c.json({ error: "Internal server error", details: error.message }, 500);
+    if (data?.[t.pk]) return String(data[t.pk]);
   }
-});
 
-// NEW: Save photo metadata after direct upload
-app.post("/make-server-c894a9ff/photos/save-metadata", async (c) => {
+  throw new Error("Failed to auto-create asset (primary key column not matched).");
+}
+
+function inferAssetTypeFromRef(assetRef: string) {
+  if (assetRef.startsWith("RS-")) return "Road Sign";
+  if (assetRef.startsWith("GR-")) return "Guardrail";
+  if (assetRef.startsWith("GS-")) return "Gantry";
+  if (assetRef.startsWith("RB-")) return "Safety Barrier";
+  if (assetRef.startsWith("RRM-")) return "Raised Road Marker";
+  if (assetRef.startsWith("RM-")) return "Road Marking";
+  if (assetRef.startsWith("FNC-")) return "Fence";
+  if (assetRef.startsWith("GP-")) return "Guidepost";
+  if (assetRef.startsWith("TS-")) return "Traffic Signal";
+  return "Road Sign";
+}
+
+// ---- ROUTE HANDLERS (registered on multiple paths to eliminate 404s) ----
+
+const getUploadUrlHandler = async (c: any) => {
   try {
     const authHeader = c.req.header("Authorization");
-    if (!authHeader) {
-      return c.json({ error: "Missing authorization header" }, 401);
+    const token = getBearerToken(authHeader);
+
+    if (!token) {
+      return c.json({ error: "No Authorization token provided" }, 401);
     }
 
-    const accessToken = authHeader.replace("Bearer ", "");
-    
-    // Verify user
-    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
-    if (authError || !user) {
-      return c.json({ error: "Unauthorized" }, 401);
+    const { data: authData, error: authError } = await supabaseAuth.auth.getUser(token);
+    if (authError || !authData?.user) {
+      return c.json({ error: "Invalid token" }, 401);
     }
 
-    // Parse request body
+    const user = authData.user;
+
+    const tenantId = await resolveTenantIdForUser({ id: user.id, email: user.email });
+    if (!tenantId) {
+      return c.json(
+        { error: `User not found or no tenant assigned: ${user.email ?? "unknown"} (${user.id})` },
+        403
+      );
+    }
+
     const body = await c.req.json();
-    const { 
-      assetId, 
-      tenantId, 
-      filePath, 
-      photoNumber, 
-      photoType, 
-      componentNumber, 
-      subNumber,
-      fileSize,
-      fileType 
-    } = body;
+    const assetRef = String(body.assetRef || "").trim();
+    const photoNumber = Number(body.photoNumber || 0);
+    const fileName = String(body.fileName || "photo.jpg");
+    const fileExt = fileName.split(".").pop()?.toLowerCase() || "jpg";
 
-    if (!assetId || !tenantId || !filePath || !photoNumber || !photoType) {
-      return c.json({ error: "Missing required fields" }, 400);
+    if (!assetRef || !photoNumber) {
+      return c.json({ error: "assetRef and photoNumber are required" }, 400);
     }
 
-    // Ensure inspection-photos bucket exists
-    const bucketName = "make-c894a9ff-inspection-photos";
+    // 1) Lookup asset id safely
+    let assetId = await lookupAssetIdByRef(tenantId, assetRef);
 
-    // Get signed URL for viewing
-    const { data: urlData } = await supabase.storage
-      .from(bucketName)
-      .createSignedUrl(filePath, 31536000);
-
-    // Store photo metadata in database
-    const photoMetadata = {
-      photo_id: uuidv4(),
-      asset_id: assetId,
-      tenant_id: tenantId,
-      photo_url: filePath,
-      photo_number: photoNumber,
-      photo_type: photoType,
-      component_number: componentNumber ? parseInt(componentNumber) : null,
-      sub_number: subNumber ? parseInt(subNumber) : null,
-      file_size: fileSize || null,
-      file_type: fileType || null,
-      uploaded_at: new Date().toISOString(),
-      uploaded_by: user.id,
-    };
-
-    const { error: insertError } = await supabase
-      .from("asset_photos")
-      .insert(photoMetadata);
-
-    if (insertError) {
-      console.error("Database insert error:", insertError);
-      return c.json({ error: "Failed to save photo metadata", details: insertError.message }, 500);
+    // 2) Auto-create if missing (kept behaviour)
+    if (!assetId) {
+      const assetTypeName = inferAssetTypeFromRef(assetRef);
+      assetId = await insertAssetIfMissing(tenantId, assetRef, user.id, assetTypeName);
     }
 
-    // If this is the main photo, update asset
-    if (photoType === "main") {
-      await supabase
-        .from("assets")
-        .update({ main_photo_url: filePath })
-        .eq("asset_id", assetId);
+    const filePath = `${tenantId}/assets/${assetRef}/photo_${photoNumberNum}.${fileExt}`;
+
+
+    const { data: uploadData, error: uploadError } =
+      await supabase.storage.from(PHOTO_BUCKET).createSignedUploadUrl(filePath);
+
+    if (uploadError) {
+      return c.json({ error: uploadError.message }, 500);
     }
 
     return c.json({
-      success: true,
-      url: urlData?.signedUrl,
-      photoId: photoMetadata.photo_id,
-      message: `Photo ${photoNumber} metadata saved`,
+      uploadUrl: uploadData.signedUrl,
+      path: filePath,
+      assetId,
+      tenantId,
+      bucket: PHOTO_BUCKET,
     });
-
   } catch (error: any) {
-    console.error("Save metadata error:", error);
-    return c.json({ error: "Internal server error", details: error.message }, 500);
+    return c.json({ error: error?.message || "Unknown error" }, 500);
   }
-});
+};
 
-// Get photos for an asset
-app.get("/make-server-c894a9ff/photos/:assetId", async (c) => {
+const saveMetadataHandler = async (c: any) => {
   try {
     const authHeader = c.req.header("Authorization");
-    if (!authHeader) {
-      return c.json({ error: "Missing authorization header" }, 401);
+    const token = getBearerToken(authHeader);
+
+    if (!token) return c.json({ error: "No Authorization token provided" }, 401);
+
+    const { data: authData, error: authError } = await supabaseAuth.auth.getUser(token);
+    if (authError || !authData?.user) return c.json({ error: "Invalid token" }, 401);
+
+    const user = authData.user;
+
+    const tenantId = await resolveTenantIdForUser({ id: user.id, email: user.email });
+    if (!tenantId) {
+      return c.json(
+        { error: `User not found or no tenant assigned: ${user.email ?? "unknown"} (${user.id})` },
+        403
+      );
     }
 
-    const accessToken = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken);
-    
-    if (authError || !user) {
-      return c.json({ error: "Unauthorized" }, 401);
+    const body = await c.req.json();
+    const assetId = String(body.assetId || "").trim();
+    const path = String(body.path || "").trim();
+    const photoNumber = Number(body.photoNumber || 0);
+    const photoType = String(body.photoType || "component").trim();
+
+    if (!assetId || !path) {
+      return c.json({ error: "assetId and path are required" }, 400);
     }
 
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("asset_photos")
+      .insert([
+        {
+          photo_id: crypto.randomUUID(),
+          tenant_id: tenantId,
+          asset_id: assetId,
+          photo_number: photoNumber,
+          photo_type: photoType,
+          file_path: path,
+          url: publicUrl,
+          uploaded_by: user.id,
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select("*");
+
+    if (insertError) return c.json({ error: insertError.message }, 500);
+
+    return c.json({ success: true, photo: inserted?.[0] ?? null });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Unknown error" }, 500);
+  }
+};
+
+const listPhotosHandler = async (c: any) => {
+  try {
     const assetId = c.req.param("assetId");
+    
+    // Get auth token to validate user
+    const authHeader = c.req.header("Authorization");
+    const token = getBearerToken(authHeader);
+    
+    if (!token) {
+      return c.json({ error: "No Authorization token provided" }, 401);
+    }
 
-    const { data: photos, error } = await supabase
+    const { data: authData, error: authError } = await supabaseAuth.auth.getUser(token);
+    if (authError || !authData?.user) {
+      return c.json({ error: "Invalid token" }, 401);
+    }
+
+    // Fetch photos from database
+    const { data, error } = await supabase
       .from("asset_photos")
       .select("*")
       .eq("asset_id", assetId)
-      .order("photo_number", { ascending: true });
+      .order("photo_number");
 
-    if (error) {
-      return c.json({ error: "Failed to fetch photos", details: error.message }, 500);
-    }
-
-    const bucketName = "make-c894a9ff-inspection-photos";
+    if (error) return c.json({ error: error.message }, 500);
+    
+    // Generate signed URLs for each photo
     const photosWithUrls = await Promise.all(
-      photos.map(async (photo) => {
-        const { data: urlData } = await supabase.storage
-          .from(bucketName)
-          .createSignedUrl(photo.photo_url, 3600);
-
-        return {
-          ...photo,
-          signedUrl: urlData?.signedUrl || null,
+      (data || []).map(async (photo) => {
+        if (!photo.file_path) {
+          return { ...photo, signedUrl: null };
+        }
+        
+        // Generate signed URL (valid for 1 hour)
+        const { data: signedData, error: signedError } = await supabase.storage
+          .from(PHOTO_BUCKET)
+          .createSignedUrl(photo.file_path, 3600);
+        
+        if (signedError) {
+          // Only log as warning if photo doesn't exist (404), not as error
+          if (signedError.message?.includes('not found') || signedError.statusCode === '404') {
+            console.log(`[PHOTOS] Photo not found (skipping): ${photo.file_path}`);
+          } else {
+            console.error(`Error generating signed URL for ${photo.file_path}:`, signedError);
+          }
+          return { ...photo, signedUrl: null };
+        }
+        
+        return { 
+          ...photo, 
+          signedUrl: signedData.signedUrl,
+          url: signedData.signedUrl // Also set url for backward compatibility
         };
       })
     );
 
     return c.json({ photos: photosWithUrls });
-
   } catch (error: any) {
-    console.error("Fetch photos error:", error);
-    return c.json({ error: "Internal server error", details: error.message }, 500);
+    return c.json({ error: error?.message || "Unknown error" }, 500);
   }
-});
+};
+
+// Handler to list photos by asset reference
+const listPhotosByRefHandler = async (c: any) => {
+  try {
+    const assetRef = c.req.param("assetRef");
+    
+    // Get auth token to validate user
+    const authHeader = c.req.header("Authorization");
+    const token = getBearerToken(authHeader);
+    
+    if (!token) {
+      return c.json({ error: "No Authorization token provided" }, 401);
+    }
+
+    const { data: authData, error: authError } = await supabaseAuth.auth.getUser(token);
+    if (authError || !authData?.user) {
+      return c.json({ error: "Invalid token" }, 401);
+    }
+
+    // Get tenant for user
+    const tenantId = await resolveTenantIdForUser({ id: authData.user.id, email: authData.user.email });
+    if (!tenantId) {
+      return c.json({ error: "User not found or no tenant assigned" }, 403);
+    }
+
+    // Fetch photos from database by asset_ref
+    const { data, error } = await supabase
+      .from("asset_photos")
+      .select("*")
+      .eq("asset_ref", assetRef)
+      .eq("tenant_id", tenantId)
+      .order("photo_number");
+
+    if (error) return c.json({ error: error.message }, 500);
+    
+    // Generate signed URLs for each photo
+    const photosWithUrls = await Promise.all(
+      (data || []).map(async (photo) => {
+        if (!photo.file_path) {
+          return { ...photo, signedUrl: null };
+        }
+        
+        // Generate signed URL (valid for 1 hour)
+        const { data: signedData, error: signedError } = await supabase.storage
+          .from(PHOTO_BUCKET)
+          .createSignedUrl(photo.file_path, 3600);
+        
+        if (signedError) {
+          // Only log as warning if photo doesn't exist (404), not as error
+          if (signedError.message?.includes('not found') || signedError.statusCode === '404') {
+            console.log(`[PHOTOS] Photo not found (skipping): ${photo.file_path}`);
+          } else {
+            console.error(`Error generating signed URL for ${photo.file_path}:`, signedError);
+          }
+          return { ...photo, signedUrl: null };
+        }
+        
+        return { 
+          ...photo, 
+          signedUrl: signedData.signedUrl,
+          url: signedData.signedUrl // Also set url for backward compatibility
+        };
+      })
+    );
+
+    return c.json({ photos: photosWithUrls });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Unknown error" }, 500);
+  }
+};
+
+// Register on multiple paths so you never 404 depending on what pathname the runtime gives you
+const routes = {
+  getUpload: [
+    "/photos/get-upload-url",
+    "/make-server-c894a9ff/photos/get-upload-url",
+    "/functions/v1/make-server-c894a9ff/photos/get-upload-url",
+  ],
+  saveMeta: [
+    "/photos/save-metadata",
+    "/make-server-c894a9ff/photos/save-metadata",
+    "/functions/v1/make-server-c894a9ff/photos/save-metadata",
+  ],
+  list: [
+    "/photos/:assetId",
+    "/make-server-c894a9ff/photos/:assetId",
+    "/functions/v1/make-server-c894a9ff/photos/:assetId",
+  ],
+  listByRef: [
+    "/photos/by-ref/:assetRef",
+    "/make-server-c894a9ff/photos/by-ref/:assetRef",
+    "/functions/v1/make-server-c894a9ff/photos/by-ref/:assetRef",
+  ],
+};
+
+routes.getUpload.forEach((p) => app.post(p, getUploadUrlHandler));
+routes.saveMeta.forEach((p) => app.post(p, saveMetadataHandler));
+routes.list.forEach((p) => app.get(p, listPhotosHandler));
+routes.listByRef.forEach((p) => app.get(p, listPhotosByRefHandler));
+
+
 
 // ============================================================================
 // ADMIN ROUTES - Unassigned Assets (Tenant Migration)
@@ -7738,4 +8084,14 @@ app.post("/make-server-c894a9ff/admin/claim-assets", async (c) => {
   }
 });
 
-Deno.serve(withTimeout(app.fetch));
+// ============================================================================
+// SERVER STARTUP
+// ============================================================================
+
+console.log("TAMS360 Server starting...");
+console.log("Note: 'broken pipe' or 'connection closed' errors are informational.");
+console.log("They occur when clients disconnect before responses complete (e.g., closing popups).");
+console.log("These are logged by Deno's HTTP runtime and do not indicate a problem.");
+console.log("Server ready!");
+
+Deno.serve(wrapWithTimeout(app.fetch));

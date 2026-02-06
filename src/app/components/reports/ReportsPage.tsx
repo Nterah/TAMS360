@@ -3,12 +3,15 @@ import { AuthContext } from "../../App";
 import { useTenant } from "../../contexts/TenantContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { Download, FileText, BarChart3, TrendingUp, Loader2, PieChart as PieChartIcon } from "lucide-react";
+import { Download, FileText, BarChart3, TrendingUp, Loader2, PieChartIcon, Filter, Search } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 import { downloadReport } from "../../utils/reportGenerators";
+import { generatePhotoPDFReport, generatePhotoExcelReport } from "../../utils/reportGenerators";
 import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 export default function ReportsPage() {
@@ -20,6 +23,26 @@ export default function ReportsPage() {
   const [customReportType, setCustomReportType] = useState('assets');
   const [customAssetType, setCustomAssetType] = useState('all');
   const [customRegion, setCustomRegion] = useState('all');
+
+  // Global report filters (applies to all standard reports)
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterAssetType, setFilterAssetType] = useState('all');
+  const [filterRegion, setFilterRegion] = useState('all');
+  const [filterWard, setFilterWard] = useState('all');
+  const [filterDepot, setFilterDepot] = useState('all');
+  const [filterOwner, setFilterOwner] = useState('all');
+  const [filterRoadName, setFilterRoadName] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterCondition, setFilterCondition] = useState('all');
+  const [filterUrgency, setFilterUrgency] = useState('all');
+
+  // Unique filter values
+  const [uniqueAssetTypes, setUniqueAssetTypes] = useState<string[]>([]);
+  const [uniqueRegions, setUniqueRegions] = useState<string[]>([]);
+  const [uniqueWards, setUniqueWards] = useState<string[]>([]);
+  const [uniqueDepots, setUniqueDepots] = useState<string[]>([]);
+  const [uniqueOwners, setUniqueOwners] = useState<string[]>([]);
+  const [uniqueRoadNames, setUniqueRoadNames] = useState<string[]>([]);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
@@ -37,7 +60,35 @@ export default function ReportsPage() {
   useEffect(() => {
     fetchReportSummary();
     fetchAnalyticsData();
+    fetchUniqueFilterValues();
   }, []);
+
+  const fetchUniqueFilterValues = async () => {
+    try {
+      const assetsRes = await fetch(`${API_URL}/assets`, {
+        headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+      });
+      const assetsData = await assetsRes.json();
+      const assets = assetsData.assets || [];
+
+      // Extract unique values
+      const types = [...new Set(assets.map((a: any) => a.asset_type_name).filter(Boolean))].sort();
+      const regions = [...new Set(assets.map((a: any) => a.region).filter(Boolean))].sort();
+      const wards = [...new Set(assets.map((a: any) => a.ward).filter(Boolean))].sort();
+      const depots = [...new Set(assets.map((a: any) => a.depot).filter(Boolean))].sort();
+      const owners = [...new Set(assets.map((a: any) => a.owner).filter(Boolean))].sort();
+      const roads = [...new Set(assets.map((a: any) => a.road_name).filter(Boolean))].sort();
+
+      setUniqueAssetTypes(types as string[]);
+      setUniqueRegions(regions as string[]);
+      setUniqueWards(wards as string[]);
+      setUniqueDepots(depots as string[]);
+      setUniqueOwners(owners as string[]);
+      setUniqueRoadNames(roads as string[]);
+    } catch (error) {
+      console.error('Error fetching unique filter values:', error);
+    }
+  };
 
   const fetchAnalyticsData = async () => {
     try {
@@ -169,6 +220,89 @@ export default function ReportsPage() {
       console.log('Logo URL:', tenant.logo_url || tenant.logoUrl);
       console.log('Primary Color:', tenant.primary_color || tenant.primaryColor);
 
+      // Helper function to apply filters to asset data
+      const applyFilters = (assets: any[]) => {
+        let filtered = [...assets];
+        
+        // Search term filter
+        if (searchTerm) {
+          const searchLower = searchTerm.toLowerCase();
+          filtered = filtered.filter((asset: any) => 
+            asset.asset_ref?.toLowerCase().includes(searchLower) ||
+            asset.asset_type_name?.toLowerCase().includes(searchLower) ||
+            asset.description?.toLowerCase().includes(searchLower) ||
+            asset.road_name?.toLowerCase().includes(searchLower) ||
+            asset.region?.toLowerCase().includes(searchLower)
+          );
+        }
+        
+        if (filterAssetType !== 'all') {
+          filtered = filtered.filter((asset: any) => 
+            asset.asset_type_name === filterAssetType
+          );
+        }
+        
+        if (filterRegion !== 'all') {
+          filtered = filtered.filter((asset: any) => 
+            asset.region === filterRegion
+          );
+        }
+        
+        if (filterWard !== 'all') {
+          filtered = filtered.filter((asset: any) => 
+            asset.ward === filterWard
+          );
+        }
+        
+        if (filterDepot !== 'all') {
+          filtered = filtered.filter((asset: any) => 
+            asset.depot === filterDepot
+          );
+        }
+        
+        if (filterOwner !== 'all') {
+          filtered = filtered.filter((asset: any) => 
+            asset.owner === filterOwner
+          );
+        }
+        
+        if (filterRoadName !== 'all') {
+          filtered = filtered.filter((asset: any) => 
+            asset.road_name === filterRoadName
+          );
+        }
+        
+        if (filterStatus !== 'all') {
+          filtered = filtered.filter((asset: any) => 
+            asset.status?.toLowerCase() === filterStatus.toLowerCase()
+          );
+        }
+        
+        if (filterCondition !== 'all') {
+          filtered = filtered.filter((asset: any) => {
+            const ci = parseFloat(asset.latest_ci || asset.condition_index);
+            if (isNaN(ci)) return false;
+            
+            switch(filterCondition) {
+              case 'excellent': return ci >= 80 && ci <= 100;
+              case 'good': return ci >= 60 && ci < 80;
+              case 'fair': return ci >= 40 && ci < 60;
+              case 'poor': return ci >= 20 && ci < 40;
+              case 'critical': return ci >= 0 && ci < 20;
+              default: return true;
+            }
+          });
+        }
+        
+        if (filterUrgency !== 'all') {
+          filtered = filtered.filter((asset: any) => 
+            asset.latest_urgency?.toString() === filterUrgency
+          );
+        }
+        
+        return filtered;
+      };
+
       let data: any[] = [];
       let columns: any[] = [];
       let title = reportType;
@@ -180,12 +314,16 @@ export default function ReportsPage() {
             headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
           });
           const assetsData = await assetsRes.json();
-          data = (assetsData.assets || []).map((asset: any) => ({
+          let assetsInventory = (assetsData.assets || []).map((asset: any) => ({
             ...asset,
             route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
             chainage_km: asset.km_marker || '-',
             condition_index: asset.latest_ci || '-',
           }));
+          
+          // Apply filters
+          data = applyFilters(assetsInventory);
+          
           columns = [
             { header: 'Asset Number', key: 'asset_ref' },
             { header: 'Asset Type', key: 'asset_type_name' },
@@ -203,13 +341,17 @@ export default function ReportsPage() {
             headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
           });
           const ciData = await ciRes.json();
-          data = (ciData.assets || []).map((asset: any) => ({
+          let conditionAssets = (ciData.assets || []).map((asset: any) => ({
             ...asset,
             condition_index: asset.latest_ci || '-',
             urgency_category: asset.latest_urgency || '-',
             last_inspection_date: asset.last_inspection_date || '-',
             route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
           }));
+          
+          // Apply filters
+          data = applyFilters(conditionAssets);
+          
           columns = [
             { header: 'Asset Number', key: 'asset_ref' },
             { header: 'Asset Type', key: 'asset_type_name' },
@@ -226,7 +368,7 @@ export default function ReportsPage() {
             headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
           });
           const valData = await valRes.json();
-          data = (valData.assets || []).map((asset: any) => {
+          let valuationAssets = (valData.assets || []).map((asset: any) => {
             const installDate = asset.install_date ? new Date(asset.install_date) : null;
             const ageYears = installDate ? (Date.now() - installDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25) : 0;
             const usefulLife = asset.useful_life_years || asset.expected_life_years || 20;
@@ -237,6 +379,10 @@ export default function ReportsPage() {
               depreciation_rate: depreciationRate.toFixed(2),
             };
           });
+          
+          // Apply filters
+          data = applyFilters(valuationAssets);
+          
           columns = [
             { header: 'Asset Number', key: 'asset_ref' },
             { header: 'Asset Type', key: 'asset_type_name' },
@@ -253,13 +399,17 @@ export default function ReportsPage() {
             headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
           });
           const locData = await locRes.json();
-          data = (locData.assets || []).map((asset: any) => ({
+          let locationAssets = (locData.assets || []).map((asset: any) => ({
             ...asset,
             route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
             section: asset.section || '-',
             chainage_km: asset.km_marker || '-',
             side_of_road: asset.side_of_road || '-',
           }));
+          
+          // Apply filters
+          data = applyFilters(locationAssets);
+          
           columns = [
             { header: 'Route/Road', key: 'route_road' },
             { header: 'Section', key: 'section' },
@@ -459,31 +609,202 @@ export default function ReportsPage() {
           ];
           break;
 
+        case 'Inventory with Images':
+        case 'Inspection Photos Summary':
+        case 'Asset Condition Photos':
+        case 'Photo Gallery Report':
+          // Fetch assets with their photos
+          const photoAssetsRes = await fetch(`${API_URL}/assets`, {
+            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+          });
+          const photoAssetsData = await photoAssetsRes.json();
+          const assets = photoAssetsData.assets || [];
+          
+          // Fetch photos for each asset
+          const assetsWithPhotos = await Promise.all(
+            assets.map(async (asset: any) => {
+              try {
+                const photosRes = await fetch(`${API_URL}/assets/${asset.asset_id}/photos`, {
+                  headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+                });
+                
+                if (photosRes.ok) {
+                  const photosData = await photosRes.json();
+                  const photos = photosData.photos || [];
+                  
+                  // Filter photos based on report type
+                  let filteredPhotos = photos;
+                  if (reportType === 'Inventory with Images') {
+                    // Include main photo (0.jpg) and all inspection photos
+                    filteredPhotos = photos.filter((p: any) => 
+                      p.name === '0.jpg' || p.name === '0.jpeg' || p.name === '0.png' || /^[1-6](_\d+)?\./.test(p.name)
+                    );
+                  } else if (reportType === 'Inspection Photos Summary') {
+                    // Only inspection photos (1.jpg, 1_1.jpg, etc.)
+                    filteredPhotos = photos.filter((p: any) => /^[1-6](_\d+)?\./.test(p.name));
+                  } else if (reportType === 'Asset Condition Photos') {
+                    // Main asset photo only
+                    filteredPhotos = photos.filter((p: any) => 
+                      p.name === '0.jpg' || p.name === '0.jpeg' || p.name === '0.png'
+                    );
+                  } else if (reportType === 'Photo Gallery Report') {
+                    // All photos
+                    filteredPhotos = photos;
+                  }
+                  
+                  return {
+                    ...asset,
+                    photos: filteredPhotos,
+                    photo_count: filteredPhotos.length,
+                    main_photo_url: filteredPhotos.length > 0 ? filteredPhotos[0].signedUrl : null,
+                  };
+                }
+              } catch (error) {
+                console.error(`Error fetching photos for asset ${asset.asset_id}:`, error);
+              }
+              
+              return {
+                ...asset,
+                photos: [],
+                photo_count: 0,
+                main_photo_url: null,
+              };
+            })
+          );
+          
+          // Filter out assets without photos for photo-only reports
+          let filteredAssets = reportType === 'Photo Gallery Report' 
+            ? assetsWithPhotos.filter(a => a.photo_count > 0)
+            : assetsWithPhotos;
+          
+          // Apply user-selected filters for photo reports
+          if (filterAssetType !== 'all') {
+            filteredAssets = filteredAssets.filter((asset: any) => 
+              asset.asset_type_name?.toLowerCase().includes(filterAssetType)
+            );
+          }
+          
+          if (filterRegion !== 'all') {
+            filteredAssets = filteredAssets.filter((asset: any) => 
+              asset.region?.toLowerCase().includes(filterRegion)
+            );
+          }
+          
+          if (filterCondition !== 'all') {
+            filteredAssets = filteredAssets.filter((asset: any) => {
+              const ci = parseFloat(asset.latest_ci);
+              if (isNaN(ci)) return false;
+              
+              switch(filterCondition) {
+                case 'excellent': return ci >= 80 && ci <= 100;
+                case 'good': return ci >= 60 && ci < 80;
+                case 'fair': return ci >= 40 && ci < 60;
+                case 'poor': return ci >= 20 && ci < 40;
+                case 'critical': return ci >= 0 && ci < 20;
+                default: return true;
+              }
+            });
+          }
+          
+          if (filterUrgency !== 'all') {
+            filteredAssets = filteredAssets.filter((asset: any) => 
+              asset.latest_urgency?.toString() === filterUrgency
+            );
+          }
+          
+          data = filteredAssets.map((asset: any) => ({
+            ...asset,
+            route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
+            chainage_km: asset.km_marker || '-',
+            condition_index: asset.latest_ci || '-',
+            urgency_category: asset.latest_urgency || '-',
+            coordinates: asset.latitude && asset.longitude ? `${asset.latitude.toFixed(6)}, ${asset.longitude.toFixed(6)}` : '-',
+            description: asset.description || asset.asset_type_name || '-',
+          }));
+          
+          columns = [
+            { header: 'Reference Number', key: 'asset_ref' },
+            { header: 'Coordinates', key: 'coordinates' },
+            { header: 'Road Name', key: 'route_road' },
+            { header: 'Description', key: 'description' },
+            { header: 'Condition Index', key: 'condition_index' },
+            { header: 'Urgency', key: 'urgency_category' },
+            { header: 'Status', key: 'status' },
+            { header: 'Photos', key: 'photo_count' },
+          ];
+          break;
+
         default:
           toast.error('Unknown report type');
           return;
       }
 
-      await downloadReport(format.toLowerCase() as 'pdf' | 'excel' | 'csv', {
-        title,
-        data,
-        columns,
-        tenant: {
-          organizationName: tenant.organization_name || tenant.organizationName,
-          logoUrl: tenant.logo_url || tenant.logoUrl,
-          primaryColor: tenant.primary_color || tenant.primaryColor || '#010D13',
-          regionName: tenant.region_name || tenant.regionName,
-          currency: 'ZAR',
-          tagline: tenant.tagline,
-          address: tenant.address,
-          phone: tenant.phone,
-          email: tenant.email,
-          website: tenant.website,
-        },
-        fileName: `${fileName}-${new Date().toISOString().split('T')[0]}`,
-        includeDate: true,
-        includeFooter: true,
-      });
+      if (reportType.includes('Photo')) {
+        if (format === 'PDF') {
+          await generatePhotoPDFReport({
+            title,
+            data,
+            columns,
+            tenant: {
+              organizationName: tenant.organization_name || tenant.organizationName,
+              logoUrl: tenant.logo_url || tenant.logoUrl,
+              primaryColor: tenant.primary_color || tenant.primaryColor || '#010D13',
+              regionName: tenant.region_name || tenant.regionName,
+              currency: 'ZAR',
+              tagline: tenant.tagline,
+              address: tenant.address,
+              phone: tenant.phone,
+              email: tenant.email,
+              website: tenant.website,
+            },
+            fileName: `${fileName}-${new Date().toISOString().split('T')[0]}`,
+            includeDate: true,
+            includeFooter: true,
+          });
+        } else if (format === 'Excel') {
+          await generatePhotoExcelReport({
+            title,
+            data,
+            columns,
+            tenant: {
+              organizationName: tenant.organization_name || tenant.organizationName,
+              logoUrl: tenant.logo_url || tenant.logoUrl,
+              primaryColor: tenant.primary_color || tenant.primaryColor || '#010D13',
+              regionName: tenant.region_name || tenant.regionName,
+              currency: 'ZAR',
+              tagline: tenant.tagline,
+              address: tenant.address,
+              phone: tenant.phone,
+              email: tenant.email,
+              website: tenant.website,
+            },
+            fileName: `${fileName}-${new Date().toISOString().split('T')[0]}`,
+            includeDate: true,
+            includeFooter: true,
+          });
+        }
+      } else {
+        await downloadReport(format.toLowerCase() as 'pdf' | 'excel' | 'csv', {
+          title,
+          data,
+          columns,
+          tenant: {
+            organizationName: tenant.organization_name || tenant.organizationName,
+            logoUrl: tenant.logo_url || tenant.logoUrl,
+            primaryColor: tenant.primary_color || tenant.primaryColor || '#010D13',
+            regionName: tenant.region_name || tenant.regionName,
+            currency: 'ZAR',
+            tagline: tenant.tagline,
+            address: tenant.address,
+            phone: tenant.phone,
+            email: tenant.email,
+            website: tenant.website,
+          },
+          fileName: `${fileName}-${new Date().toISOString().split('T')[0]}`,
+          includeDate: true,
+          includeFooter: true,
+        });
+      }
 
       toast.success(`${reportType} exported as ${format} successfully!`);
     } catch (error) {
@@ -689,6 +1010,169 @@ export default function ReportsPage() {
             </TabsList>
 
             <TabsContent value="standard" className="space-y-4 mt-4">
+              {/* Global Filter Section for All Standard Reports */}
+              <div className="p-3 border rounded-lg bg-accent/20 space-y-3">
+                <h4 className="text-xs font-semibold flex items-center gap-2">
+                  <Filter className="w-3 h-3" />
+                  Filter Assets
+                </h4>
+                
+                {/* Search Input */}
+                <div>
+                  <Label className="text-xs mb-1 block">Search Assets</Label>
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-8 h-8 text-xs"
+                    />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-4 gap-2">
+                  <div>
+                    <Label className="text-xs mb-1 block">Asset Type</Label>
+                    <Select value={filterAssetType} onValueChange={setFilterAssetType}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Types</SelectItem>
+                        {uniqueAssetTypes.map((type) => (
+                          <SelectItem key={type} value={type}>{type}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs mb-1 block">Region</Label>
+                    <Select value={filterRegion} onValueChange={setFilterRegion}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Regions</SelectItem>
+                        {uniqueRegions.map((region) => (
+                          <SelectItem key={region} value={region}>{region}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs mb-1 block">Ward</Label>
+                    <Select value={filterWard} onValueChange={setFilterWard}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Wards</SelectItem>
+                        {uniqueWards.map((ward) => (
+                          <SelectItem key={ward} value={ward}>{ward}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs mb-1 block">Depot</Label>
+                    <Select value={filterDepot} onValueChange={setFilterDepot}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Depots</SelectItem>
+                        {uniqueDepots.map((depot) => (
+                          <SelectItem key={depot} value={depot}>{depot}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs mb-1 block">Owner</Label>
+                    <Select value={filterOwner} onValueChange={setFilterOwner}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Owners</SelectItem>
+                        {uniqueOwners.map((owner) => (
+                          <SelectItem key={owner} value={owner}>{owner}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs mb-1 block">Road Name</Label>
+                    <Select value={filterRoadName} onValueChange={setFilterRoadName}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Roads</SelectItem>
+                        {uniqueRoadNames.map((road) => (
+                          <SelectItem key={road} value={road}>{road}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs mb-1 block">Status</Label>
+                    <Select value={filterStatus} onValueChange={setFilterStatus}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Statuses</SelectItem>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="damaged">Damaged</SelectItem>
+                        <SelectItem value="missing">Missing</SelectItem>
+                        <SelectItem value="repaired">Repaired</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs mb-1 block">Condition (CI)</Label>
+                    <Select value={filterCondition} onValueChange={setFilterCondition}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Conditions</SelectItem>
+                        <SelectItem value="excellent">Excellent (80-100)</SelectItem>
+                        <SelectItem value="good">Good (60-79)</SelectItem>
+                        <SelectItem value="fair">Fair (40-59)</SelectItem>
+                        <SelectItem value="poor">Poor (20-39)</SelectItem>
+                        <SelectItem value="critical">Critical (0-19)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label className="text-xs mb-1 block">Urgency</Label>
+                    <Select value={filterUrgency} onValueChange={setFilterUrgency}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Urgency</SelectItem>
+                        <SelectItem value="1">Category 1</SelectItem>
+                        <SelectItem value="2">Category 2</SelectItem>
+                        <SelectItem value="3">Category 3</SelectItem>
+                        <SelectItem value="4">Category 4</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+              
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-3">
                   <h3 className="font-semibold text-sm flex items-center gap-2">
@@ -767,6 +1251,31 @@ export default function ReportsPage() {
                           <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'CSV')}>
                             <Download className="w-3 h-3 mr-1" />
                             CSV
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <PieChartIcon className="w-4 h-4" />
+                    Photo Reports
+                  </h3>
+                  
+                  <div className="space-y-2">
+                    {['Inventory with Images', 'Inspection Photos Summary', 'Asset Condition Photos', 'Photo Gallery Report'].map((report) => (
+                      <div key={report} className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors">
+                        <span className="text-sm font-medium">{report}</span>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'PDF')}>
+                            <Download className="w-3 h-3 mr-1" />
+                            PDF
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'Excel')}>
+                            <Download className="w-3 h-3 mr-1" />
+                            Excel
                           </Button>
                         </div>
                       </div>

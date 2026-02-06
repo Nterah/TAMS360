@@ -81,10 +81,11 @@ export default function EditInspectionPage() {
           overall_comments: insp.finding_summary || "",
           component_scores: componentScores,
           aggregates: {
-            ci_health: insp.ci_health,
-            ci_safety: insp.ci_safety,
-            ci_final: insp.ci_final,
-            worst_urgency: insp.calculated_urgency,
+            // Read from calculation_metadata (authoritative stored values)
+            ci_health: insp.calculation_metadata?.ci_health ?? insp.ci_health,
+            ci_safety: insp.calculation_metadata?.ci_safety ?? insp.ci_safety,
+            ci_final: insp.calculation_metadata?.ci_final ?? insp.ci_final,
+            worst_urgency: insp.calculation_metadata?.worst_urgency ?? insp.calculated_urgency,
             overall_degree: insp.degree,
             overall_extent: insp.extent,
             overall_relevancy: insp.relevancy,
@@ -154,7 +155,10 @@ export default function EditInspectionPage() {
         console.log('[EditInspection] Component template response:', data);
         
         if (data.template) {
+          console.log('[EditInspection] Template found with', data.template.items?.length || 0, 'components');
           setComponentTemplate(data.template);
+          // Enrich existing component scores with template metadata
+          enrichComponentScoresWithTemplate(data.template);
         } else {
           console.warn('[EditInspection] No component template found for:', assetTypeName);
           if (data.error) {
@@ -184,6 +188,59 @@ export default function EditInspectionPage() {
     } finally {
       setTemplateLoading(false);
     }
+  };
+
+  // Enrich component scores with latest template metadata
+  const enrichComponentScoresWithTemplate = (template: any) => {
+    if (!template || !template.items || formData.component_scores.length === 0) {
+      console.warn('[Enrichment] Skipping enrichment - missing template or component scores');
+      return;
+    }
+
+    console.log('[Enrichment] Starting enrichment with', formData.component_scores.length, 'stored components and', template.items.length, 'template components');
+
+    const enrichedScores = formData.component_scores.map((score: any, index: number) => {
+      // Try to match by component_order/component_number first (most reliable for edit)
+      let templateComp = template.items.find(
+        (tc: any) => tc.component_order === score.component_number || tc.component_order === (index + 1)
+      );
+
+      // Fallback: Try to match by component_name
+      if (!templateComp) {
+        templateComp = template.items.find(
+          (tc: any) => tc.component_name === score.component_name
+        );
+      }
+
+      // Fallback: Try matching by position/index
+      if (!templateComp && template.items[index]) {
+        templateComp = template.items[index];
+        console.log(`[Enrichment] Matched component by index ${index}: "${score.component_name}" -> "${templateComp.component_name}"`);
+      }
+
+      if (templateComp) {
+        console.log(`[Enrichment] Enriching component ${index + 1}: "${score.component_name}" with template "${templateComp.component_name}"`);
+        // Merge: preserve scores and all inspection data, update ONLY template metadata
+        return {
+          ...score,
+          // Update component name from template (fixes generic "Comp 1" -> "1. Foundation")
+          component_name: templateComp.component_name,
+          // Update from template (descriptions, rubrics, units)
+          what_to_inspect: templateComp.what_to_inspect,
+          degree_rubric: templateComp.degree_rubric,
+          extent_rubric: templateComp.extent_rubric,
+          relevancy_rubric: templateComp.relevancy_rubric,
+          unit: templateComp.quantity_unit || score.unit,
+        };
+      } else {
+        console.warn(`[Enrichment] No template match found for component ${index + 1}: "${score.component_name}"`);
+      }
+
+      return score;
+    });
+
+    console.log('[Enrichment] Enriched component scores:', enrichedScores.map(s => ({ name: s.component_name, number: s.component_number })));
+    setFormData(prev => ({ ...prev, component_scores: enrichedScores }));
   };
 
   const fetchAndLogAssetTypes = async (requestedType: string) => {
@@ -377,18 +434,16 @@ export default function EditInspectionPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Asset *</Label>
-              <Select value={formData.asset_id} onValueChange={handleAssetChange}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select asset to inspect" />
-                </SelectTrigger>
-                <SelectContent>
-                  {assets.map((asset) => (
-                    <SelectItem key={asset.asset_id} value={asset.asset_id}>
-                      {asset.asset_ref} - {asset.asset_type_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="relative">
+                <Input 
+                  value={selectedAsset ? `${selectedAsset.asset_ref} - ${selectedAsset.asset_type_name}` : 'Loading...'} 
+                  disabled 
+                  className="bg-muted cursor-not-allowed font-medium"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Asset is locked for existing inspections
+                </p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Inspection Date *</Label>
@@ -444,6 +499,7 @@ export default function EditInspectionPage() {
           repairThreshold={60}
           onScoresChange={handleComponentScoresChange}
           initialScores={formData.component_scores}
+          initialAggregates={formData.aggregates}
         />
       ) : templateLoading ? (
         <Card>

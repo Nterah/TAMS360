@@ -335,7 +335,7 @@ export default function MobileNewInspectionPage() {
             </Button>
             <div>
               <h1 className="text-lg font-bold">New Inspection</h1>
-              <p className="text-xs text-slate-500">DERU Component Assessment</p>
+              <p className="text-xs text-slate-500">Component-based Assessment</p>
             </div>
           </div>
           <Badge variant={isOnline ? "default" : "secondary"} className="gap-1">
@@ -488,7 +488,7 @@ export default function MobileNewInspectionPage() {
             <CardContent className="py-12 text-center text-slate-500">
               <CheckCircle2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
               <p className="text-sm">Select an asset above to begin</p>
-              <p className="text-xs mt-1">Component-based DERU inspection</p>
+              <p className="text-xs mt-1">Component-based inspection</p>
             </CardContent>
           </Card>
         )}

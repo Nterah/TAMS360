@@ -31,6 +31,7 @@ interface ComponentInspectionFormProps {
   repairThreshold?: number; // Default 60
   onScoresChange?: (scores: ComponentScore[], aggregates: any) => void;
   initialScores?: any[]; // For editing existing inspections
+  initialAggregates?: any; // Pre-calculated aggregates from database
 }
 
 export default function ComponentInspectionForm({
@@ -39,6 +40,7 @@ export default function ComponentInspectionForm({
   repairThreshold = 60,
   onScoresChange,
   initialScores,
+  initialAggregates,
 }: ComponentInspectionFormProps) {
   const [componentScores, setComponentScores] = useState<ComponentScore[]>(() => {
     // If initialScores provided, use them; otherwise create empty scores
@@ -76,6 +78,9 @@ export default function ComponentInspectionForm({
       photo_url: undefined,
     }));
   });
+
+  // Use initialAggregates if provided (from stored calculation_metadata)
+  const [useStoredAggregates, setUseStoredAggregates] = useState(!!initialAggregates);
 
   // Calculate CI for a single component
   const calculateComponentCI = (D: string, E: string, R: string): number | null => {
@@ -321,7 +326,7 @@ export default function ComponentInspectionForm({
     return urgencyLabels[urgency] || { label: "Unknown", color: "bg-slate-500", icon: XCircle };
   };
 
-  const aggregates = calculateAggregates(componentScores);
+  const aggregates = useStoredAggregates ? initialAggregates : calculateAggregates(componentScores);
 
   return (
     <div className="space-y-6">

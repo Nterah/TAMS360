@@ -1,16 +1,13 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/app/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/app/components/ui/card";
 import { Badge } from "@/app/components/ui/badge";
 import { Progress } from "@/app/components/ui/progress";
 import { Alert, AlertDescription } from "@/app/components/ui/alert";
-import { Upload, FolderOpen, Image as ImageIcon, CheckCircle2, XCircle, AlertCircle, FileImage } from "lucide-react";
+import { Upload, FolderOpen, Image as ImageIcon, CheckCircle2, XCircle, AlertCircle, FileImage, LogIn } from "lucide-react";
 import { toast } from "sonner";
-import { publicAnonKey, projectId } from "/utils/supabase/info";
-import { createClient } from "@supabase/supabase-js";
-
-const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
-const supabase = createClient(`https://${projectId}.supabase.co`, publicAnonKey);
+import { supabase, API_URL } from "@/lib/supabaseClient";
+import { getValidSession } from "@/app/utils/authHelper";
 
 // Helper function to compress images in the browser
 async function compressImage(file: File, maxSizeMB = 1): Promise<Blob> {
@@ -87,6 +84,28 @@ export function ImportPhotosPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [sessionValid, setSessionValid] = useState<boolean | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
+  // Check session status on mount
+  useEffect(() => {
+    checkSession();
+  }, []);
+
+  // Check session status
+  const checkSession = async () => {
+    const result = await getValidSession();
+    if (result.ok) {
+      setSessionValid(true);
+      setSessionError(null);
+    } else {
+      setSessionValid(false);
+      setSessionError(result.reason === "missing_session" 
+        ? "No active session. Please log in to upload photos." 
+        : "Session expired. Please log in again.");
+    }
+    return result.ok;
+  };
 
   const parsePhotoMetadata = (file: File): ParsedPhoto | null => {
     // Extract path components
@@ -189,12 +208,16 @@ export function ImportPhotosPage() {
     setParsing(false);
 
     // Show summary
-    const assetRefs = new Set(parsedPhotos.map(p => p.assetRef));
-    toast.success(`Parsed ${parsedPhotos.length} photos for ${assetRefs.size} assets`);
+    if (parsedPhotos.length === 0) {
+      toast.warning("No photos found in this folder. Please select the top 'Inspection Photos' folder that contains asset-type subfolders.");
+    } else {
+      const assetRefs = new Set(parsedPhotos.map(p => p.assetRef));
+      toast.success(`Parsed ${parsedPhotos.length} photos for ${assetRefs.size} assets`);
 
-    if (invalidFiles.length > 0) {
-      console.warn("Invalid files skipped:", invalidFiles);
-      toast.warning(`Skipped ${invalidFiles.length} files with invalid structure`);
+      if (invalidFiles.length > 0) {
+        console.warn("Invalid files skipped:", invalidFiles);
+        toast.warning(`Skipped ${invalidFiles.length} files with invalid structure`);
+      }
     }
   }, []);
 
@@ -204,16 +227,26 @@ export function ImportPhotosPage() {
       return;
     }
 
-    // Get fresh access token from Supabase session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    
-    if (sessionError || !session?.access_token) {
-      toast.error("You must be logged in to upload photos. Please log in and try again.");
+    // Check session validity
+    const sessionResult = await getValidSession();
+    if (!sessionResult.ok) {
+      // Session is invalid - show error and don't upload
+      if (sessionResult.reason === "missing_session") {
+        toast.error("No active session. Please log in to upload photos.");
+      } else {
+        toast.error("Session expired. Please log in again.");
+      }
+      setSessionValid(false);
+      setSessionError(sessionResult.reason === "missing_session" 
+        ? "No active session. Please log in to upload photos." 
+        : "Session expired. Please log in again.");
       return;
     }
     
-    let accessToken = session.access_token;
-    console.log("🔑 Using fresh access token from Supabase session");
+    let accessToken = sessionResult.access_token;
+    console.log("🔑 Using valid access token from session");
+    setSessionValid(true);
+    setSessionError(null);
 
     setUploading(true);
     setUploadProgress(0);
@@ -221,17 +254,18 @@ export function ImportPhotosPage() {
 
     const results: UploadResult[] = [];
 
-    // 🚀 NEW: Upload ONE photo at a time with compression
+    // Upload ONE photo at a time with compression
     for (let i = 0; i < selectedFiles.length; i++) {
       const photo = selectedFiles[i];
       let lastError: any = null;
 
-      // Refresh token every 20 uploads to prevent expiration
+      // Refresh session every 20 uploads to prevent expiration during long uploads
       if (i % 20 === 0 && i > 0) {
-        console.log("🔄 Refreshing access token...");
-        const refreshedToken = localStorage.getItem("tams360_token");
-        if (refreshedToken) {
-          accessToken = refreshedToken;
+        console.log("🔄 Refreshing session...");
+        const refreshedResult = await getValidSession();
+        if (refreshedResult.ok) {
+          accessToken = refreshedResult.access_token;
+          console.log("✅ Session refreshed successfully");
         }
       }
 
@@ -292,7 +326,7 @@ export function ImportPhotosPage() {
           throw new Error(errorData.error || errorData.message || `HTTP ${urlResponse.status}`);
         }
 
-        const { uploadUrl, filePath, assetId, tenantId } = await urlResponse.json();
+        const { uploadUrl, filePath, assetRef, tenantId } = await urlResponse.json();
 
         // Step 3: Upload directly to Supabase Storage (bypasses Edge Function!)
         console.log(`☁️ Uploading to storage...`);
@@ -317,7 +351,7 @@ export function ImportPhotosPage() {
             Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
-            assetId,
+            assetRef,  // Changed from assetId
             tenantId,
             filePath,
             photoNumber: photo.photoNumber,
@@ -420,6 +454,29 @@ export function ImportPhotosPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {/* Session Status Banner */}
+            {sessionValid === false && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="flex items-center justify-between">
+                  <span>
+                    <strong>Session Expired:</strong> {sessionError}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-4"
+                    onClick={() => {
+                      window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+                    }}
+                  >
+                    <LogIn className="h-4 w-4 mr-2" />
+                    Log In
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* Session Warning */}
             {failedCount > 200 && uploadResults.some(r => r.error?.includes("Unauthorized")) && (
               <Alert variant="destructive">
@@ -461,15 +518,10 @@ export function ImportPhotosPage() {
                 directory=""
                 multiple
                 onChange={handleFolderSelect}
-                onClick={(e) => {
-                  // Reset the input so the same folder can be selected again
-                  e.currentTarget.value = '';
-                }}
                 className="hidden"
                 disabled={uploading}
               />
-              <label htmlFor="folder-input">
-                <Button
+              <label htmlFor="folder-input">\n                <Button
                   type="button"
                   size="lg"
                   disabled={uploading || parsing}

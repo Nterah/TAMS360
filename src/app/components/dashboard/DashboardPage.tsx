@@ -7,6 +7,8 @@ import { Database, ClipboardCheck, Wrench, TrendingUp, AlertCircle, CheckCircle2
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Treemap } from "recharts";
 import { Link, useNavigate } from "react-router-dom";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
 const COLORS = ["#39AEDF", "#5DB32A", "#F8D227", "#455B5E", "#010D13"];
 
@@ -56,6 +58,16 @@ export default function DashboardPage() {
   const [worstAssets, setWorstAssets] = useState<any[]>([]);
   const [overdueInspections, setOverdueInspections] = useState<number>(0);
   const [dataQualityAlerts, setDataQualityAlerts] = useState<any>(null);
+  
+  // DERU Analysis State
+  const [selectedDERUCategory, setSelectedDERUCategory] = useState<'degree' | 'extent' | 'relevancy' | 'urgency' | 'ci'>('degree');
+  const [deruData, setDeruData] = useState<any>({
+    degree: [],
+    extent: [],
+    relevancy: [],
+    urgency: [],
+    ci: []
+  });
   const [overdueMaintenance, setOverdueMaintenance] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
@@ -63,32 +75,45 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (accessToken) {
-      fetchDashboardStats();
-      fetchMaintenanceStats();
-      fetchInspectionStats();
-      fetchCIDistribution();
-      fetchCITreemapData();
-      fetchUrgencySummary();
-      fetchUrgencyDistribution();
-      fetchAssetTypeSummary();
-      fetchRegionSummary();
-      fetchCiTrendData();
-      fetchRecentActivity();
-      fetchWorstAssets();
-      fetchHighestCostAssets();
-      fetchCriticalAlerts();
+      // Create abort controller for cleanup
+      const abortController = new AbortController();
+      const signal = abortController.signal;
+
+      // Pass signal to all fetch functions
+      fetchDashboardStats(signal);
+      fetchMaintenanceStats(signal);
+      fetchInspectionStats(signal);
+      fetchCIDistribution(signal);
+      fetchCITreemapData(signal);
+      fetchUrgencySummary(signal);
+      fetchUrgencyDistribution(signal);
+      fetchAssetTypeSummary(signal);
+      fetchRegionSummary(signal);
+      fetchCiTrendData(signal);
+      fetchRecentActivity(signal);
+      fetchWorstAssets(signal);
+      fetchHighestCostAssets(signal);
+      fetchDERUAnalysis(signal);
+      fetchCriticalAlerts(signal);
       // REMOVED: fetchOverdueInspections() - now using stats.uninspectedAssets from backend
-      fetchDataQualityAlerts();
+      fetchDataQualityAlerts(signal);
       // REMOVED: fetchOverdueMaintenance() - now using maintenanceStats.overdue from backend
+      
+      // Cleanup function to abort all pending requests
+      return () => {
+        abortController.abort();
+      };
     }
   }, [accessToken]);
 
-  const fetchDashboardStats = async () => {
+  const fetchDashboardStats = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/dashboard/summary`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -106,18 +131,22 @@ export default function DashboardPage() {
         if (data.urgencySummary) setUrgencySummary(data.urgencySummary);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching dashboard stats:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchMaintenanceStats = async () => {
+  const fetchMaintenanceStats = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/maintenance/stats`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -125,16 +154,20 @@ export default function DashboardPage() {
         setMaintenanceStats(data.stats);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching maintenance stats:", error);
     }
   };
 
-  const fetchInspectionStats = async () => {
+  const fetchInspectionStats = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/inspections/stats`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -142,16 +175,20 @@ export default function DashboardPage() {
         setInspectionStats(data.stats);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching inspection stats:", error);
     }
   };
 
-  const fetchCIDistribution = async () => {
+  const fetchCIDistribution = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/dashboard/ci-distribution`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -159,36 +196,43 @@ export default function DashboardPage() {
         setCiDistribution(data.distribution || []);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching CI distribution:", error);
     }
   };
 
-  const fetchCITreemapData = async () => {
-    try {
-      // Add timeout to prevent hanging connections
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+  const fetchCITreemapData = async (signal?: AbortSignal) => {
+    // Skip if no access token
+    if (!accessToken) {
+      console.log("Skipping CI treemap fetch - no access token");
+      setCiTreemapData([]);
+      return;
+    }
 
+    try {
       const response = await fetch(`${API_URL}/dashboard/ci-treemap`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
-        signal: controller.signal,
+        signal,
       });
-
-      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
         console.log("CI Treemap data received:", data.treemapData);
         setCiTreemapData(data.treemapData || []);
       } else {
-        console.error("Failed to fetch CI treemap data:", response.status);
+        if (response.status === 401) {
+          console.log("CI treemap data requires authentication");
+        } else {
+          console.error("Failed to fetch CI treemap data:", response.status);
+        }
         setCiTreemapData([]);
       }
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        console.error("CI treemap data fetch timed out");
+        return; // Ignore abort errors
       } else {
         console.error("Error fetching CI treemap data:", error);
       }
@@ -196,12 +240,14 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchUrgencySummary = async () => {
+  const fetchUrgencySummary = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/dashboard/urgency-summary`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -209,16 +255,20 @@ export default function DashboardPage() {
         setUrgencySummary(data.summary || []);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching urgency summary:", error);
     }
   };
 
-  const fetchAssetTypeSummary = async () => {
+  const fetchAssetTypeSummary = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/dashboard/asset-type-summary`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -226,16 +276,20 @@ export default function DashboardPage() {
         setAssetTypeSummary(data.summary || []);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching asset type summary:", error);
     }
   };
 
-  const fetchRegionSummary = async () => {
+  const fetchRegionSummary = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/dashboard/stats`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -245,11 +299,14 @@ export default function DashboardPage() {
         }
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching region summary:", error);
     }
   };
 
-  const fetchCiTrendData = async () => {
+  const fetchCiTrendData = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       let allInspections: any[] = [];
       let page = 1;
@@ -257,8 +314,9 @@ export default function DashboardPage() {
       while (true) {
         const response = await fetch(`${API_URL}/inspections?page=${page}`, {
           headers: {
-            Authorization: `Bearer ${accessToken || publicAnonKey}`,
+            Authorization: `Bearer ${accessToken}`,
           },
+          signal,
         });
 
         if (!response.ok) break;
@@ -303,11 +361,14 @@ export default function DashboardPage() {
 
       setCiTrendData(trend);
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching CI trend:", error);
     }
   };
 
-  const fetchUrgencyDistribution = async () => {
+  const fetchUrgencyDistribution = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       let allInspections: any[] = [];
       let page = 1;
@@ -315,8 +376,9 @@ export default function DashboardPage() {
       while (true) {
         const response = await fetch(`${API_URL}/inspections?page=${page}`, {
           headers: {
-            Authorization: `Bearer ${accessToken || publicAnonKey}`,
+            Authorization: `Bearer ${accessToken}`,
           },
+          signal,
         });
 
         if (!response.ok) break;
@@ -359,17 +421,21 @@ export default function DashboardPage() {
 
       setUrgencyDistribution(distribution);
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching urgency distribution:", error);
       setUrgencyDistribution([]);
     }
   };
 
-  const fetchHighestCostAssets = async () => {
+  const fetchHighestCostAssets = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/inspections`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -410,16 +476,207 @@ export default function DashboardPage() {
         setHighestCostAssets(sorted);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching highest cost assets:", error);
     }
   };
 
-  const fetchCriticalAlerts = async () => {
+  const fetchDERUAnalysis = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
+    try {
+      const response = await fetch(`${API_URL}/inspections/deru-analytics`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        signal,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const inspections = data.inspections || [];
+        
+        // Debug: Log first inspection to see what fields are available
+        if (inspections.length > 0) {
+          const firstInsp = inspections[0];
+          console.log('[DERU Debug] First inspection sample:', {
+            Degree_1: firstInsp.Degree_1,
+            Degree_2: firstInsp.Degree_2,
+            Extent_1: firstInsp.Extent_1,
+            Extent_2: firstInsp.Extent_2,
+            Relevancy_1: firstInsp.Relevancy_1,
+            Relevancy_2: firstInsp.Relevancy_2,
+            'U - Comp 1': firstInsp['U - Comp 1'],
+            'U - Comp 2': firstInsp['U - Comp 2'],
+          });
+          console.log('[DERU Debug] Total inspections:', inspections.length);
+          console.log('[DERU Debug] Asset types found:', [...new Set(inspections.map((i: any) => i.asset_type_name).filter(Boolean))]);
+        }
+        
+        // Process DERU data by asset type
+        const assetTypes = [...new Set(inspections.map((i: any) => i.asset_type_name).filter(Boolean))];
+        
+        const processCategory = (categoryField: string, labels: { [key: string]: string }, isCI: boolean = false) => {
+          return assetTypes.map(assetType => {
+            const typeInspections = inspections.filter((i: any) => i.asset_type_name === assetType);
+            const counts: { [key: string]: number } = {};
+            
+            typeInspections.forEach((insp: any) => {
+              // DERU values are now at the top level (pre-extracted by server)
+              
+              // Helper to extract numeric value from strings like "1 = Minor", "4 = General"
+              const extractNumericValue = (str: string | null | undefined): string | null => {
+                if (!str || str === '#N/A' || str === 'null') return null;
+                const match = str.match(/^(\d+|[A-Z])\s*=/);
+                return match ? match[1] : null;
+              };
+              
+              let values: (string | null)[] = [];
+              
+              // Extract values from all 6 components based on category
+              if (categoryField === 'd_degree') {
+                // Extract Degree_1 through Degree_6
+                for (let i = 1; i <= 6; i++) {
+                  const rawVal = insp[`Degree_${i}`];
+                  const val = extractNumericValue(rawVal);
+                  if (val) values.push(val);
+                }
+              } else if (categoryField === 'e_extent') {
+                // Extract Extent_1 through Extent_6
+                for (let i = 1; i <= 6; i++) {
+                  const val = extractNumericValue(insp[`Extent_${i}`]);
+                  if (val) values.push(val);
+                }
+              } else if (categoryField === 'r_relevancy') {
+                // Extract Relevancy_1 through Relevancy_6
+                for (let i = 1; i <= 6; i++) {
+                  const val = extractNumericValue(insp[`Relevancy_${i}`]);
+                  if (val) values.push(val);
+                }
+              } else if (categoryField === 'u_urgency') {
+                // Extract U - Comp 1 through U - Comp 6
+                for (let i = 1; i <= 6; i++) {
+                  const val = insp[`U - Comp ${i}`];
+                  if (val && val !== 'null') values.push(val);
+                }
+              } else if (isCI) {
+                // Extract CI from top-level fields
+                const ciValue = insp.CI_Final || insp.conditional_index;
+                if (ciValue) values.push(ciValue);
+              }
+              
+              // Count each value
+              values.forEach(value => {
+                if (value !== null) {
+                  if (isCI) {
+                    // Handle CI ranges
+                    const ci = parseFloat(value);
+                    if (!isNaN(ci)) {
+                      if (ci >= 0 && ci < 20) counts['0-19'] = (counts['0-19'] || 0) + 1;
+                      else if (ci >= 20 && ci < 40) counts['20-39'] = (counts['20-39'] || 0) + 1;
+                      else if (ci >= 40 && ci < 60) counts['40-59'] = (counts['40-59'] || 0) + 1;
+                      else if (ci >= 60 && ci < 80) counts['60-79'] = (counts['60-79'] || 0) + 1;
+                      else if (ci >= 80 && ci <= 100) counts['80-100'] = (counts['80-100'] || 0) + 1;
+                    }
+                  } else {
+                    counts[value] = (counts[value] || 0) + 1;
+                  }
+                }
+              });
+            });
+            
+            // Debug logging
+            if (categoryField === 'd_degree' && assetType === 'Gantry') {
+              console.log('[DERU Debug] Gantry Degree counts:', counts);
+              console.log('[DERU Debug] Labels:', labels);
+            }
+            
+            // Calculate total for percentage conversion
+            const total = Object.values(counts).reduce((sum: number, val: any) => sum + (val || 0), 0);
+            
+            // Build row with ALL label keys initialized (critical for stacking)
+            const row: any = { name: assetType };
+            Object.keys(labels).forEach(key => {
+              const count = counts[key] || 0;
+              // Convert to percentage (0-100 scale), ensuring ALL keys exist
+              row[labels[key]] = total > 0 ? Math.round((count / total) * 100) : 0;
+            });
+            
+            return row;
+          }).filter(item => {
+            // Keep rows with at least one non-zero value (excluding 'name')
+            return Object.keys(item).some(k => k !== 'name' && item[k] > 0);
+          });
+        };
+        
+        console.log('[DERU Debug] Processing categories...');
+        const degreeData = processCategory('d_degree', {
+          '0': 'None (Good)',
+          '1': 'Not applicable',
+          'U': 'Unable to inspect', 
+          '2': 'Good defects',
+          '3': 'Moderate defects',
+          '4': 'Major defects'
+        });
+        
+        // Debug: Validate 100% stacked chart structure
+        if (degreeData.length > 0) {
+          const firstItem = degreeData[0];
+          const categoryKeys = Object.keys(firstItem).filter(k => k !== 'name');
+          const total = categoryKeys.reduce((sum, k) => sum + (firstItem[k] || 0), 0);
+          console.log('[DERU Debug] First degree item:', firstItem);
+          console.log('[DERU Debug] Category keys:', categoryKeys);
+          console.log('[DERU Debug] Row total:', total, '% (should be ~100%)');
+        }
+        
+        setDeruData({
+          degree: degreeData,
+          extent: processCategory('e_extent', {
+            '0': 'None',
+            '1': '<10% affected',
+            '2': '10-30% affected',
+            '3': '30-60% affected',
+            '4': 'Mostly affected (>60%)'
+          }),
+          relevancy: processCategory('r_relevancy', {
+            '0': 'None',
+            '1': 'Cosmetic',
+            '2': 'Local dysfunction',
+            '3': 'Moderate dysfunction',
+            '4': 'Major dysfunction'
+          }),
+          urgency: processCategory('u_urgency', {
+            'X': 'Not applicable',
+            '0': 'Monitor only',
+            '1': 'Routine maintenance',
+            '2': 'Repair within 10 years',
+            '3': 'Repair within 10 years',
+            '4': 'Immediate action'
+          }),
+          ci: processCategory('ci_final', {
+            '0-19': 'Critical (0-19)',
+            '20-39': 'Poor (20-39)',
+            '40-59': 'Fair (40-59)',
+            '60-79': 'Good (60-79)',
+            '80-100': 'Excellent (80-100)'
+          }, true)
+        });
+      }
+    } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
+      console.error("Error fetching DERU analysis:", error);
+    }
+  };
+
+  const fetchCriticalAlerts = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/dashboard/critical-alerts`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -427,25 +684,30 @@ export default function DashboardPage() {
         setCriticalAlerts(data.alerts || []);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching critical alerts:", error);
       setCriticalAlerts([]);
     }
   };
 
-  const fetchRecentActivity = async () => {
+  const fetchRecentActivity = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       // Fetch recent inspections
       const inspectionsResponse = await fetch(`${API_URL}/inspections`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       // Fetch recent maintenance
       const maintenanceResponse = await fetch(`${API_URL}/maintenance`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       const activities: any[] = [];
@@ -488,16 +750,20 @@ export default function DashboardPage() {
 
       setRecentActivity(activities.slice(0, 5));
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching recent activity:", error);
     }
   };
 
-  const fetchWorstAssets = async () => {
+  const fetchWorstAssets = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/assets`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -517,17 +783,21 @@ export default function DashboardPage() {
         setWorstAssets(assetsWithCI);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching worst assets:", error);
     }
   };
 
-  const fetchOverdueInspections = async () => {
+  const fetchOverdueInspections = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       // Fetch all assets to see which ones have never been inspected
       const assetsResponse = await fetch(`${API_URL}/assets?pageSize=2000`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (assetsResponse.ok) {
@@ -550,17 +820,21 @@ export default function DashboardPage() {
         setOverdueInspections(0);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching overdue inspections:", error);
       setOverdueInspections(0);
     }
   };
 
-  const fetchOverdueMaintenance = async () => {
+  const fetchOverdueMaintenance = async (signal?: AbortSignal) => {
+    if (!accessToken) return;
     try {
       const response = await fetch(`${API_URL}/maintenance`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -598,18 +872,28 @@ export default function DashboardPage() {
         setOverdueMaintenance(0);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching overdue maintenance:", error);
       setOverdueMaintenance(0);
     }
   };
 
-  const fetchDataQualityAlerts = async () => {
+  const fetchDataQualityAlerts = async (signal?: AbortSignal) => {
+    // Skip if no access token
+    if (!accessToken) {
+      console.log("Skipping data quality fetch - no access token");
+      setDataQualityAlerts({ count: 0, details: {} });
+      return;
+    }
+
     try {
       // Use lightweight count query with head:true
       const response = await fetch(`${API_URL}/assets?pageSize=2000`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        signal,
       });
 
       if (response.ok) {
@@ -664,10 +948,16 @@ export default function DashboardPage() {
           }
         });
       } else {
-        console.error(`[Data Quality] Failed to fetch assets: ${response.status}`);
+        if (response.status === 401) {
+          console.log("[Data Quality] Asset data requires authentication");
+        } else {
+          console.error(`[Data Quality] Failed to fetch assets: ${response.status}`);
+        }
         setDataQualityAlerts({ count: 0, details: {} });
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') return;
       console.error("Error fetching data quality alerts:", error);
       setDataQualityAlerts({ count: 0, details: {} });
     }
@@ -792,7 +1082,18 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Primary KPI Cards */}
+      {/* Dashboard Tabs */}
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="condition">Condition & DERU Analysis</TabsTrigger>
+          <TabsTrigger value="maintenance">Maintenance & Costs</TabsTrigger>
+          <TabsTrigger value="regional">Regional & Activity</TabsTrigger>
+        </TabsList>
+
+        {/* ========== TAB 1: OVERVIEW ========== */}
+        <TabsContent value="overview" className="space-y-6 mt-6">
+          {/* Primary KPI Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card 
           className="cursor-pointer hover:shadow-lg transition-shadow"
@@ -1003,6 +1304,485 @@ export default function DashboardPage() {
         </Card>
       </div>
 
+      {/* DERU Inspection Analysis */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>DERU Inspection Analysis</CardTitle>
+              <CardDescription>Worst values across all components using DERU methodology (Degree, Extent, Relevancy, Urgency)</CardDescription>
+            </div>
+            <Select value={selectedDERUCategory} onValueChange={(v: any) => setSelectedDERUCategory(v)}>
+              <SelectTrigger className="w-[260px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="degree">D - Degree (Condition Severity)</SelectItem>
+                <SelectItem value="extent">E - Extent (How Widespread)</SelectItem>
+                <SelectItem value="relevancy">R - Relevancy (Functional Importance)</SelectItem>
+                <SelectItem value="urgency">U - Urgency (How Soon to Attend)</SelectItem>
+                <SelectItem value="ci">CI - Condition Index (Final)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-3">
+          <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+            {/* Bar Chart - Asset Type Breakdown */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
+              {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart 
+                      data={(() => {
+                        // Define stack keys per category (exact labels)
+                        const stackKeys: { [key: string]: string[] } = {
+                          degree: ["None (Good)", "Not applicable", "Unable to inspect", "Good defects", "Moderate defects", "Major defects"],
+                          extent: ["None", "<10% affected", "10-30% affected", "30-60% affected", "Mostly affected (>60%)"],
+                          relevancy: ["None", "Cosmetic", "Local dysfunction", "Moderate dysfunction", "Major dysfunction"],
+                          urgency: ["Not applicable", "Monitor only", "Routine maintenance", "Repair within 10 years", "Immediate action"],
+                          ci: ["Excellent (80-100)", "Good (60-79)", "Fair (40-59)", "Poor (20-39)", "Critical (0-19)"]
+                        };
+                        
+                        const keys = stackKeys[selectedDERUCategory] || [];
+                        
+                        // Normalize each row to ensure 100% total with all keys present
+                        return deruData[selectedDERUCategory].map((row: any) => {
+                          const normalized: any = { name: row.name };
+                          
+                          // Ensure all keys exist (set to 0 if missing)
+                          keys.forEach(key => {
+                            const val = row[key];
+                            normalized[key] = (typeof val === 'number' && !isNaN(val)) ? val : 0;
+                          });
+                          
+                          // Calculate sum
+                          const sum = keys.reduce((total, key) => total + normalized[key], 0);
+                          
+                          // Rescale to 100% if sum is not 100
+                          if (sum > 0 && Math.abs(sum - 100) > 0.5) {
+                            keys.forEach(key => {
+                              normalized[key] = parseFloat(((normalized[key] / sum) * 100).toFixed(1));
+                            });
+                          }
+                          
+                          return normalized;
+                        });
+                      })()} 
+                      layout="vertical"
+                      margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} label={{ value: 'Percentage (%)', position: 'insideBottom', offset: -5 }} />
+                      <YAxis dataKey="name" type="category" width={120} />
+                      <Tooltip formatter={(value: any) => `${value}%`} />
+                      {selectedDERUCategory === 'degree' && (
+                        <>
+                          <Bar dataKey="None (Good)" stackId="a" fill="#5DB32A" />
+                          <Bar dataKey="Good defects" stackId="a" fill="#A8D96E" />
+                          <Bar dataKey="Moderate defects" stackId="a" fill="#F8D227" />
+                          <Bar dataKey="Major defects" stackId="a" fill="#d4183d" />
+                          <Bar dataKey="Unable to inspect" stackId="a" fill="#9E9E9E" />
+                          <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
+                        </>
+                      )}
+                      {selectedDERUCategory === 'extent' && (
+                        <>
+                          <Bar dataKey="None" stackId="a" fill="#5DB32A" />
+                          <Bar dataKey="<10% affected" stackId="a" fill="#A8D96E" />
+                          <Bar dataKey="10-30% affected" stackId="a" fill="#F8D227" />
+                          <Bar dataKey="30-60% affected" stackId="a" fill="#F57C00" />
+                          <Bar dataKey="Mostly affected (>60%)" stackId="a" fill="#d4183d" />
+                        </>
+                      )}
+                      {selectedDERUCategory === 'relevancy' && (
+                        <>
+                          <Bar dataKey="None" stackId="a" fill="#5DB32A" />
+                          <Bar dataKey="Cosmetic" stackId="a" fill="#A8D96E" />
+                          <Bar dataKey="Local dysfunction" stackId="a" fill="#F8D227" />
+                          <Bar dataKey="Moderate dysfunction" stackId="a" fill="#F57C00" />
+                          <Bar dataKey="Major dysfunction" stackId="a" fill="#d4183d" />
+                        </>
+                      )}
+                      {selectedDERUCategory === 'urgency' && (
+                        <>
+                          <Bar dataKey="Monitor only" stackId="a" fill="#5DB32A" />
+                          <Bar dataKey="Routine maintenance" stackId="a" fill="#A8D96E" />
+                          <Bar dataKey="Repair within 10 years" stackId="a" fill="#F8D227" />
+                          <Bar dataKey="Immediate action" stackId="a" fill="#d4183d" />
+                          <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
+                        </>
+                      )}
+                      {selectedDERUCategory === 'ci' && (
+                        <>
+                          <Bar dataKey="Excellent (80-100)" stackId="a" fill="#5DB32A" />
+                          <Bar dataKey="Good (60-79)" stackId="a" fill="#A8D96E" />
+                          <Bar dataKey="Fair (40-59)" stackId="a" fill="#F8D227" />
+                          <Bar dataKey="Poor (20-39)" stackId="a" fill="#F57C00" />
+                          <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
+                        </>
+                      )}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </>
+              ) : (
+                <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                  <p>No {selectedDERUCategory} data available</p>
+                </div>
+              )}
+            </div>
+
+            {/* Pie Chart - Overall Distribution */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Overall Distribution (All Assets)</h4>
+              {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={(() => {
+                        // Aggregate all values across asset types
+                        const aggregated: any = {};
+                        deruData[selectedDERUCategory].forEach((item: any) => {
+                          Object.keys(item).forEach(key => {
+                            if (key !== 'name' && typeof item[key] === 'number') {
+                              aggregated[key] = (aggregated[key] || 0) + item[key];
+                            }
+                          });
+                        });
+                        return Object.entries(aggregated).map(([name, value]) => ({ name, value }));
+                      })()}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={((entry: any) => {
+                        const aggregated: any = {};
+                        deruData[selectedDERUCategory].forEach((item: any) => {
+                          Object.keys(item).forEach(key => {
+                            if (key !== 'name' && typeof item[key] === 'number') {
+                              aggregated[key] = (aggregated[key] || 0) + item[key];
+                            }
+                          });
+                        });
+                        const total = Object.values(aggregated).reduce((sum: any, val: any) => sum + val, 0) as number;
+                        const pct = total > 0 ? ((entry.value / total) * 100) : 0;
+                        
+                        // Only show label if slice is large enough (>5%)
+                        if (pct < 5) return null;
+                        
+                        const RADIAN = Math.PI / 180;
+                        const radius = 70 + (110 - 70) / 2; // Middle of donut ring
+                        const x = entry.cx + radius * Math.cos(-entry.midAngle * RADIAN);
+                        const y = entry.cy + radius * Math.sin(-entry.midAngle * RADIAN);
+                        
+                        return (
+                          <text 
+                            x={x} 
+                            y={y} 
+                            fill="white" 
+                            textAnchor="middle" 
+                            dominantBaseline="middle"
+                            className="text-xs font-semibold"
+                            style={{ textShadow: '0 0 3px rgba(0,0,0,0.8)' }}
+                          >
+                            {pct.toFixed(1)}%
+                          </text>
+                        );
+                      })}
+                      innerRadius={70}
+                      outerRadius={110}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {Object.entries((() => {
+                        const aggregated: any = {};
+                        deruData[selectedDERUCategory].forEach((item: any) => {
+                          Object.keys(item).forEach(key => {
+                            if (key !== 'name' && typeof item[key] === 'number') {
+                              aggregated[key] = (aggregated[key] || 0) + item[key];
+                            }
+                          });
+                        });
+                        return aggregated;
+                      })()).map(([name], index) => {
+                        // Unified color map
+                        const colorMap: { [key: string]: string } = {
+                          'None (Good)': '#5DB32A',
+                          'Good defects': '#A8D96E',
+                          'Moderate defects': '#F8D227',
+                          'Major defects': '#d4183d',
+                          'Unable to inspect': '#9E9E9E',
+                          'Not applicable': '#455B5E',
+                          'None': '#5DB32A',
+                          '<10% affected': '#A8D96E',
+                          '10-30% affected': '#F8D227',
+                          '30-60% affected': '#F57C00',
+                          'Mostly affected (>60%)': '#d4183d',
+                          'Cosmetic': '#A8D96E',
+                          'Local dysfunction': '#F8D227',
+                          'Moderate dysfunction': '#F57C00',
+                          'Major dysfunction': '#d4183d',
+                          'Monitor only': '#5DB32A',
+                          'Routine maintenance': '#A8D96E',
+                          'Repair within 10 years': '#F8D227',
+                          'Immediate action': '#d4183d',
+                          'Excellent (80-100)': '#5DB32A',
+                          'Good (60-79)': '#A8D96E',
+                          'Fair (40-59)': '#F8D227',
+                          'Poor (20-39)': '#F57C00',
+                          'Critical (0-19)': '#d4183d',
+                        };
+                        return (
+                          <Cell key={`cell-${index}`} fill={colorMap[name] || COLORS[index % COLORS.length]} />
+                        );
+                      })}
+                    </Pie>
+                    <Tooltip formatter={(value: any, name: any) => {
+                      const aggregated: any = {};
+                      deruData[selectedDERUCategory].forEach((item: any) => {
+                        Object.keys(item).forEach(key => {
+                          if (key !== 'name' && typeof item[key] === 'number') {
+                            aggregated[key] = (aggregated[key] || 0) + item[key];
+                          }
+                        });
+                      });
+                      const total = Object.values(aggregated).reduce((sum: any, val: any) => sum + val, 0) as number;
+                      const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0';
+                      return [`${pct}% (${value} components)`, name];
+                    }} />
+                    {(() => {
+                      const result = (() => {
+                        // Calculate weighted average rating
+                        const aggregated: any = {};
+                        deruData[selectedDERUCategory].forEach((item: any) => {
+                          Object.keys(item).forEach(key => {
+                            if (key !== 'name' && typeof item[key] === 'number') {
+                              aggregated[key] = (aggregated[key] || 0) + item[key];
+                            }
+                          });
+                        });
+                        
+                        // Score maps (lower = better)
+                        const scoreMap: { [key: string]: { [key: string]: number } } = {
+                          degree: {
+                            'None (Good)': 1,
+                            'Good defects': 2,
+                            'Moderate defects': 3,
+                            'Major defects': 4
+                          },
+                          extent: {
+                            'None': 1,
+                            '<10% affected': 2,
+                            '10-30% affected': 3,
+                            '30-60% affected': 4,
+                            'Mostly affected (>60%)': 5
+                          },
+                          relevancy: {
+                            'None': 1,
+                            'Cosmetic': 2,
+                            'Local dysfunction': 3,
+                            'Moderate dysfunction': 4,
+                            'Major dysfunction': 5
+                          },
+                          urgency: {
+                            'Monitor only': 1,
+                            'Routine maintenance': 2,
+                            'Repair within 10 years': 3,
+                            'Immediate action': 4
+                          },
+                          ci: {
+                            'Excellent (80-100)': 1,
+                            'Good (60-79)': 2,
+                            'Fair (40-59)': 3,
+                            'Poor (20-39)': 4,
+                            'Critical (0-19)': 5
+                          }
+                        };
+                        
+                        const scores = scoreMap[selectedDERUCategory] || {};
+                        let weightedSum = 0;
+                        let totalWeight = 0;
+                        
+                        Object.entries(aggregated).forEach(([label, value]) => {
+                          if (scores[label] !== undefined) {
+                            weightedSum += scores[label] * (value as number);
+                            totalWeight += value as number;
+                          }
+                        });
+                        
+                        const avgNum = totalWeight > 0 ? (weightedSum / totalWeight) : 0;
+                        const avg = avgNum > 0 ? avgNum.toFixed(2) : 'N/A';
+                        
+                        // Determine status label and color based on average
+                        let statusLabel = '';
+                        let statusColor = '#010D13';
+                        
+                        if (selectedDERUCategory === 'degree') {
+                          if (avgNum <= 1.0) { statusLabel = 'Good overall'; statusColor = '#5DB32A'; }
+                          else if (avgNum <= 2.0) { statusLabel = 'Minor defects'; statusColor = '#A8D96E'; }
+                          else if (avgNum <= 2.9) { statusLabel = 'Moderate defects'; statusColor = '#F8D227'; }
+                          else { statusLabel = 'Major defects'; statusColor = '#d4183d'; }
+                        } else if (selectedDERUCategory === 'extent') {
+                          if (avgNum <= 1.5) { statusLabel = 'Isolated issues'; statusColor = '#5DB32A'; }
+                          else if (avgNum <= 2.5) { statusLabel = 'Localized issues'; statusColor = '#A8D96E'; }
+                          else if (avgNum <= 3.5) { statusLabel = 'Widespread issues'; statusColor = '#F8D227'; }
+                          else { statusLabel = 'Systemic failure'; statusColor = '#d4183d'; }
+                        } else if (selectedDERUCategory === 'relevancy') {
+                          if (avgNum <= 1.5) { statusLabel = 'Cosmetic'; statusColor = '#5DB32A'; }
+                          else if (avgNum <= 2.5) { statusLabel = 'Local dysfunctional'; statusColor = '#A8D96E'; }
+                          else if (avgNum <= 3.5) { statusLabel = 'Moderate dysfunctional'; statusColor = '#F8D227'; }
+                          else { statusLabel = 'Major dysfunctional'; statusColor = '#d4183d'; }
+                        } else if (selectedDERUCategory === 'urgency') {
+                          if (avgNum <= 1.5) { statusLabel = 'Monitor only'; statusColor = '#5DB32A'; }
+                          else if (avgNum <= 2.5) { statusLabel = 'Routine maintenance'; statusColor = '#A8D96E'; }
+                          else if (avgNum <= 3.5) { statusLabel = 'Repair within 10 years'; statusColor = '#F8D227'; }
+                          else { statusLabel = 'Immediate action'; statusColor = '#d4183d'; }
+                        } else if (selectedDERUCategory === 'ci') {
+                          // For CI, calculate actual CI value from bands
+                          const ciValue = totalWeight > 0 ? (() => {
+                            let ciSum = 0;
+                            let ciCount = 0;
+                            Object.entries(aggregated).forEach(([label, value]) => {
+                              if (label === 'Excellent (80-100)') { ciSum += 90 * (value as number); ciCount += value as number; }
+                              else if (label === 'Good (60-79)') { ciSum += 69.5 * (value as number); ciCount += value as number; }
+                              else if (label === 'Fair (40-59)') { ciSum += 49.5 * (value as number); ciCount += value as number; }
+                              else if (label === 'Poor (20-39)') { ciSum += 29.5 * (value as number); ciCount += value as number; }
+                              else if (label === 'Critical (0-19)') { ciSum += 9.5 * (value as number); ciCount += value as number; }
+                            });
+                            return ciCount > 0 ? (ciSum / ciCount).toFixed(1) : 'N/A';
+                          })() : 'N/A';
+                          
+                          // Determine CI status color
+                          const ciNum = parseFloat(ciValue);
+                          if (ciNum >= 80) statusColor = '#5DB32A';
+                          else if (ciNum >= 60) statusColor = '#A8D96E';
+                          else if (ciNum >= 40) statusColor = '#F8D227';
+                          else if (ciNum >= 20) statusColor = '#F57C00';
+                          else statusColor = '#d4183d';
+                          
+                          return { text: `Avg CI: ${ciValue}`, color: statusColor };
+                        }
+                        
+                        // For D/E/R/U: show only status label, no numeric value
+                        return { text: statusLabel, color: statusColor };
+                      })();
+                      
+                      // Render text with color (wrapping for long text)
+                      const text = result.text;
+                      const words = text.split(' ');
+                      const lines: string[] = [];
+                      let currentLine = '';
+                      
+                      // Wrap text: new line if current line exceeds 11 chars or word is >8 chars
+                      words.forEach((word, idx) => {
+                        if (word.length > 8 && currentLine.length > 0) {
+                          // Long word starts on new line
+                          lines.push(currentLine.trim());
+                          currentLine = word;
+                        } else if ((currentLine + ' ' + word).length > 11 && currentLine.length > 0) {
+                          // Line too long, wrap
+                          lines.push(currentLine.trim());
+                          currentLine = word;
+                        } else {
+                          // Add word to current line
+                          currentLine += (currentLine.length > 0 ? ' ' : '') + word;
+                        }
+                        
+                        // Last word
+                        if (idx === words.length - 1 && currentLine.length > 0) {
+                          lines.push(currentLine.trim());
+                        }
+                      });
+                      
+                      const lineHeight = 16;
+                      const startY = 50 - ((lines.length - 1) * lineHeight / 2);
+                      
+                      return (
+                        <>
+                          {lines.map((line, idx) => (
+                            <text 
+                              key={idx}
+                              x="50%" 
+                              y={`${startY + (idx * lineHeight)}%`} 
+                              textAnchor="middle" 
+                              dominantBaseline="middle" 
+                              className="text-sm font-bold" 
+                              fill={result.color}
+                            >
+                              {line}
+                            </text>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                  <p>No {selectedDERUCategory} data available</p>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {/* Shared Legend */}
+          {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 && (
+            <div className="flex flex-wrap gap-4 justify-center mt-4 pt-3 border-t">
+              {(() => {
+                const legendItems: { [key: string]: Array<{ label: string; color: string }> } = {
+                  degree: [
+                    { label: 'None (Good)', color: '#5DB32A' },
+                    { label: 'Good defects', color: '#A8D96E' },
+                    { label: 'Moderate defects', color: '#F8D227' },
+                    { label: 'Major defects', color: '#d4183d' },
+                    { label: 'Unable to inspect', color: '#9E9E9E' },
+                    { label: 'Not applicable', color: '#455B5E' }
+                  ],
+                  extent: [
+                    { label: 'None', color: '#5DB32A' },
+                    { label: '<10% affected', color: '#A8D96E' },
+                    { label: '10-30% affected', color: '#F8D227' },
+                    { label: '30-60% affected', color: '#F57C00' },
+                    { label: 'Mostly affected (>60%)', color: '#d4183d' }
+                  ],
+                  relevancy: [
+                    { label: 'None', color: '#5DB32A' },
+                    { label: 'Cosmetic', color: '#A8D96E' },
+                    { label: 'Local dysfunction', color: '#F8D227' },
+                    { label: 'Moderate dysfunction', color: '#F57C00' },
+                    { label: 'Major dysfunction', color: '#d4183d' }
+                  ],
+                  urgency: [
+                    { label: 'Monitor only', color: '#5DB32A' },
+                    { label: 'Routine maintenance', color: '#A8D96E' },
+                    { label: 'Repair within 10 years', color: '#F8D227' },
+                    { label: 'Immediate action', color: '#d4183d' },
+                    { label: 'Not applicable', color: '#455B5E' }
+                  ],
+                  ci: [
+                    { label: 'Excellent (80-100)', color: '#5DB32A' },
+                    { label: 'Good (60-79)', color: '#A8D96E' },
+                    { label: 'Fair (40-59)', color: '#F8D227' },
+                    { label: 'Poor (20-39)', color: '#F57C00' },
+                    { label: 'Critical (0-19)', color: '#d4183d' }
+                  ]
+                };
+                
+                return legendItems[selectedDERUCategory]?.map((item) => (
+                  <div key={item.label} className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: item.color }} />
+                    <span className="text-xs text-muted-foreground">{item.label}</span>
+                  </div>
+                ));
+              })()}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+        </TabsContent>
+
+        {/* ========== TAB 2: CONDITION & DERU ANALYSIS ========== */}
+        <TabsContent value="condition" className="space-y-6 mt-6">
       {/* Condition & Risk Overview Charts */}
       <div className="grid gap-4 lg:grid-cols-2">
         {/* CI Distribution Bar Chart */}
@@ -1305,7 +2085,58 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Highest Cost Assets & Top 10 Worst */}
+      {/* Top 10 Worst Assets by CI */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Top 10 Worst Assets</CardTitle>
+          <CardDescription>Assets with lowest CI scores requiring attention</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {worstAssets.length > 0 ? (
+            <div className="space-y-3">
+              {worstAssets.map((asset, index) => (
+                <div 
+                  key={asset.asset_id || index} 
+                  className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${asset.asset_id ? 'hover:bg-accent/50 cursor-pointer' : ''}`}
+                  onClick={() => asset.asset_id && navigate(`/assets/${asset.asset_id}`)}
+                >
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center font-bold text-sm">
+                    #{index + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{asset.asset_ref}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {asset.asset_type_name} • {asset.road_name || asset.road_number || 'Location N/A'}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant="destructive" className="font-bold">
+                      CI: {asset.normalized_ci.toFixed(0)}
+                    </Badge>
+                    {asset.replacement_value && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                        <Banknote className="w-3 h-3" />
+                        R {(asset.replacement_value / 1000).toFixed(0)}k
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+              <AlertCircle className="w-12 h-12 mb-4 opacity-50" />
+              <p>No assets with CI scores</p>
+              <p className="text-sm">Perform inspections to see assets ranked by condition</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+        </TabsContent>
+
+        {/* ========== TAB 3: MAINTENANCE & COSTS ========== */}
+        <TabsContent value="maintenance" className="space-y-6 mt-6">
+      {/* Highest Cost Assets */}
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Highest Remedial Cost Assets */}
         <Card>
@@ -1353,57 +2184,12 @@ export default function DashboardPage() {
             )}
           </CardContent>
         </Card>
-
-        {/* Top 10 Worst Assets */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Top 10 Worst Assets</CardTitle>
-            <CardDescription>Assets with lowest CI scores requiring attention</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {worstAssets.length > 0 ? (
-              <div className="space-y-3">
-                {worstAssets.map((asset, index) => (
-                  <div 
-                    key={asset.asset_id || index} 
-                    className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${asset.asset_id ? 'hover:bg-accent/50 cursor-pointer' : ''}`}
-                    onClick={() => asset.asset_id && navigate(`/assets/${asset.asset_id}`)}
-                  >
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center font-bold text-sm">
-                      #{index + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{asset.asset_ref}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {asset.asset_type_name} • {asset.road_name || asset.road_number || 'Location N/A'}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <Badge variant="destructive" className="font-bold">
-                        CI: {asset.normalized_ci.toFixed(0)}
-                      </Badge>
-                      {asset.replacement_value && (
-                        <span className="text-xs text-muted-foreground flex items-center gap-0.5">
-                          <Banknote className="w-3 h-3" />
-                          R {(asset.replacement_value / 1000).toFixed(0)}k
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-                <AlertCircle className="w-12 h-12 mb-4 opacity-50" />
-                <p>No assets with CI scores</p>
-                <p className="text-sm">Perform inspections to see assets ranked by condition</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
+        </TabsContent>
 
-      {/* Worst Assets & Recent Activity */}
+        {/* ========== TAB 4: REGIONAL & ACTIVITY ========== */}
+        <TabsContent value="regional" className="space-y-6 mt-6">
+      {/* Regional & Asset Type Distribution */}
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Asset Distribution by Type */}
         <Card>
@@ -1618,8 +2404,8 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* CI Distribution Treemap */}
-      
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

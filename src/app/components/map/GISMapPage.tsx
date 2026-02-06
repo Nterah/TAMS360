@@ -38,6 +38,8 @@ export default function GISMapPage() {
   const [assets, setAssets] = useState<any[]>([]);
   const [totalAssetCount, setTotalAssetCount] = useState<number>(0);
   const [selectedAsset, setSelectedAsset] = useState<any>(null);
+  const [selectedAssetPhotos, setSelectedAssetPhotos] = useState<any[]>([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [mapCenter, setMapCenter] = useState<[number, number]>(DEFAULT_CENTER);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
@@ -115,6 +117,15 @@ export default function GISMapPage() {
       });
     }
   }, [assets]);
+
+  // Fetch photos when an asset is selected
+  useEffect(() => {
+    if (selectedAsset) {
+      fetchPhotosForSelectedAsset(selectedAsset.asset_id || selectedAsset.id);
+    } else {
+      setSelectedAssetPhotos([]);
+    }
+  }, [selectedAsset]);
 
   const fetchAssets = async () => {
     try {
@@ -368,6 +379,30 @@ export default function GISMapPage() {
       // Silently fail - overlays are optional
       setOverlayLayers([]);
       setOverlayVisibility({});
+    }
+  };
+
+  const fetchPhotosForSelectedAsset = async (assetId: string) => {
+    setLoadingPhotos(true);
+    try {
+      const response = await fetch(`${API_URL}/assets/${assetId}/photos`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setSelectedAssetPhotos(data.photos || []);
+      } else {
+        console.error("Failed to fetch photos:", response.statusText);
+        setSelectedAssetPhotos([]);
+      }
+    } catch (error) {
+      console.error("Error fetching asset photos:", error);
+      setSelectedAssetPhotos([]);
+    } finally {
+      setLoadingPhotos(false);
     }
   };
 
@@ -1185,6 +1220,7 @@ export default function GISMapPage() {
                     colorMode={colorMode}
                     mapLayer={mapLayer}
                     clusteringEnabled={clusteringEnabled}
+                    accessToken={accessToken || publicAnonKey}
                   />
                 </div>
 
@@ -1398,7 +1434,7 @@ export default function GISMapPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex gap-2 flex-wrap mb-4">
                   <Button size="sm" onClick={() => centerOnAsset(selectedAsset)}>
                     <MapPin className="w-3 h-3 mr-1" />
                     Center on Map
@@ -1414,6 +1450,55 @@ export default function GISMapPage() {
                   </Button>
                   <Button size="sm" variant="outline">View History</Button>
                   <Button size="sm" variant="outline">Schedule Inspection</Button>
+                </div>
+
+                {/* Photo Gallery */}
+                <div className="mt-4 pt-4 border-t">
+                  <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <ImageIcon className="w-4 h-4" />
+                    Asset Photos
+                  </h4>
+                  {loadingPhotos ? (
+                    <div className="flex items-center justify-center py-8">
+                      <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
+                      <span className="ml-2 text-sm text-muted-foreground">Loading photos...</span>
+                    </div>
+                  ) : selectedAssetPhotos.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {selectedAssetPhotos.map((photo, index) => (
+                        <div
+                          key={`${photo.photo_id}-${index}`}
+                          className="relative group cursor-pointer rounded-lg overflow-hidden border hover:border-primary transition-colors"
+                          onClick={() => window.open(photo.signedUrl || photo.url, '_blank')}
+                        >
+                          <div className="aspect-square relative">
+                            {photo.signedUrl || photo.url ? (
+                              <img
+                                src={photo.signedUrl || photo.url}
+                                alt={photo.caption || `Photo ${photo.photo_number}`}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E';
+                                }}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center bg-muted">
+                                <ImageIcon className="w-8 h-8 text-muted-foreground" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1 text-white text-xs">
+                            {photo.caption || `Photo ${photo.photo_number}`}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-muted-foreground bg-muted/30 rounded-lg">
+                      <ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No photos available</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

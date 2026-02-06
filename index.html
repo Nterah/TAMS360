@@ -50,21 +50,26 @@
   
   <!-- Service Worker Registration -->
   <script>
+    // Safe Service Worker registration with error handling
+    // SW failures will not affect app functionality
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js')
           .then(registration => {
-            console.log('SW registered:', registration);
+            console.log('✅ SW registered:', registration.scope);
             
-            // Check for updates periodically
+            // Check for updates periodically (optional)
             setInterval(() => {
               registration.update();
             }, 60000); // Check every minute
           })
           .catch(err => {
-            console.log('SW registration failed:', err);
+            // SW registration failed - log warning but continue
+            console.warn('⚠️ SW registration failed (app will continue without offline support):', err);
           });
       });
+    } else {
+      console.log('ℹ️ Service Workers not supported in this browser');
     }
   </script>
 </body>

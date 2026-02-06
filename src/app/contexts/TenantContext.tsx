@@ -94,7 +94,11 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         setTenantName(data.tenantName);
         setSettings(data.settings);
       } else {
-        console.error('Failed to fetch tenant settings');
+        if (response.status === 401) {
+          console.log('Tenant settings require authentication');
+        } else {
+          console.error('Failed to fetch tenant settings:', response.status);
+        }
         // Use fallback values
         setTenantName('TAMS360');
         setSettings(defaultSettings);

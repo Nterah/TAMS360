@@ -35,6 +35,8 @@ export default function InspectionDetailPage() {
   const [maintenanceRecords, setMaintenanceRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [photos, setPhotos] = useState<any[]>([]);
+  const [componentTemplate, setComponentTemplate] = useState<any>(null);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
@@ -49,6 +51,44 @@ export default function InspectionDetailPage() {
     }
   }, [id]);
 
+  // Fetch photos when inspection is loaded
+  useEffect(() => {
+    if (inspection?.asset_id) {
+      fetchAssetPhotos(inspection.asset_id);
+    }
+  }, [inspection?.asset_id]);
+
+  // Fetch component template when inspection is loaded
+  useEffect(() => {
+    if (inspection?.asset_type_name) {
+      fetchComponentTemplate(inspection.asset_type_name);
+    }
+  }, [inspection?.asset_type_name]);
+
+  const fetchAssetPhotos = async (assetId: string) => {
+    try {
+      console.log(`[Photos] Fetching photos for asset ${assetId}...`);
+      
+      const response = await fetch(`${API_URL}/assets/${assetId}/photos`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      console.log(`[Photos] Response status: ${response.status}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`[Photos] Found ${data.photos?.length || 0} photos`);
+        setPhotos(data.photos || []);
+      } else {
+        console.error(`[Photos] Failed to fetch photos`);
+      }
+    } catch (error) {
+      console.error("[Photos] Exception fetching photos:", error);
+    }
+  };
+
   const fetchInspection = async () => {
     try {
       const response = await fetch(`${API_URL}/inspections/${id}`, {
@@ -60,6 +100,7 @@ export default function InspectionDetailPage() {
       if (response.ok) {
         const data = await response.json();
         setInspection(data.inspection);
+        setPhotos(data.inspection.photos || []);
       } else {
         toast.error("Failed to load inspection");
         navigate("/inspections");
@@ -86,6 +127,34 @@ export default function InspectionDetailPage() {
       }
     } catch (error) {
       console.error("Error fetching maintenance records:", error);
+    }
+  };
+
+  const fetchComponentTemplate = async (assetTypeName: string) => {
+    try {
+      console.log('[InspectionDetail] Fetching component template for:', assetTypeName);
+      const response = await fetch(`${API_URL}/component-templates/${encodeURIComponent(assetTypeName)}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[InspectionDetail] Component template response:', data);
+        if (data.template) {
+          setComponentTemplate(data.template);
+        } else {
+          console.warn('[InspectionDetail] No component template found for:', assetTypeName);
+          setComponentTemplate(null);
+        }
+      } else {
+        console.error('[InspectionDetail] Failed to fetch template, status:', response.status);
+        setComponentTemplate(null);
+      }
+    } catch (error) {
+      console.error("[InspectionDetail] Error fetching component template:", error);
+      setComponentTemplate(null);
     }
   };
 
@@ -141,6 +210,38 @@ export default function InspectionDetailPage() {
     if (ci >= 60) return { label: "Good", variant: "secondary" as const };
     if (ci >= 40) return { label: "Fair", variant: "outline" as const };
     return { label: "Poor", variant: "destructive" as const };
+  };
+
+  // Get CI badge color (matching edit page)
+  const getCIBadgeColor = (ci: number | null): string => {
+    if (ci === null) return "bg-slate-500";
+    if (ci >= 80) return "bg-success";
+    if (ci >= 60) return "bg-info";
+    if (ci >= 40) return "bg-warning";
+    return "bg-destructive";
+  };
+
+  // Get CI badge text (matching edit page)
+  const getCIBadgeText = (ci: number | null): string => {
+    if (ci === null) return "Not Scored";
+    if (ci >= 80) return "Excellent";
+    if (ci >= 60) return "Good";
+    if (ci >= 40) return "Fair";
+    return "Poor";
+  };
+
+  // Get urgency badge (matching edit page)
+  const getUrgencyBadge = (urgency: string) => {
+    const urgencyLabels: Record<string, { label: string; color: string; icon: any }> = {
+      "4": { label: "Critical", color: "bg-destructive", icon: AlertTriangle },
+      "3": { label: "High", color: "bg-warning", icon: AlertTriangle },
+      "2": { label: "Medium", color: "bg-info", icon: AlertTriangle },
+      "1": { label: "Low", color: "bg-slate-500", icon: AlertTriangle },
+      "0": { label: "Routine", color: "bg-success", icon: AlertTriangle },
+      R: { label: "Record Only", color: "bg-slate-300", icon: AlertTriangle },
+      U: { label: "Unable to Inspect", color: "bg-slate-400", icon: AlertTriangle },
+    };
+    return urgencyLabels[urgency] || { label: "Unknown", color: "bg-slate-500", icon: AlertTriangle };
   };
 
   const getComponentUrgencyInfo = (degree: string, extent: string, relevancy: string) => {
@@ -205,6 +306,18 @@ export default function InspectionDetailPage() {
     return "";
   };
 
+  // Get photos for a specific component number
+  // Supports: 1.jpg, 1_1.jpg, 1_2.jpg (component 1 with sub-photos)
+  const getComponentPhotos = (componentOrder: number): any[] => {
+    if (!photos || photos.length === 0) return [];
+    
+    return photos.filter(photo => {
+      const photoNum = String(photo.photo_number);
+      // Match exact number (e.g., "1") or with underscore (e.g., "1_1", "1_2")
+      return photoNum === String(componentOrder) || photoNum.startsWith(`${componentOrder}_`);
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -224,13 +337,40 @@ export default function InspectionDetailPage() {
   const urgencyInfo = getUrgencyInfo(inspection.calculated_urgency);
   const ciBadge = getCIBadge(inspection.ci_final || inspection.conditional_index);
 
-  // Extract CI Health and CI Safety from the new view fields
-  const ciHealth = inspection.ci_health;
-  const ciSafety = inspection.ci_safety;
-  const ciFinal = inspection.ci_final || inspection.conditional_index;
+  // Extract CI values - PRIORITIZE calculation_metadata (authoritative stored values)
+  const metadata = inspection.calculation_metadata || {};
+  const ciHealth = metadata.ci_health ?? inspection.ci_health ?? null;
+  const ciSafety = metadata.ci_safety ?? inspection.ci_safety ?? null;
+  const ciFinal = metadata.ci_final ?? inspection.ci_final ?? inspection.conditional_index ?? null;
+  const worstUrgency = metadata.worst_urgency ?? inspection.calculated_urgency ?? "R";
 
-  // Use components from API response
+  // Merge stored components with latest template metadata
   const components = inspection.components || [];
+  const enrichedComponents = components.map((comp: any, index: number) => {
+    // Try to match by component_name first, then fall back to index matching
+    let templateComp = componentTemplate?.items?.find(
+      (tc: any) => tc.component_name === comp.component_name
+    );
+
+    // If no match found (e.g., generic "Comp 1"), try matching by position/index
+    if (!templateComp && componentTemplate?.items?.[index]) {
+      templateComp = componentTemplate.items[index];
+      console.log(`[InspectionDetail] Matched component by index ${index}: "${comp.component_name}" -> "${templateComp.component_name}"`);
+    }
+
+    // Merge: use stored values for scores, but latest template for metadata including name
+    return {
+      ...comp,
+      // Override component name from template (fixes generic "Comp 1" -> "1. Foundation")
+      component_name: templateComp?.component_name || comp.component_name,
+      // Override with latest template metadata if available
+      what_to_inspect: templateComp?.what_to_inspect || comp.what_to_inspect,
+      degree_rubric: templateComp?.degree_rubric || comp.degree_rubric,
+      extent_rubric: templateComp?.extent_rubric || comp.extent_rubric,
+      relevancy_rubric: templateComp?.relevancy_rubric || comp.relevancy_rubric,
+      quantity_unit: templateComp?.quantity_unit || comp.quantity_unit,
+    };
+  });
 
   return (
     <TooltipProvider>
@@ -260,134 +400,72 @@ export default function InspectionDetailPage() {
           </div>
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm flex items-center gap-2">
-                CI Final
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Info className="w-3 h-3 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="max-w-xs">Final Conditional Index is the minimum of CI Health and CI Safety (0-100 scale, higher = better condition)</p>
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl">{ciFinal !== null && ciFinal !== undefined ? Math.round(ciFinal) : "—"}</div>
-              <Badge variant={ciBadge.variant} className="mt-2">
-                {ciBadge.label}
-              </Badge>
-              <p className="text-xs text-muted-foreground mt-2">0-100 scale (higher = better)</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm flex items-center gap-2">
-                CI Health
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Info className="w-3 h-3 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="max-w-xs">Average of all component CI scores. Calculated from D/E/R penalty model: P = 0.5*(D/3) + 0.25*((E-1)/3) + 0.25*((R-1)/3), CI = 100*(1-P)</p>
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl">{ciHealth !== null && ciHealth !== undefined ? Math.round(ciHealth) : "—"}</div>
-              <p className="text-xs text-muted-foreground mt-2">Average component condition</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm flex items-center gap-2">
-                CI Safety
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Info className="w-3 h-3 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="max-w-xs">Safety score based on worst urgency: R→100, 0→90, 1→75, 2→50, 3→25, 4→0</p>
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl">{ciSafety !== null && ciSafety !== undefined ? Math.round(ciSafety) : "—"}</div>
-              <p className="text-xs text-muted-foreground mt-2">Urgency-based safety score</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm flex items-center gap-2">
-                DERU Score
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Info className="w-3 h-3 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p className="max-w-xs">Derived severity index used for ranking and prioritization analytics. Higher values indicate greater need for intervention.</p>
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl">{inspection.deru_value !== null && inspection.deru_value !== undefined ? inspection.deru_value.toFixed(2) : "—"}</div>
-              <p className="text-xs text-muted-foreground mt-2">Prioritization index</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Urgency and Cost */}
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5" />
-                Urgency Assessment
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-2">Worst Component Urgency</p>
-                  <Badge variant={urgencyInfo.variant} className="text-base px-4 py-2">
-                    {urgencyInfo.label} ({inspection.calculated_urgency})
-                  </Badge>
+        {/* Summary Cards - Matching Edit Page Layout */}
+        <Card className="border-primary">
+          <CardHeader>
+            <CardTitle className="text-lg">Overall Assessment</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <p className="text-sm text-muted-foreground">CI Health</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-2xl font-bold">{ciHealth ?? "—"}</span>
+                  {ciHealth !== null && ciHealth !== undefined && (
+                    <Badge className={getCIBadgeColor(ciHealth)}>
+                      {getCIBadgeText(ciHealth)}
+                    </Badge>
+                  )}
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  {(inspection.calculated_urgency === "4" || inspection.calculated_urgency === "Immediate") && "Requires immediate action for safety"}
-                  {(inspection.calculated_urgency === "3" || inspection.calculated_urgency === "High") && "High priority - address promptly"}
-                  {(inspection.calculated_urgency === "2" || inspection.calculated_urgency === "Medium") && "Medium priority - schedule maintenance"}
-                  {(inspection.calculated_urgency === "1" || inspection.calculated_urgency === "Low") && "Low priority - monitor condition"}
-                  {inspection.calculated_urgency === "0" && "Minor issues - routine monitoring"}
-                  {inspection.calculated_urgency === "R" && "Record only - no action required"}
-                  {inspection.calculated_urgency === "U" && "Unable to inspect - revisit required"}
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">CI Safety</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-2xl font-bold">{ciSafety ?? "—"}</span>
+                  {ciSafety !== null && ciSafety !== undefined && (
+                    <Badge className={getCIBadgeColor(ciSafety)}>
+                      {getCIBadgeText(ciSafety)}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">CI Final</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-2xl font-bold">{ciFinal ?? "—"}</span>
+                  {ciFinal !== null && ciFinal !== undefined && (
+                    <Badge className={getCIBadgeColor(ciFinal)}>
+                      {getCIBadgeText(ciFinal)}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Worst Urgency</p>
+                <div className="mt-1">
+                  {(() => {
+                    const { label, color, icon: Icon } = getUrgencyBadge(worstUrgency);
+                    return (
+                      <Badge className={color}>
+                        <Icon className="w-3 h-3 mr-1" />
+                        {label}
+                      </Badge>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+            {inspection.total_remedial_cost && inspection.total_remedial_cost > 0 && (
+              <div className="mt-4 pt-4 border-t">
+                <p className="text-sm text-muted-foreground">Total Remedial Cost</p>
+                <p className="text-2xl font-bold text-warning mt-1 flex items-center gap-1">
+                  <Banknote className="w-5 h-5" />
+                  R {inspection.total_remedial_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </p>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Banknote className="w-5 h-5" />
-                Remedial Costs
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl text-[#F8D227] bg-[#010D13] px-3 py-2 rounded inline-flex items-center gap-2">
-                R {inspection.total_remedial_cost ? inspection.total_remedial_cost.toLocaleString() : "0"}
-              </div>
-              <p className="text-sm text-muted-foreground mt-2">Estimated repair/replacement cost</p>
-            </CardContent>
-          </Card>
-        </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Inspection Info */}
         <Card>
@@ -431,7 +509,7 @@ export default function InspectionDetailPage() {
         </Card>
 
         {/* Component Details */}
-        {components.length > 0 && (
+        {enrichedComponents.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle>Component Details</CardTitle>
@@ -441,7 +519,7 @@ export default function InspectionDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-6">
-                {components.map((comp: any) => {
+                {enrichedComponents.map((comp: any, compIndex: number) => {
                   const urgencyCalc = getComponentUrgencyInfo(
                     comp.degree_value,
                     comp.extent_value,
@@ -453,7 +531,7 @@ export default function InspectionDetailPage() {
                   const relevancyMeaning = getRubricMeaning(comp.relevancy_rubric, comp.relevancy_value);
 
                   return (
-                    <div key={comp.component_order} className="p-5 border rounded-lg bg-muted/30">
+                    <div key={`comp-${comp.component_order}-${compIndex}`} className="p-5 border rounded-lg bg-muted/30">
                       {/* Component Header */}
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex-1">
@@ -596,8 +674,47 @@ export default function InspectionDetailPage() {
                         </div>
                       )}
 
-                      {/* Photo */}
-                      {comp.photo_url && (
+                      {/* Component Photos */}
+                      {(() => {
+                        const componentPhotos = getComponentPhotos(comp.component_order);
+                        return componentPhotos.length > 0 ? (
+                          <div className="mb-4">
+                            <p className="text-xs text-muted-foreground mb-2">Component Photos ({componentPhotos.length})</p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                              {componentPhotos.map((photo, idx) => (
+                                <div
+                                  key={`comp-${comp.component_order}-${compIndex}-photo-${idx}`}
+                                  className="relative group cursor-pointer rounded-lg overflow-hidden border hover:border-primary transition-colors"
+                                  onClick={() => window.open(photo.signedUrl || photo.url, '_blank')}
+                                >
+                                  <div className="aspect-square relative">
+                                    {photo.signedUrl || photo.url ? (
+                                      <img
+                                        src={photo.signedUrl || photo.url}
+                                        alt={`Component ${comp.component_order} Photo ${photo.photo_number}`}
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                          e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E';
+                                        }}
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center bg-muted">
+                                        <ImageIcon className="w-8 h-8 text-muted-foreground" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1.5 text-white text-xs text-center">
+                                    Photo {photo.photo_number}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null;
+                      })()}
+
+                      {/* Legacy photo URL support */}
+                      {comp.photo_url && getComponentPhotos(comp.component_order).length === 0 && (
                         <div className="flex items-center gap-2 p-3 bg-background rounded border">
                           <ImageIcon className="w-4 h-4 text-muted-foreground" />
                           <a 

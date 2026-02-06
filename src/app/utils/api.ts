@@ -39,7 +39,17 @@ export async function apiRequest<T = any>(
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     } else {
-      headers["Authorization"] = `Bearer ${publicAnonKey}`;
+      // No token available - user needs to log in
+      console.warn("⚠️ No authentication token found. Redirecting to login...");
+      localStorage.removeItem("tams360_token");
+      localStorage.removeItem("tams360_user");
+      
+      // Redirect to login after a brief delay
+      setTimeout(() => {
+        window.location.href = "/login";
+      }, 100);
+      
+      throw new Error("No authentication token");
     }
   } else {
     headers["Authorization"] = `Bearer ${publicAnonKey}`;
