@@ -634,37 +634,52 @@ export default function DashboardPage() {
           console.log('[DERU Debug] Row total:', total, '% (should be ~100%)');
         }
         
+        console.log('📊 [DERU] About to create newDeruData object...');
+        console.log('📊 [DERU] degreeData length:', degreeData.length);
+        
+        const extentData = processCategory('e_extent', {
+          '0': 'None',
+          '1': '<10% affected',
+          '2': '10-30% affected',
+          '3': '30-60% affected',
+          '4': 'Mostly affected (>60%)'
+        });
+        console.log('📊 [DERU] extentData length:', extentData.length);
+        
+        const relevancyData = processCategory('r_relevancy', {
+          '0': 'None',
+          '1': 'Cosmetic',
+          '2': 'Local dysfunction',
+          '3': 'Moderate dysfunction',
+          '4': 'Major dysfunction'
+        });
+        console.log('📊 [DERU] relevancyData length:', relevancyData.length);
+        
+        const urgencyData = processCategory('u_urgency', {
+          'X': 'Not applicable',
+          '0': 'Monitor only',
+          '1': 'Routine maintenance',
+          '2': 'Repair within 10 years',
+          '3': 'Repair within 10 years',
+          '4': 'Immediate action'
+        });
+        console.log('📊 [DERU] urgencyData length:', urgencyData.length);
+        
+        const ciData = processCategory('ci_final', {
+          '0-19': 'Critical (0-19)',
+          '20-39': 'Poor (20-39)',
+          '40-59': 'Fair (40-59)',
+          '60-79': 'Good (60-79)',
+          '80-100': 'Excellent (80-100)'
+        }, true);
+        console.log('📊 [DERU] ciData length:', ciData.length);
+        
         const newDeruData = {
           degree: degreeData,
-          extent: processCategory('e_extent', {
-            '0': 'None',
-            '1': '<10% affected',
-            '2': '10-30% affected',
-            '3': '30-60% affected',
-            '4': 'Mostly affected (>60%)'
-          }),
-          relevancy: processCategory('r_relevancy', {
-            '0': 'None',
-            '1': 'Cosmetic',
-            '2': 'Local dysfunction',
-            '3': 'Moderate dysfunction',
-            '4': 'Major dysfunction'
-          }),
-          urgency: processCategory('u_urgency', {
-            'X': 'Not applicable',
-            '0': 'Monitor only',
-            '1': 'Routine maintenance',
-            '2': 'Repair within 10 years',
-            '3': 'Repair within 10 years',
-            '4': 'Immediate action'
-          }),
-          ci: processCategory('ci_final', {
-            '0-19': 'Critical (0-19)',
-            '20-39': 'Poor (20-39)',
-            '40-59': 'Fair (40-59)',
-            '60-79': 'Good (60-79)',
-            '80-100': 'Excellent (80-100)'
-          }, true)
+          extent: extentData,
+          relevancy: relevancyData,
+          urgency: urgencyData,
+          ci: ciData
         };
         
         console.log('📊 [DERU] Setting DERU data:', newDeruData);
