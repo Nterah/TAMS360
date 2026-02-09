@@ -70,9 +70,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Desktop Sidebar - Hidden for field_user role */}
+      {/* Desktop Sidebar - Hidden for field_user role - Now shows on lg+ instead of md+ */}
       {user?.role !== "field_user" && (
-        <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col bg-sidebar border-r border-sidebar-border">
+        <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col bg-sidebar border-r border-sidebar-border">
           <div className="flex flex-col flex-1 min-h-0">
             {/* Logo */}
             <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
@@ -116,16 +116,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Main Content */}
-      <div className={user?.role === "field_user" ? "" : "md:pl-64"}>
+      <div className={user?.role === "field_user" ? "" : "lg:pl-64"}>
         {/* Tenant Banner */}
         <TenantBanner />
         
         {/* Offline Banner */}
         <OfflineBanner />
         
-        {/* Mobile Header - Hidden for field_user on mobile (they have MobileLayout) */}
+        {/* Mobile/Tablet Header - Now shows on screens < lg instead of < md */}
         {user?.role !== "field_user" && (
-          <header className="sticky top-0 z-40 flex items-center gap-4 px-4 py-3 bg-card border-b md:hidden">
+          <header className="sticky top-0 z-40 flex items-center gap-4 px-4 py-3 bg-card border-b lg:hidden">
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon">

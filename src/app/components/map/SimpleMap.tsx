@@ -122,15 +122,35 @@ const createAssetIcon = (assetType: string, asset: any, colorMode: string = "con
   return L.divIcon({
     className: "custom-asset-marker",
     html: `
-      <div style="position: relative; width: 32px; height: 42px;">
+      <div style="position: relative; width: 32px; height: 42px; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.3));">
         <svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg">
-          <!-- Marker pin background -->
+          <defs>
+            <!-- Gradient for shininess effect -->
+            <linearGradient id="shine-${color.replace('#', '')}" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:${color};stop-opacity:1" />
+              <stop offset="50%" style="stop-color:${color};stop-opacity:0.85" />
+              <stop offset="100%" style="stop-color:${color};stop-opacity:0.7" />
+            </linearGradient>
+            <!-- Inner glow for depth -->
+            <radialGradient id="glow-${color.replace('#', '')}" cx="50%" cy="30%">
+              <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.4" />
+              <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0" />
+            </radialGradient>
+          </defs>
+          
+          <!-- Marker pin background with gradient -->
           <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 26 16 26s16-14 16-26C32 7.2 24.8 0 16 0z" 
-                fill="${color}" stroke="#fff" stroke-width="2"/>
+                fill="url(#shine-${color.replace('#', '')})" 
+                stroke="#fff" 
+                stroke-width="2.5"
+                opacity="0.95"/>
+          
+          <!-- Inner highlight for glossy effect -->
+          <ellipse cx="16" cy="10" rx="8" ry="6" fill="url(#glow-${color.replace('#', '')})" />
           
           <!-- Asset type icon (centered in marker) -->
           <g transform="translate(8, 4) scale(1)">
-            <path d="${iconShape}" fill="#fff" stroke="#fff" stroke-width="0.5"/>
+            <path d="${iconShape}" fill="#fff" stroke="#fff" stroke-width="0.5" opacity="0.95"/>
           </g>
         </svg>
       </div>

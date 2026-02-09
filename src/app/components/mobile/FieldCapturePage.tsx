@@ -44,6 +44,8 @@ export default function FieldCapturePage() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [saving, setSaving] = useState(false);
   const [gettingLocation, setGettingLocation] = useState(false);
+  const [assetTypes, setAssetTypes] = useState<Array<{ id: string; name: string }>>([]);
+  const [loadingAssetTypes, setLoadingAssetTypes] = useState(true);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -53,10 +55,18 @@ export default function FieldCapturePage() {
     longitude: "",
     condition: "Good",
     notes: "",
+    region: "",
+    depot: "",
+    ward: "",
+    owner: "",
+    responsibleParty: "",
+    roadName: "",
   });
 
   const [photos, setPhotos] = useState<{ file: File; preview: string }[]>([]);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+
+  const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   // Monitor online/offline status
   useEffect(() => {
@@ -71,6 +81,56 @@ export default function FieldCapturePage() {
       window.removeEventListener("offline", handleOffline);
     };
   }, []);
+
+  // Fetch asset types from database
+  useEffect(() => {
+    fetchAssetTypes();
+  }, []);
+
+  const fetchAssetTypes = async () => {
+    try {
+      const response = await fetch(`${API_URL}/asset-types`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const typeNames = data.assetTypes?.map((type: any) => ({ id: type.id, name: type.asset_type_name })) || [];
+        setAssetTypes(typeNames);
+      } else {
+        // Fallback to hardcoded types if API fails
+        setAssetTypes([
+          { id: "1", name: "Road Sign" },
+          { id: "2", name: "Guardrail" },
+          { id: "3", name: "Safety Barrier" },
+          { id: "4", name: "Traffic Signal" },
+          { id: "5", name: "Gantry" },
+          { id: "6", name: "Fence" },
+          { id: "7", name: "Guidepost" },
+          { id: "8", name: "Road Marking" },
+          { id: "9", name: "Raised Road Marker" }
+        ]);
+      }
+    } catch (error) {
+      console.error("Error fetching asset types:", error);
+      // Fallback to hardcoded types
+      setAssetTypes([
+        { id: "1", name: "Road Sign" },
+        { id: "2", name: "Guardrail" },
+        { id: "3", name: "Safety Barrier" },
+        { id: "4", name: "Traffic Signal" },
+        { id: "5", name: "Gantry" },
+        { id: "6", name: "Fence" },
+        { id: "7", name: "Guidepost" },
+        { id: "8", name: "Road Marking" },
+        { id: "9", name: "Raised Road Marker" }
+      ]);
+    } finally {
+      setLoadingAssetTypes(false);
+    }
+  };
 
   // Get current GPS location
   const getCurrentLocation = () => {
@@ -223,6 +283,12 @@ export default function FieldCapturePage() {
         notes: assetData.notes,
         photo_urls: photoUrls,
         status: "Active",
+        region: assetData.region || null,
+        depot: assetData.depot || null,
+        ward: assetData.ward || null,
+        owner: assetData.owner || null,
+        responsible_party: assetData.responsibleParty || null,
+        road_name: assetData.roadName || null,
       }),
     });
 
@@ -349,13 +415,9 @@ export default function FieldCapturePage() {
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Road Sign">Road Sign</SelectItem>
-                  <SelectItem value="Guardrail">Guardrail</SelectItem>
-                  <SelectItem value="Safety Barrier">Safety Barrier</SelectItem>
-                  <SelectItem value="Traffic Signal">Traffic Signal</SelectItem>
-                  <SelectItem value="Street Light">Street Light</SelectItem>
-                  <SelectItem value="Bollard">Bollard</SelectItem>
-                  <SelectItem value="Delineator">Delineator</SelectItem>
+                  {assetTypes.map((type) => (
+                    <SelectItem key={type.id} value={type.name}>{type.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -394,6 +456,69 @@ export default function FieldCapturePage() {
                 placeholder="Additional observations..."
                 rows={3}
                 className="text-sm resize-none"
+              />
+            </div>
+
+            {/* Additional Asset Fields */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Region</Label>
+                <Input
+                  value={formData.region}
+                  onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                  placeholder="Region"
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Depot</Label>
+                <Input
+                  value={formData.depot}
+                  onChange={(e) => setFormData({ ...formData, depot: e.target.value })}
+                  placeholder="Depot"
+                  className="h-9 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Ward</Label>
+                <Input
+                  value={formData.ward}
+                  onChange={(e) => setFormData({ ...formData, ward: e.target.value })}
+                  placeholder="Ward"
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Owner</Label>
+                <Input
+                  value={formData.owner}
+                  onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
+                  placeholder="Owner"
+                  className="h-9 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Responsible Party</Label>
+              <Input
+                value={formData.responsibleParty}
+                onChange={(e) => setFormData({ ...formData, responsibleParty: e.target.value })}
+                placeholder="Responsible party"
+                className="h-9 text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">Road Name</Label>
+              <Input
+                value={formData.roadName}
+                onChange={(e) => setFormData({ ...formData, roadName: e.target.value })}
+                placeholder="Road name"
+                className="h-9 text-sm"
               />
             </div>
           </CardContent>

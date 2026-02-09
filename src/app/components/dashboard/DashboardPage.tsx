@@ -1375,8 +1375,12 @@ export default function DashboardPage() {
                         
                         const keys = stackKeys[selectedDERUCategory] || [];
                         
+                        console.log('🎨 [DERU Chart Render] Processing data for chart...');
+                        console.log('🎨 [DERU Chart Render] Stack keys:', keys);
+                        console.log('🎨 [DERU Chart Render] Raw input data:', deruData[selectedDERUCategory]);
+                        
                         // Normalize each row to ensure 100% total with all keys present
-                        return deruData[selectedDERUCategory].map((row: any) => {
+                        const normalizedData = deruData[selectedDERUCategory].map((row: any) => {
                           const normalized: any = { name: row.name };
                           
                           // Ensure all keys exist (set to 0 if missing)
@@ -1397,6 +1401,11 @@ export default function DashboardPage() {
                           
                           return normalized;
                         });
+                        
+                        console.log('🎨 [DERU Chart Render] Normalized chart data:', normalizedData);
+                        console.log('🎨 [DERU Chart Render] First row sample:', normalizedData[0]);
+                        
+                        return normalizedData;
                       })()} 
                       layout="vertical"
                       margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
