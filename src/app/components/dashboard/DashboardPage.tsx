@@ -1375,13 +1375,6 @@ export default function DashboardPage() {
             {/* Bar Chart - Asset Type Breakdown */}
             <div>
               <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
-              {(() => {
-                console.log('📊 [DERU Render] Current category:', selectedDERUCategory);
-                console.log('📊 [DERU Render] Full deruData:', deruData);
-                console.log('📊 [DERU Render] Selected category data:', deruData[selectedDERUCategory]);
-                console.log('📊 [DERU Render] Data length:', deruData[selectedDERUCategory]?.length);
-                return null;
-              })()}
               {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
                 <>
                   <ResponsiveContainer width="100%" height={300}>
