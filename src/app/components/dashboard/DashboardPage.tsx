@@ -264,6 +264,7 @@ export default function DashboardPage() {
   const fetchAssetTypeSummary = async (signal?: AbortSignal) => {
     if (!accessToken) return;
     try {
+      console.log('📡 [Asset Type] Fetching asset type summary...');
       const response = await fetch(`${API_URL}/dashboard/asset-type-summary`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -273,12 +274,16 @@ export default function DashboardPage() {
 
       if (response.ok) {
         const data = await response.json();
+        console.log('✅ [Asset Type] Received data:', data);
+        console.log('✅ [Asset Type] Summary array:', data.summary);
         setAssetTypeSummary(data.summary || []);
+      } else {
+        console.error('❌ [Asset Type] Failed to fetch:', response.status, await response.text());
       }
     } catch (error) {
       // Ignore abort errors
       if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching asset type summary:", error);
+      console.error("❌ [Asset Type] Error fetching asset type summary:", error);
     }
   };
 
@@ -1045,20 +1050,30 @@ export default function DashboardPage() {
 
   // Memoized asset type chart data with robust normalization
   const assetTypeChartData = useMemo(() => {
+    console.log('🔍 [Asset Type Chart] Raw assetTypeSummary:', assetTypeSummary);
+    
     const raw = Array.isArray(assetTypeSummary)
       ? assetTypeSummary
       : (assetTypeSummary ? Object.values(assetTypeSummary) : []);
+
+    console.log('🔍 [Asset Type Chart] Processed raw data:', raw);
 
     const normalized = raw.map((r: any) => ({
       name: toAssetTypeName(r),
       count: toNumber(r?.asset_count ?? r?.total_assets ?? r?.count ?? r?.value ?? 0),
     }));
 
+    console.log('🔍 [Asset Type Chart] Normalized data:', normalized);
+
     // Sort biggest first
-    return normalized
+    const final = normalized
       .filter(x => x.count > 0) // Only show types with assets
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
+      
+    console.log('✅ [Asset Type Chart] Final chart data:', final);
+    
+    return final;
   }, [assetTypeSummary]);
 
   if (loading) {
