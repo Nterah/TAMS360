@@ -634,7 +634,7 @@ export default function DashboardPage() {
           console.log('[DERU Debug] Row total:', total, '% (should be ~100%)');
         }
         
-        setDeruData({
+        const newDeruData = {
           degree: degreeData,
           extent: processCategory('e_extent', {
             '0': 'None',
@@ -665,7 +665,13 @@ export default function DashboardPage() {
             '60-79': 'Good (60-79)',
             '80-100': 'Excellent (80-100)'
           }, true)
-        });
+        };
+        
+        console.log('📊 [DERU] Setting DERU data:', newDeruData);
+        console.log('📊 [DERU] Degree data length:', newDeruData.degree.length);
+        console.log('📊 [DERU] Degree sample:', newDeruData.degree[0]);
+        
+        setDeruData(newDeruData);
       }
     } catch (error) {
       // Ignore abort errors
@@ -1346,6 +1352,13 @@ export default function DashboardPage() {
             {/* Bar Chart - Asset Type Breakdown */}
             <div>
               <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
+              {(() => {
+                console.log('📊 [DERU Render] Current category:', selectedDERUCategory);
+                console.log('📊 [DERU Render] Full deruData:', deruData);
+                console.log('📊 [DERU Render] Selected category data:', deruData[selectedDERUCategory]);
+                console.log('📊 [DERU Render] Data length:', deruData[selectedDERUCategory]?.length);
+                return null;
+              })()}
               {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
                 <>
                   <ResponsiveContainer width="100%" height={300}>
