@@ -615,78 +615,86 @@ export default function DashboardPage() {
         };
         
         console.log('[DERU Debug] Processing categories...');
-        const degreeData = processCategory('d_degree', {
-          '0': 'None (Good)',
-          '1': 'Not applicable',
-          'U': 'Unable to inspect', 
-          '2': 'Good defects',
-          '3': 'Moderate defects',
-          '4': 'Major defects'
-        });
         
-        // Debug: Validate 100% stacked chart structure
-        if (degreeData.length > 0) {
-          const firstItem = degreeData[0];
-          const categoryKeys = Object.keys(firstItem).filter(k => k !== 'name');
-          const total = categoryKeys.reduce((sum, k) => sum + (firstItem[k] || 0), 0);
-          console.log('[DERU Debug] First degree item:', firstItem);
-          console.log('[DERU Debug] Category keys:', categoryKeys);
-          console.log('[DERU Debug] Row total:', total, '% (should be ~100%)');
+        // Wrap in try-catch to prevent silent failures
+        try {
+          const degreeData = processCategory('d_degree', {
+            '0': 'None (Good)',
+            '1': 'Not applicable',
+            'U': 'Unable to inspect', 
+            '2': 'Good defects',
+            '3': 'Moderate defects',
+            '4': 'Major defects'
+          });
+          
+          // Debug: Validate 100% stacked chart structure
+          if (degreeData.length > 0) {
+            const firstItem = degreeData[0];
+            const categoryKeys = Object.keys(firstItem).filter(k => k !== 'name');
+            const total = categoryKeys.reduce((sum, k) => sum + (firstItem[k] || 0), 0);
+            console.log('[DERU Debug] First degree item:', firstItem);
+            console.log('[DERU Debug] Category keys:', categoryKeys);
+            console.log('[DERU Debug] Row total:', total, '% (should be ~100%)');
+          }
+          
+          const extentData = processCategory('e_extent', {
+            '0': 'None',
+            '1': '<10% affected',
+            '2': '10-30% affected',
+            '3': '30-60% affected',
+            '4': 'Mostly affected (>60%)'
+          });
+          
+          const relevancyData = processCategory('r_relevancy', {
+            '0': 'None',
+            '1': 'Cosmetic',
+            '2': 'Local dysfunction',
+            '3': 'Moderate dysfunction',
+            '4': 'Major dysfunction'
+          });
+          
+          const urgencyData = processCategory('u_urgency', {
+            'X': 'Not applicable',
+            '0': 'Monitor only',
+            '1': 'Routine maintenance',
+            '2': 'Repair within 10 years',
+            '3': 'Repair within 10 years',
+            '4': 'Immediate action'
+          });
+          
+          const ciData = processCategory('ci_final', {
+            '0-19': 'Critical (0-19)',
+            '20-39': 'Poor (20-39)',
+            '40-59': 'Fair (40-59)',
+            '60-79': 'Good (60-79)',
+            '80-100': 'Excellent (80-100)'
+          }, true);
+          
+          const newDeruData = {
+            degree: degreeData,
+            extent: extentData,
+            relevancy: relevancyData,
+            urgency: urgencyData,
+            ci: ciData
+          };
+          
+          console.log('📊 [DERU] Setting DERU data:', newDeruData);
+          console.log('📊 [DERU] Degree data length:', newDeruData.degree.length);
+          console.log('📊 [DERU] Degree sample:', newDeruData.degree[0]);
+          
+          setDeruData(newDeruData);
+          console.log('✅ [DERU] State updated successfully!');
+        } catch (categoryError) {
+          console.error('❌ [DERU] Error processing categories:', categoryError);
+          // Set empty data so the chart at least initializes
+          setDeruData({
+            degree: [],
+            extent: [],
+            relevancy: [],
+            urgency: [],
+            ci: []
+          });
         }
-        
-        console.log('📊 [DERU] About to create newDeruData object...');
-        console.log('📊 [DERU] degreeData length:', degreeData.length);
-        
-        const extentData = processCategory('e_extent', {
-          '0': 'None',
-          '1': '<10% affected',
-          '2': '10-30% affected',
-          '3': '30-60% affected',
-          '4': 'Mostly affected (>60%)'
-        });
-        console.log('📊 [DERU] extentData length:', extentData.length);
-        
-        const relevancyData = processCategory('r_relevancy', {
-          '0': 'None',
-          '1': 'Cosmetic',
-          '2': 'Local dysfunction',
-          '3': 'Moderate dysfunction',
-          '4': 'Major dysfunction'
-        });
-        console.log('📊 [DERU] relevancyData length:', relevancyData.length);
-        
-        const urgencyData = processCategory('u_urgency', {
-          'X': 'Not applicable',
-          '0': 'Monitor only',
-          '1': 'Routine maintenance',
-          '2': 'Repair within 10 years',
-          '3': 'Repair within 10 years',
-          '4': 'Immediate action'
-        });
-        console.log('📊 [DERU] urgencyData length:', urgencyData.length);
-        
-        const ciData = processCategory('ci_final', {
-          '0-19': 'Critical (0-19)',
-          '20-39': 'Poor (20-39)',
-          '40-59': 'Fair (40-59)',
-          '60-79': 'Good (60-79)',
-          '80-100': 'Excellent (80-100)'
-        }, true);
-        console.log('📊 [DERU] ciData length:', ciData.length);
-        
-        const newDeruData = {
-          degree: degreeData,
-          extent: extentData,
-          relevancy: relevancyData,
-          urgency: urgencyData,
-          ci: ciData
-        };
-        
-        console.log('📊 [DERU] Setting DERU data:', newDeruData);
-        console.log('📊 [DERU] Degree data length:', newDeruData.degree.length);
-        console.log('📊 [DERU] Degree sample:', newDeruData.degree[0]);
-        
-        setDeruData(newDeruData);
       }
     } catch (error) {
       // Ignore abort errors
