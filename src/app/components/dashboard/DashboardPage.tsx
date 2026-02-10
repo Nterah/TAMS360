@@ -84,41 +84,6 @@ const toAssetTypeName = (r: any) =>
  * Production-safe measurement hook for Recharts charts inside grids/tabs.
  * In production builds, ResponsiveContainer can sometimes measure 0x0 and never recover.
  */
-function useMeasuredSize<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  const [size, setSize] = useState({ width: 0, height: 0 });
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const measure = () => {
-      const rect = el.getBoundingClientRect();
-      const w = Math.round(rect.width);
-      const h = Math.round(rect.height);
-      setSize((prev) => (prev.width !== w || prev.height !== h ? { width: w, height: h } : prev));
-    };
-
-    measure();
-
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(el);
-
-    // extra measure passes (prod layout/fonts/CSS often settle after paint)
-    const r1 = requestAnimationFrame(measure);
-    const r2 = requestAnimationFrame(measure);
-
-    window.addEventListener("resize", measure);
-    return () => {
-      ro.disconnect();
-      cancelAnimationFrame(r1);
-      cancelAnimationFrame(r2);
-      window.removeEventListener("resize", measure);
-    };
-  }, []);
-
-  return { ref, size };
-}
 
 
 
