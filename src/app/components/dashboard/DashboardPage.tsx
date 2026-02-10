@@ -1371,9 +1371,9 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="pt-3">
-          <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+          <div className="grid gap-6 lg:grid-cols-[2fr_1fr]  min-w-0">
             {/* Bar Chart - Asset Type Breakdown */}
-            <div className="w-full" style={{ minHeight: '300px' }}>
+            <div className="w-full  min-w-0" style={{ minHeight: '300px' }}>
               <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
               {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
                 <>
