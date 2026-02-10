@@ -11,8 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-// keep your existing imports too
 
 function useMeasuredSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
@@ -1522,8 +1520,61 @@ const deruNormalizedData = useMemo(() => {
                           layout="vertical"
                           margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
                         >
-                          {/* KEEP EVERYTHING INSIDE YOUR BarChart EXACTLY AS IT IS NOW:
-                              CartesianGrid, XAxis, YAxis, Tooltip, and all the <Bar .../> blocks */}
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
+                          <YAxis dataKey="name" type="category" width={120} />
+                          <Tooltip formatter={(v: any) => `${v}%`} />
+
+                          {selectedDERUCategory === "degree" && (
+                            <>
+                              <Bar dataKey="None (Good)" stackId="a" fill="#5DB32A" />
+                              <Bar dataKey="Good defects" stackId="a" fill="#A8D96E" />
+                              <Bar dataKey="Moderate defects" stackId="a" fill="#F8D227" />
+                              <Bar dataKey="Major defects" stackId="a" fill="#d4183d" />
+                              <Bar dataKey="Unable to inspect" stackId="a" fill="#9E9E9E" />
+                              <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
+                            </>
+                          )}
+
+                          {selectedDERUCategory === "extent" && (
+                            <>
+                              <Bar dataKey="None" stackId="a" fill="#5DB32A" />
+                              <Bar dataKey="<10% affected" stackId="a" fill="#A8D96E" />
+                              <Bar dataKey="10-30% affected" stackId="a" fill="#F8D227" />
+                              <Bar dataKey="30-60% affected" stackId="a" fill="#F57C00" />
+                              <Bar dataKey="Mostly affected (>60% affected)" stackId="a" fill="#d4183d" />
+                            </>
+                          )}
+
+                          {selectedDERUCategory === "relevancy" && (
+                            <>
+                              <Bar dataKey="None" stackId="a" fill="#5DB32A" />
+                              <Bar dataKey="Cosmetic" stackId="a" fill="#A8D96E" />
+                              <Bar dataKey="Local dysfunction" stackId="a" fill="#F8D227" />
+                              <Bar dataKey="Moderate dysfunction" stackId="a" fill="#F57C00" />
+                              <Bar dataKey="Major dysfunction" stackId="a" fill="#d4183d" />
+                            </>
+                          )}
+
+                          {selectedDERUCategory === "urgency" && (
+                            <>
+                              <Bar dataKey="Monitor only" stackId="a" fill="#5DB32A" />
+                              <Bar dataKey="Routine maintenance" stackId="a" fill="#A8D96E" />
+                              <Bar dataKey="Repair within 10 years" stackId="a" fill="#F8D227" />
+                              <Bar dataKey="Immediate action" stackId="a" fill="#d4183d" />
+                              <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
+                            </>
+                          )}
+
+                          {selectedDERUCategory === "ci" && (
+                            <>
+                              <Bar dataKey="Excellent (80-100)" stackId="a" fill="#5DB32A" />
+                              <Bar dataKey="Good (60-79)" stackId="a" fill="#A8D96E" />
+                              <Bar dataKey="Fair (40-59)" stackId="a" fill="#F8D227" />
+                              <Bar dataKey="Poor (20-39)" stackId="a" fill="#F57C00" />
+                              <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
+                            </>
+                          )}
                         </BarChart>
                       ) : (
                         <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -1550,292 +1601,96 @@ const deruNormalizedData = useMemo(() => {
             {/* Pie Chart - Overall Distribution */}
             <div>
               <h4 className="text-sm font-semibold mb-3">Overall Distribution (All Assets)</h4>
+
+
               {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={(() => {
-                        // Aggregate all values across asset types
-                        const aggregated: any = {};
-                        deruData[selectedDERUCategory].forEach((item: any) => {
-                          Object.keys(item).forEach(key => {
-                            if (key !== 'name' && typeof item[key] === 'number') {
-                              aggregated[key] = (aggregated[key] || 0) + item[key];
-                            }
-                          });
-                        });
-                        return Object.entries(aggregated).map(([name, value]) => ({ name, value }));
-                      })()}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={((entry: any) => {
-                        const aggregated: any = {};
-                        deruData[selectedDERUCategory].forEach((item: any) => {
-                          Object.keys(item).forEach(key => {
-                            if (key !== 'name' && typeof item[key] === 'number') {
-                              aggregated[key] = (aggregated[key] || 0) + item[key];
-                            }
-                          });
-                        });
-                        const total = Object.values(aggregated).reduce((sum: any, val: any) => sum + val, 0) as number;
-                        const pct = total > 0 ? ((entry.value / total) * 100) : 0;
-                        
-                        // Only show label if slice is large enough (>5%)
-                        if (pct < 5) return null;
-                        
-                        const RADIAN = Math.PI / 180;
-                        const radius = 70 + (110 - 70) / 2; // Middle of donut ring
-                        const x = entry.cx + radius * Math.cos(-entry.midAngle * RADIAN);
-                        const y = entry.cy + radius * Math.sin(-entry.midAngle * RADIAN);
-                        
-                        return (
-                          <text 
-                            x={x} 
-                            y={y} 
-                            fill="white" 
-                            textAnchor="middle" 
-                            dominantBaseline="middle"
-                            className="text-xs font-semibold"
-                            style={{ textShadow: '0 0 3px rgba(0,0,0,0.8)' }}
-                          >
-                            {pct.toFixed(1)}%
-                          </text>
-                        );
-                      })}
-                      innerRadius={70}
-                      outerRadius={110}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {Object.entries((() => {
-                        const aggregated: any = {};
-                        deruData[selectedDERUCategory].forEach((item: any) => {
-                          Object.keys(item).forEach(key => {
-                            if (key !== 'name' && typeof item[key] === 'number') {
-                              aggregated[key] = (aggregated[key] || 0) + item[key];
-                            }
-                          });
-                        });
-                        return aggregated;
-                      })()).map(([name], index) => {
-                        // Unified color map
-                        const colorMap: { [key: string]: string } = {
-                          'None (Good)': '#5DB32A',
-                          'Good defects': '#A8D96E',
-                          'Moderate defects': '#F8D227',
-                          'Major defects': '#d4183d',
-                          'Unable to inspect': '#9E9E9E',
-                          'Not applicable': '#455B5E',
-                          'None': '#5DB32A',
-                          '<10% affected': '#A8D96E',
-                          '10-30% affected': '#F8D227',
-                          '30-60% affected': '#F57C00',
-                          'Mostly affected (>60%)': '#d4183d',
-                          'Cosmetic': '#A8D96E',
-                          'Local dysfunction': '#F8D227',
-                          'Moderate dysfunction': '#F57C00',
-                          'Major dysfunction': '#d4183d',
-                          'Monitor only': '#5DB32A',
-                          'Routine maintenance': '#A8D96E',
-                          'Repair within 10 years': '#F8D227',
-                          'Immediate action': '#d4183d',
-                          'Excellent (80-100)': '#5DB32A',
-                          'Good (60-79)': '#A8D96E',
-                          'Fair (40-59)': '#F8D227',
-                          'Poor (20-39)': '#F57C00',
-                          'Critical (0-19)': '#d4183d',
-                        };
-                        return (
-                          <Cell key={`cell-${index}`} fill={colorMap[name] || COLORS[index % COLORS.length]} />
-                        );
-                      })}
-                    </Pie>
-                    <Tooltip formatter={(value: any, name: any) => {
-                      const aggregated: any = {};
-                      deruData[selectedDERUCategory].forEach((item: any) => {
-                        Object.keys(item).forEach(key => {
-                          if (key !== 'name' && typeof item[key] === 'number') {
-                            aggregated[key] = (aggregated[key] || 0) + item[key];
-                          }
-                        });
-                      });
-                      const total = Object.values(aggregated).reduce((sum: any, val: any) => sum + val, 0) as number;
-                      const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0';
-                      return [`${pct}% (${value} components)`, name];
-                    }} />
-                    {(() => {
-                      const result = (() => {
-                        // Calculate weighted average rating
-                        const aggregated: any = {};
-                        deruData[selectedDERUCategory].forEach((item: any) => {
-                          Object.keys(item).forEach(key => {
-                            if (key !== 'name' && typeof item[key] === 'number') {
-                              aggregated[key] = (aggregated[key] || 0) + item[key];
-                            }
-                          });
-                        });
-                        
-                        // Score maps (lower = better)
-                        const scoreMap: { [key: string]: { [key: string]: number } } = {
-                          degree: {
-                            'None (Good)': 1,
-                            'Good defects': 2,
-                            'Moderate defects': 3,
-                            'Major defects': 4
-                          },
-                          extent: {
-                            'None': 1,
-                            '<10% affected': 2,
-                            '10-30% affected': 3,
-                            '30-60% affected': 4,
-                            'Mostly affected (>60%)': 5
-                          },
-                          relevancy: {
-                            'None': 1,
-                            'Cosmetic': 2,
-                            'Local dysfunction': 3,
-                            'Moderate dysfunction': 4,
-                            'Major dysfunction': 5
-                          },
-                          urgency: {
-                            'Monitor only': 1,
-                            'Routine maintenance': 2,
-                            'Repair within 10 years': 3,
-                            'Immediate action': 4
-                          },
-                          ci: {
-                            'Excellent (80-100)': 1,
-                            'Good (60-79)': 2,
-                            'Fair (40-59)': 3,
-                            'Poor (20-39)': 4,
-                            'Critical (0-19)': 5
-                          }
-                        };
-                        
-                        const scores = scoreMap[selectedDERUCategory] || {};
-                        let weightedSum = 0;
-                        let totalWeight = 0;
-                        
-                        Object.entries(aggregated).forEach(([label, value]) => {
-                          if (scores[label] !== undefined) {
-                            weightedSum += scores[label] * (value as number);
-                            totalWeight += value as number;
-                          }
-                        });
-                        
-                        const avgNum = totalWeight > 0 ? (weightedSum / totalWeight) : 0;
-                        const avg = avgNum > 0 ? avgNum.toFixed(2) : 'N/A';
-                        
-                        // Determine status label and color based on average
-                        let statusLabel = '';
-                        let statusColor = '#010D13';
-                        
-                        if (selectedDERUCategory === 'degree') {
-                          if (avgNum <= 1.0) { statusLabel = 'Good overall'; statusColor = '#5DB32A'; }
-                          else if (avgNum <= 2.0) { statusLabel = 'Minor defects'; statusColor = '#A8D96E'; }
-                          else if (avgNum <= 2.9) { statusLabel = 'Moderate defects'; statusColor = '#F8D227'; }
-                          else { statusLabel = 'Major defects'; statusColor = '#d4183d'; }
-                        } else if (selectedDERUCategory === 'extent') {
-                          if (avgNum <= 1.5) { statusLabel = 'Isolated issues'; statusColor = '#5DB32A'; }
-                          else if (avgNum <= 2.5) { statusLabel = 'Localized issues'; statusColor = '#A8D96E'; }
-                          else if (avgNum <= 3.5) { statusLabel = 'Widespread issues'; statusColor = '#F8D227'; }
-                          else { statusLabel = 'Systemic failure'; statusColor = '#d4183d'; }
-                        } else if (selectedDERUCategory === 'relevancy') {
-                          if (avgNum <= 1.5) { statusLabel = 'Cosmetic'; statusColor = '#5DB32A'; }
-                          else if (avgNum <= 2.5) { statusLabel = 'Local dysfunctional'; statusColor = '#A8D96E'; }
-                          else if (avgNum <= 3.5) { statusLabel = 'Moderate dysfunctional'; statusColor = '#F8D227'; }
-                          else { statusLabel = 'Major dysfunctional'; statusColor = '#d4183d'; }
-                        } else if (selectedDERUCategory === 'urgency') {
-                          if (avgNum <= 1.5) { statusLabel = 'Monitor only'; statusColor = '#5DB32A'; }
-                          else if (avgNum <= 2.5) { statusLabel = 'Routine maintenance'; statusColor = '#A8D96E'; }
-                          else if (avgNum <= 3.5) { statusLabel = 'Repair within 10 years'; statusColor = '#F8D227'; }
-                          else { statusLabel = 'Immediate action'; statusColor = '#d4183d'; }
-                        } else if (selectedDERUCategory === 'ci') {
-                          // For CI, calculate actual CI value from bands
-                          const ciValue = totalWeight > 0 ? (() => {
-                            let ciSum = 0;
-                            let ciCount = 0;
-                            Object.entries(aggregated).forEach(([label, value]) => {
-                              if (label === 'Excellent (80-100)') { ciSum += 90 * (value as number); ciCount += value as number; }
-                              else if (label === 'Good (60-79)') { ciSum += 69.5 * (value as number); ciCount += value as number; }
-                              else if (label === 'Fair (40-59)') { ciSum += 49.5 * (value as number); ciCount += value as number; }
-                              else if (label === 'Poor (20-39)') { ciSum += 29.5 * (value as number); ciCount += value as number; }
-                              else if (label === 'Critical (0-19)') { ciSum += 9.5 * (value as number); ciCount += value as number; }
-                            });
-                            return ciCount > 0 ? (ciSum / ciCount).toFixed(1) : 'N/A';
-                          })() : 'N/A';
-                          
-                          // Determine CI status color
-                          const ciNum = parseFloat(ciValue);
-                          if (ciNum >= 80) statusColor = '#5DB32A';
-                          else if (ciNum >= 60) statusColor = '#A8D96E';
-                          else if (ciNum >= 40) statusColor = '#F8D227';
-                          else if (ciNum >= 20) statusColor = '#F57C00';
-                          else statusColor = '#d4183d';
-                          
-                          return { text: `Avg CI: ${ciValue}`, color: statusColor };
-                        }
-                        
-                        // For D/E/R/U: show only status label, no numeric value
-                        return { text: statusLabel, color: statusColor };
-                      })();
-                      
-                      // Render text with color (wrapping for long text)
-                      const text = result.text;
-                      const words = text.split(' ');
-                      const lines: string[] = [];
-                      let currentLine = '';
-                      
-                      // Wrap text: new line if current line exceeds 11 chars or word is >8 chars
-                      words.forEach((word, idx) => {
-                        if (word.length > 8 && currentLine.length > 0) {
-                          // Long word starts on new line
-                          lines.push(currentLine.trim());
-                          currentLine = word;
-                        } else if ((currentLine + ' ' + word).length > 11 && currentLine.length > 0) {
-                          // Line too long, wrap
-                          lines.push(currentLine.trim());
-                          currentLine = word;
-                        } else {
-                          // Add word to current line
-                          currentLine += (currentLine.length > 0 ? ' ' : '') + word;
-                        }
-                        
-                        // Last word
-                        if (idx === words.length - 1 && currentLine.length > 0) {
-                          lines.push(currentLine.trim());
-                        }
-                      });
-                      
-                      const lineHeight = 16;
-                      const startY = 50 - ((lines.length - 1) * lineHeight / 2);
-                      
-                      return (
-                        <>
-                          {lines.map((line, idx) => (
-                            <text 
-                              key={idx}
-                              x="50%" 
-                              y={`${startY + (idx * lineHeight)}%`} 
-                              textAnchor="middle" 
-                              dominantBaseline="middle" 
-                              className="text-sm font-bold" 
-                              fill={result.color}
-                            >
-                              {line}
-                            </text>
-                          ))}
-                        </>
-                      );
-                    })()}
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="w-full min-w-0" style={{ height: deruChartHeight }}>
+                  <div
+                    ref={deruChartRef}
+                    style={{ width: "100%", height: deruChartHeight }}
+                    className="min-w-0"
+                  >
+                    {deruChartSize.width > 10 ? (
+                      <BarChart
+                        key={`deru-${selectedDERUCategory}-${deruChartSize.width}x${deruChartHeight}`}
+                        width={deruChartSize.width}
+                        height={deruChartHeight}
+                        data={deruNormalizedData}
+                        layout="vertical"
+                        margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
+                        <YAxis dataKey="name" type="category" width={120} />
+                        <Tooltip formatter={(v: any) => `${v}%`} />
+
+                        {selectedDERUCategory === "degree" && (
+                          <>
+                            <Bar dataKey="None (Good)" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="Good defects" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="Moderate defects" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="Major defects" stackId="a" fill="#d4183d" />
+                            <Bar dataKey="Unable to inspect" stackId="a" fill="#9E9E9E" />
+                            <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
+                          </>
+                        )}
+
+                        {selectedDERUCategory === "extent" && (
+                          <>
+                            <Bar dataKey="None" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="<10% affected" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="10-30% affected" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="30-60% affected" stackId="a" fill="#F57C00" />
+                            <Bar dataKey="Mostly affected (>60% affected)" stackId="a" fill="#d4183d" />
+                          </>
+                        )}
+
+                        {selectedDERUCategory === "relevancy" && (
+                          <>
+                            <Bar dataKey="None" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="Cosmetic" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="Local dysfunction" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="Moderate dysfunction" stackId="a" fill="#F57C00" />
+                            <Bar dataKey="Major dysfunction" stackId="a" fill="#d4183d" />
+                          </>
+                        )}
+
+                        {selectedDERUCategory === "urgency" && (
+                          <>
+                            <Bar dataKey="Monitor only" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="Routine maintenance" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="Repair within 10 years" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="Immediate action" stackId="a" fill="#d4183d" />
+                            <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
+                          </>
+                        )}
+
+                        {selectedDERUCategory === "ci" && (
+                          <>
+                            <Bar dataKey="Excellent (80-100)" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="Good (60-79)" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="Fair (40-59)" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="Poor (20-39)" stackId="a" fill="#F57C00" />
+                            <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
+                          </>
+                        )}
+                      </BarChart>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-muted-foreground">
+                        Measuring chart…
+                      </div>
+                    )}
+                  </div>
+                </div>
               ) : (
                 <div className="flex items-center justify-center h-[300px] text-muted-foreground">
                   <p>No {selectedDERUCategory} data available</p>
                 </div>
               )}
+
+
+
+
             </div>
           </div>
           
