@@ -1373,13 +1373,15 @@ export default function DashboardPage() {
         <CardContent className="pt-3">
           <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
             {/* Bar Chart - Asset Type Breakdown */}
-            <div>
+            <div className="w-full" style={{ minHeight: '300px' }}>
               <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
               {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
                 <>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart 
-                      data={(() => {
+                  <div style={{ width: '100%', height: '300px' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart 
+                        key={`deru-chart-${selectedDERUCategory}`}
+                        data={(() => {
                         // Define stack keys per category (exact labels)
                         const stackKeys: { [key: string]: string[] } = {
                           degree: ["None (Good)", "Not applicable", "Unable to inspect", "Good defects", "Moderate defects", "Major defects"],
@@ -1476,8 +1478,9 @@ export default function DashboardPage() {
                           <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
                         </>
                       )}
-                    </BarChart>
-                  </ResponsiveContainer>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </>
               ) : (
                 <div className="flex items-center justify-center h-[300px] text-muted-foreground">
