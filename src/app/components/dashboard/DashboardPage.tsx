@@ -1503,16 +1503,20 @@ export default function DashboardPage() {
             <div className="w-full  min-w-0" style={{ minHeight: '300px' }}>
               <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
               {hasDeruRows ? (
+
+
+
+              
                 <div className="w-full min-w-0" style={{ height: deruChartHeight }}>
                   <div
                     ref={deruBarRef}
-                    className="w-full min-w-0"
                     style={{ width: "100%", height: deruChartHeight }}
+                    className="min-w-0"
                   >
-                    {deruBarSize.width > 10 ? (
+                    {Math.max(deruBarSize.width, 600) > 10 ? (
                       <BarChart
-                        key={`deru-${selectedDERUCategory}-${deruBarSize.width}x${deruChartHeight}`}
-                        width={deruBarSize.width}
+                        key={`deru-${selectedDERUCategory}-${Math.max(deruBarSize.width, 600)}x${deruChartHeight}`}
+                        width={Math.max(deruBarSize.width, 600)}
                         height={deruChartHeight}
                         data={deruNormalizedData}
                         layout="vertical"
@@ -1581,6 +1585,10 @@ export default function DashboardPage() {
                     )}
                   </div>
                 </div>
+
+
+
+
               ) : (
                 <div className="flex items-center justify-center h-[300px] text-muted-foreground">
                   <p>No {selectedDERUCategory} data available</p>
