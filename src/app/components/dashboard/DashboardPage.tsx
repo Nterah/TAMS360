@@ -10,6 +10,48 @@ import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+// keep your existing imports too
+
+function useMeasuredSize<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      setSize((prev) => (prev.width !== w || prev.height !== h ? { width: w, height: h } : prev));
+    };
+
+    measure();
+
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+
+    // extra measurements after paint (production CSS/layout often settles late)
+    const r1 = requestAnimationFrame(measure);
+    const r2 = requestAnimationFrame(measure);
+
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(r1);
+      cancelAnimationFrame(r2);
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  return { ref, size };
+}
+
+
+
 const COLORS = ["#39AEDF", "#5DB32A", "#F8D227", "#455B5E", "#010D13"];
 
 const URGENCY_ORDER = ["Immediate", "Critical", "High", "Medium", "Low", "Record Only", "Unknown"];
@@ -1377,110 +1419,49 @@ export default function DashboardPage() {
               <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
               {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
                 <>
-                  <div style={{ width: '100%', height: '300px' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart 
-                        key={`deru-chart-${selectedDERUCategory}`}
-                        data={(() => {
-                        // Define stack keys per category (exact labels)
-                        const stackKeys: { [key: string]: string[] } = {
-                          degree: ["None (Good)", "Not applicable", "Unable to inspect", "Good defects", "Moderate defects", "Major defects"],
-                          extent: ["None", "<10% affected", "10-30% affected", "30-60% affected", "Mostly affected (>60%)"],
-                          relevancy: ["None", "Cosmetic", "Local dysfunction", "Moderate dysfunction", "Major dysfunction"],
-                          urgency: ["Not applicable", "Monitor only", "Routine maintenance", "Repair within 10 years", "Immediate action"],
-                          ci: ["Excellent (80-100)", "Good (60-79)", "Fair (40-59)", "Poor (20-39)", "Critical (0-19)"]
-                        };
-                        
-                        const keys = stackKeys[selectedDERUCategory] || [];
-                        
-                        console.log('🎨 [DERU Chart Render] Processing data for chart...');
-                        console.log('🎨 [DERU Chart Render] Stack keys:', keys);
-                        console.log('🎨 [DERU Chart Render] Raw input data:', deruData[selectedDERUCategory]);
-                        
-                        // Normalize each row to ensure 100% total with all keys present
-                        const normalizedData = deruData[selectedDERUCategory].map((row: any) => {
-                          const normalized: any = { name: row.name };
-                          
-                          // Ensure all keys exist (set to 0 if missing)
-                          keys.forEach(key => {
-                            const val = row[key];
-                            normalized[key] = (typeof val === 'number' && !isNaN(val)) ? val : 0;
-                          });
-                          
-                          // Calculate sum
-                          const sum = keys.reduce((total, key) => total + normalized[key], 0);
-                          
-                          // Rescale to 100% if sum is not 100
-                          if (sum > 0 && Math.abs(sum - 100) > 0.5) {
-                            keys.forEach(key => {
-                              normalized[key] = parseFloat(((normalized[key] / sum) * 100).toFixed(1));
-                            });
-                          }
-                          
-                          return normalized;
-                        });
-                        
-                        console.log('🎨 [DERU Chart Render] Normalized chart data:', normalizedData);
-                        console.log('🎨 [DERU Chart Render] First row sample:', normalizedData[0]);
-                        
-                        return normalizedData;
-                      })()} 
-                      layout="vertical"
-                      margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
+
+
+                  const chartHeight = 300;
+
+                  const { ref: deruChartRef, size: deruSize } = useMeasuredSize<HTMLDivElement>();
+
+                  // optional: force a remount if size changes from 0 -> real size
+                  const deruChartKey = `deru-${selectedDERUCategory}-${deruSize.width}x${deruSize.height}`;
+
+                  ...
+
+                  <div className="w-full min-w-0" style={{ height: chartHeight }}>
+                    <div
+                      ref={deruChartRef}
+                      style={{ width: "100%", height: chartHeight }}
+                      className="min-w-0"
                     >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} label={{ value: 'Percentage (%)', position: 'insideBottom', offset: -5 }} />
-                      <YAxis dataKey="name" type="category" width={120} />
-                      <Tooltip formatter={(value: any) => `${value}%`} />
-                      {selectedDERUCategory === 'degree' && (
-                        <>
-                          <Bar dataKey="None (Good)" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="Good defects" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="Moderate defects" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="Major defects" stackId="a" fill="#d4183d" />
-                          <Bar dataKey="Unable to inspect" stackId="a" fill="#9E9E9E" />
-                          <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
-                        </>
+                      {deruSize.width > 10 ? (
+                        <BarChart
+                          key={deruChartKey}
+                          width={deruSize.width}
+                          height={chartHeight}
+                          data={normalizedData}
+                          layout="vertical"
+                          margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
+                          <YAxis dataKey="name" type="category" width={120} />
+                          <Tooltip formatter={(v: any) => `${v}%`} />
+
+                          {/* your existing Bars exactly as you have them */}
+                        </BarChart>
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-muted-foreground">
+                          Measuring chart…
+                        </div>
                       )}
-                      {selectedDERUCategory === 'extent' && (
-                        <>
-                          <Bar dataKey="None" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="<10% affected" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="10-30% affected" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="30-60% affected" stackId="a" fill="#F57C00" />
-                          <Bar dataKey="Mostly affected (>60%)" stackId="a" fill="#d4183d" />
-                        </>
-                      )}
-                      {selectedDERUCategory === 'relevancy' && (
-                        <>
-                          <Bar dataKey="None" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="Cosmetic" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="Local dysfunction" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="Moderate dysfunction" stackId="a" fill="#F57C00" />
-                          <Bar dataKey="Major dysfunction" stackId="a" fill="#d4183d" />
-                        </>
-                      )}
-                      {selectedDERUCategory === 'urgency' && (
-                        <>
-                          <Bar dataKey="Monitor only" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="Routine maintenance" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="Repair within 10 years" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="Immediate action" stackId="a" fill="#d4183d" />
-                          <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
-                        </>
-                      )}
-                      {selectedDERUCategory === 'ci' && (
-                        <>
-                          <Bar dataKey="Excellent (80-100)" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="Good (60-79)" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="Fair (40-59)" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="Poor (20-39)" stackId="a" fill="#F57C00" />
-                          <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
-                        </>
-                      )}
-                      </BarChart>
-                    </ResponsiveContainer>
+                    </div>
                   </div>
+
+
+
                 </>
               ) : (
                 <div className="flex items-center justify-center h-[300px] text-muted-foreground">
