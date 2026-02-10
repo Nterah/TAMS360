@@ -1,14 +1,99 @@
-import { useContext, useEffect, useState, useMemo } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Database, ClipboardCheck, Wrench, TrendingUp, AlertCircle, CheckCircle2, Clock, MapPin, Shield, Activity, Banknote, FileWarning, CircleDollarSign, AlertTriangle, Calendar, TrendingDown, Eye, BarChart3 } from "lucide-react";
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Treemap } from "recharts";
+import {
+  Database,
+  ClipboardCheck,
+  Wrench,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  MapPin,
+  Shield,
+  Activity,
+  Banknote,
+  FileWarning,
+  CircleDollarSign,
+  AlertTriangle,
+  Calendar,
+  TrendingDown,
+  Eye,
+  BarChart3,
+} from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Treemap,
+} from "recharts";
 import { Link, useNavigate } from "react-router-dom";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+
+/**
+ * Measures a div reliably in production (ResizeObserver + a few delayed re-measures).
+ * This prevents "0 width" stuck states that can happen with responsive layouts after deploy.
+ */
+function useMeasuredSize<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      setSize((prev) => (prev.width !== w || prev.height !== h ? { width: w, height: h } : prev));
+    };
+
+    measure();
+
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+
+    const r1 = requestAnimationFrame(measure);
+    const r2 = requestAnimationFrame(measure);
+
+    // Important: production layout/fonts often settle late
+    const t1 = window.setTimeout(measure, 0);
+    const t2 = window.setTimeout(measure, 50);
+    const t3 = window.setTimeout(measure, 250);
+
+    window.addEventListener("resize", measure);
+
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(r1);
+      cancelAnimationFrame(r2);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  return { ref, size };
+}
+
+
+
 
 const COLORS = ["#39AEDF", "#5DB32A", "#F8D227", "#455B5E", "#010D13"];
 
@@ -68,6 +153,48 @@ export default function DashboardPage() {
     urgency: [],
     ci: []
   });
+  // DERU Chart sizing + normalization (production-safe: avoids ResponsiveContainer 0x0 issues)
+  const deruChartHeight = 300;
+  const { ref: deruBarRef, size: deruBarSize } = useMeasuredSize<HTMLDivElement>();
+
+  const hasDeruRows = (deruData?.[selectedDERUCategory]?.length ?? 0) > 0;
+  const deruNormalizedData = useMemo(() => {
+    const rows: any[] = Array.isArray(deruData?.[selectedDERUCategory]) ? deruData[selectedDERUCategory] : [];
+    if (!rows.length) return [];
+
+    return rows.map((row: any) => {
+      const out: any = { ...row };
+      const keys = Object.keys(out).filter((k) => k !== "name" && typeof out[k] === "number" && Number.isFinite(out[k]));
+      if (!keys.length) return out;
+
+      const total = keys.reduce((s, k) => s + (out[k] as number), 0);
+      if (!total || total <= 0) return out;
+
+      // Scale to 100%, round to 1 decimal, then fix rounding drift by nudging the largest slice.
+      const factor = 100 / total;
+      let maxKey = keys[0];
+      let maxVal = -Infinity;
+
+      let roundedSum = 0;
+      for (const k of keys) {
+        const scaled = (out[k] as number) * factor;
+        const rounded = Math.round(scaled * 10) / 10; // 1 decimal
+        out[k] = rounded;
+        roundedSum += rounded;
+
+        if (rounded > maxVal) {
+          maxVal = rounded;
+          maxKey = k;
+        }
+      }
+
+      const drift = Math.round((100 - roundedSum) * 10) / 10; // keep 1 decimal drift
+      if (Math.abs(drift) >= 0.1 && maxKey) {
+        out[maxKey] = Math.round(((out[maxKey] as number) + drift) * 10) / 10;
+      }
+      return out;
+    });
+  }, [deruData, selectedDERUCategory]);
   const [overdueMaintenance, setOverdueMaintenance] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
@@ -1371,112 +1498,97 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent className="pt-3">
-          <div className="space-y-8">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]  min-w-0">
             {/* Bar Chart - Asset Type Breakdown */}
-            <div>
+            <div className="w-full  min-w-0" style={{ minHeight: '300px' }}>
               <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
-              {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart 
-                      data={(() => {
-                        // Define stack keys per category (exact labels)
-                        const stackKeys: { [key: string]: string[] } = {
-                          degree: ["None (Good)", "Not applicable", "Unable to inspect", "Good defects", "Moderate defects", "Major defects"],
-                          extent: ["None", "<10% affected", "10-30% affected", "30-60% affected", "Mostly affected (>60%)"],
-                          relevancy: ["None", "Cosmetic", "Local dysfunction", "Moderate dysfunction", "Major dysfunction"],
-                          urgency: ["Not applicable", "Monitor only", "Routine maintenance", "Repair within 10 years", "Immediate action"],
-                          ci: ["Excellent (80-100)", "Good (60-79)", "Fair (40-59)", "Poor (20-39)", "Critical (0-19)"]
-                        };
-                        
-                        const keys = stackKeys[selectedDERUCategory] || [];
-                        
-                        console.log('🎨 [DERU Chart Render] Processing data for chart...');
-                        console.log('🎨 [DERU Chart Render] Stack keys:', keys);
-                        console.log('🎨 [DERU Chart Render] Raw input data:', deruData[selectedDERUCategory]);
-                        
-                        // Normalize each row to ensure 100% total with all keys present
-                        const normalizedData = deruData[selectedDERUCategory].map((row: any) => {
-                          const normalized: any = { name: row.name };
-                          
-                          // Ensure all keys exist (set to 0 if missing)
-                          keys.forEach(key => {
-                            const val = row[key];
-                            normalized[key] = (typeof val === 'number' && !isNaN(val)) ? val : 0;
-                          });
-                          
-                          // Calculate sum
-                          const sum = keys.reduce((total, key) => total + normalized[key], 0);
-                          
-                          // Rescale to 100% if sum is not 100
-                          if (sum > 0 && Math.abs(sum - 100) > 0.5) {
-                            keys.forEach(key => {
-                              normalized[key] = parseFloat(((normalized[key] / sum) * 100).toFixed(1));
-                            });
-                          }
-                          
-                          return normalized;
-                        });
-                        
-                        console.log('🎨 [DERU Chart Render] Normalized chart data:', normalizedData);
-                        console.log('🎨 [DERU Chart Render] First row sample:', normalizedData[0]);
-                        
-                        return normalizedData;
-                      })()} 
-                      layout="vertical"
-                      margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} label={{ value: 'Percentage (%)', position: 'insideBottom', offset: -5 }} />
-                      <YAxis dataKey="name" type="category" width={120} />
-                      <Tooltip formatter={(value: any) => `${value}%`} />
-                      {selectedDERUCategory === 'degree' && (
-                        <>
-                          <Bar dataKey="None (Good)" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="Good defects" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="Moderate defects" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="Major defects" stackId="a" fill="#d4183d" />
-                          <Bar dataKey="Unable to inspect" stackId="a" fill="#9E9E9E" />
-                          <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
-                        </>
-                      )}
-                      {selectedDERUCategory === 'extent' && (
-                        <>
-                          <Bar dataKey="None" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="<10% affected" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="10-30% affected" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="30-60% affected" stackId="a" fill="#F57C00" />
-                          <Bar dataKey="Mostly affected (>60%)" stackId="a" fill="#d4183d" />
-                        </>
-                      )}
-                      {selectedDERUCategory === 'relevancy' && (
-                        <>
-                          <Bar dataKey="None" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="Cosmetic" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="Local dysfunction" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="Moderate dysfunction" stackId="a" fill="#F57C00" />
-                          <Bar dataKey="Major dysfunction" stackId="a" fill="#d4183d" />
-                        </>
-                      )}
-                      {selectedDERUCategory === 'urgency' && (
-                        <>
-                          <Bar dataKey="Monitor only" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="Routine maintenance" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="Repair within 10 years" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="Immediate action" stackId="a" fill="#d4183d" />
-                          <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
-                        </>
-                      )}
-                      {selectedDERUCategory === 'ci' && (
-                        <>
-                          <Bar dataKey="Excellent (80-100)" stackId="a" fill="#5DB32A" />
-                          <Bar dataKey="Good (60-79)" stackId="a" fill="#A8D96E" />
-                          <Bar dataKey="Fair (40-59)" stackId="a" fill="#F8D227" />
-                          <Bar dataKey="Poor (20-39)" stackId="a" fill="#F57C00" />
-                          <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
-                        </>
-                      )}
-                  </BarChart>
-                </ResponsiveContainer>
+              {hasDeruRows ? (
+
+
+
+              
+                <div className="w-full min-w-0" style={{ height: deruChartHeight }}>
+                  <div
+                    ref={deruBarRef}
+                    style={{ width: "100%", height: deruChartHeight }}
+                    className="min-w-0"
+                  >
+                    {Math.max(deruBarSize.width, 600) > 10 ? (
+                      <BarChart
+                        key={`deru-${selectedDERUCategory}-${Math.max(deruBarSize.width, 600)}x${deruChartHeight}`}
+                        width={Math.max(deruBarSize.width, 600)}
+                        height={deruChartHeight}
+                        data={deruNormalizedData}
+                        layout="vertical"
+                        margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
+                        <YAxis dataKey="name" type="category" width={120} />
+                        <Tooltip formatter={(v: any) => `${v}%`} />
+
+                        {selectedDERUCategory === "degree" && (
+                          <>
+                            <Bar dataKey="None (Good)" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="Good defects" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="Moderate defects" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="Major defects" stackId="a" fill="#d4183d" />
+                            <Bar dataKey="Unable to inspect" stackId="a" fill="#9E9E9E" />
+                            <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
+                          </>
+                        )}
+
+                        {selectedDERUCategory === "extent" && (
+                          <>
+                            <Bar dataKey="None" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="<10% affected" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="10-30% affected" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="30-60% affected" stackId="a" fill="#F57C00" />
+                            <Bar dataKey="Mostly affected (>60% affected)" stackId="a" fill="#d4183d" />
+                          </>
+                        )}
+
+                        {selectedDERUCategory === "relevancy" && (
+                          <>
+                            <Bar dataKey="None" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="Cosmetic" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="Local dysfunction" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="Moderate dysfunction" stackId="a" fill="#F57C00" />
+                            <Bar dataKey="Major dysfunction" stackId="a" fill="#d4183d" />
+                          </>
+                        )}
+
+                        {selectedDERUCategory === "urgency" && (
+                          <>
+                            <Bar dataKey="Monitor only" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="Routine maintenance" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="Repair within 10 years" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="Immediate action" stackId="a" fill="#d4183d" />
+                            <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
+                          </>
+                        )}
+
+                        {selectedDERUCategory === "ci" && (
+                          <>
+                            <Bar dataKey="Excellent (80-100)" stackId="a" fill="#5DB32A" />
+                            <Bar dataKey="Good (60-79)" stackId="a" fill="#A8D96E" />
+                            <Bar dataKey="Fair (40-59)" stackId="a" fill="#F8D227" />
+                            <Bar dataKey="Poor (20-39)" stackId="a" fill="#F57C00" />
+                            <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
+                          </>
+                        )}
+                      </BarChart>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-muted-foreground">
+                        Measuring chart…
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+
+
+
               ) : (
                 <div className="flex items-center justify-center h-[300px] text-muted-foreground">
                   <p>No {selectedDERUCategory} data available</p>
