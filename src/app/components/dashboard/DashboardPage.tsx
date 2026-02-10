@@ -120,7 +120,7 @@ export default function DashboardPage() {
   
   // DERU chart sizing + normalization (avoid ResponsiveContainer production 0x0 measurements)
 const deruChartHeight = 300;
-const { ref: deruChartRef, size: deruChartSize } = useMeasuredSize<HTMLDivElement>();
+const { ref: deruBarRef, size: deruBarSize } = useMeasuredSize<HTMLDivElement>();
 
 const deruStackKeys = useMemo(() => ({
   degree: ["None (Good)", "Good defects", "Moderate defects", "Major defects", "Unable to inspect", "Not applicable"],
@@ -1478,8 +1478,10 @@ const deruNormalizedData = useMemo(() => {
                     >
                       {deruChartSize.width > 10 ? (
                         <BarChart
-                          key={`deru-${selectedDERUCategory}-${deruChartSize.width}x${deruChartHeight}`}
-                          width={deruChartSize.width}
+
+                          key={`deru-${selectedDERUCategory}-${deruBarSize.width}x${deruChartHeight}`}
+                          width={deruBarSize.width}
+
                           height={deruChartHeight}
                           data={deruNormalizedData}
                           layout="vertical"
@@ -1563,100 +1565,98 @@ const deruNormalizedData = useMemo(() => {
             
             </div>
 
+
             {/* Pie Chart - Overall Distribution */}
             <div>
               <h4 className="text-sm font-semibold mb-3">Overall Distribution (All Assets)</h4>
 
-
               {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
-                <div className="w-full min-w-0" style={{ height: deruChartHeight }}>
-                  <div
-                    ref={deruChartRef}
-                    style={{ width: "100%", height: deruChartHeight }}
-                    className="min-w-0"
-                  >
-                    {deruChartSize.width > 10 ? (
-                      <BarChart
-                        key={`deru-${selectedDERUCategory}-${deruChartSize.width}x${deruChartHeight}`}
-                        width={deruChartSize.width}
-                        height={deruChartHeight}
-                        data={deruNormalizedData}
-                        layout="vertical"
-                        margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
+                <div className="w-full" style={{ height: 300 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={(() => {
+                          // build overall distribution by averaging the category percentages across asset types
+                          // (keeps chart stable even without raw counts)
+                          const keys =
+                            selectedDERUCategory === "degree"
+                              ? ["None (Good)", "Good defects", "Moderate defects", "Major defects", "Unable to inspect", "Not applicable"]
+                              : selectedDERUCategory === "extent"
+                              ? ["None", "<10% affected", "10-30% affected", "30-60% affected", "Mostly affected (>60% affected)"]
+                              : selectedDERUCategory === "relevancy"
+                              ? ["None", "Cosmetic", "Local dysfunction", "Moderate dysfunction", "Major dysfunction"]
+                              : selectedDERUCategory === "urgency"
+                              ? ["Monitor only", "Routine maintenance", "Repair within 10 years", "Immediate action", "Not applicable"]
+                              : ["Excellent (80-100)", "Good (60-79)", "Fair (40-59)", "Poor (20-39)", "Critical (0-19)"];
+
+                          const rows = deruNormalizedData || [];
+                          const out = keys.map((k) => {
+                            const avg =
+                              rows.length > 0
+                                ? rows.reduce((sum: number, r: any) => sum + (Number(r?.[k]) || 0), 0) / rows.length
+                                : 0;
+                            return { name: k, value: Number(avg.toFixed(1)) };
+                          });
+
+                          // remove zero slices so labels are clean
+                          return out.filter((d) => d.value > 0);
+                        })()}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={70}
+                        outerRadius={110}
+                        paddingAngle={1}
+                        labelLine={false}
                       >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
-                        <YAxis dataKey="name" type="category" width={120} />
-                        <Tooltip formatter={(v: any) => `${v}%`} />
+                        {(() => {
+                          // match your bar colors for degree; otherwise keep a simple palette
+                          const colorMap: Record<string, string> =
+                            selectedDERUCategory === "degree"
+                              ? {
+                                  "None (Good)": "#5DB32A",
+                                  "Good defects": "#A8D96E",
+                                  "Moderate defects": "#F8D227",
+                                  "Major defects": "#d4183d",
+                                  "Unable to inspect": "#9E9E9E",
+                                  "Not applicable": "#455B5E",
+                                }
+                              : {};
 
-                        {selectedDERUCategory === "degree" && (
-                          <>
-                            <Bar dataKey="None (Good)" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="Good defects" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="Moderate defects" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="Major defects" stackId="a" fill="#d4183d" />
-                            <Bar dataKey="Unable to inspect" stackId="a" fill="#9E9E9E" />
-                            <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
-                          </>
-                        )}
+                          const keys =
+                            selectedDERUCategory === "degree"
+                              ? ["None (Good)", "Good defects", "Moderate defects", "Major defects", "Unable to inspect", "Not applicable"]
+                              : selectedDERUCategory === "extent"
+                              ? ["None", "<10% affected", "10-30% affected", "30-60% affected", "Mostly affected (>60% affected)"]
+                              : selectedDERUCategory === "relevancy"
+                              ? ["None", "Cosmetic", "Local dysfunction", "Moderate dysfunction", "Major dysfunction"]
+                              : selectedDERUCategory === "urgency"
+                              ? ["Monitor only", "Routine maintenance", "Repair within 10 years", "Immediate action", "Not applicable"]
+                              : ["Excellent (80-100)", "Good (60-79)", "Fair (40-59)", "Poor (20-39)", "Critical (0-19)"];
 
-                        {selectedDERUCategory === "extent" && (
-                          <>
-                            <Bar dataKey="None" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="<10% affected" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="10-30% affected" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="30-60% affected" stackId="a" fill="#F57C00" />
-                            <Bar dataKey="Mostly affected (>60% affected)" stackId="a" fill="#d4183d" />
-                          </>
-                        )}
+                          const defaultPalette = ["#5DB32A", "#A8D96E", "#F8D227", "#F57C00", "#d4183d", "#455B5E", "#9E9E9E"];
 
-                        {selectedDERUCategory === "relevancy" && (
-                          <>
-                            <Bar dataKey="None" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="Cosmetic" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="Local dysfunction" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="Moderate dysfunction" stackId="a" fill="#F57C00" />
-                            <Bar dataKey="Major dysfunction" stackId="a" fill="#d4183d" />
-                          </>
-                        )}
+                          return keys.map((k, i) => (
+                            <Cell key={`${k}-${i}`} fill={colorMap[k] || defaultPalette[i % defaultPalette.length]} />
+                          ));
+                        })()}
+                      </Pie>
 
-                        {selectedDERUCategory === "urgency" && (
-                          <>
-                            <Bar dataKey="Monitor only" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="Routine maintenance" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="Repair within 10 years" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="Immediate action" stackId="a" fill="#d4183d" />
-                            <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
-                          </>
-                        )}
-
-                        {selectedDERUCategory === "ci" && (
-                          <>
-                            <Bar dataKey="Excellent (80-100)" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="Good (60-79)" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="Fair (40-59)" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="Poor (20-39)" stackId="a" fill="#F57C00" />
-                            <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
-                          </>
-                        )}
-                      </BarChart>
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-muted-foreground">
-                        Measuring chart…
-                      </div>
-                    )}
-                  </div>
+                      <Tooltip formatter={(v: any) => `${v}%`} />
+                      <Legend verticalAlign="bottom" height={36} />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
               ) : (
                 <div className="flex items-center justify-center h-[300px] text-muted-foreground">
                   <p>No {selectedDERUCategory} data available</p>
                 </div>
               )}
-
-
-
-
             </div>
+
+
+
           </div>
           
           {/* Shared Legend */}
