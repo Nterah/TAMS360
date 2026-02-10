@@ -1,16 +1,53 @@
-import { useContext, useEffect, useState, useMemo, useRef } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Database, ClipboardCheck, Wrench, TrendingUp, AlertCircle, CheckCircle2, Clock, MapPin, Shield, Activity, Banknote, FileWarning, CircleDollarSign, AlertTriangle, Calendar, TrendingDown, Eye, BarChart3 } from "lucide-react";
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Treemap } from "recharts";
+import {
+  Database,
+  ClipboardCheck,
+  Wrench,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  MapPin,
+  Shield,
+  Activity,
+  Banknote,
+  FileWarning,
+  CircleDollarSign,
+  AlertTriangle,
+  Calendar,
+  TrendingDown,
+  Eye,
+  BarChart3,
+} from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Treemap,
+} from "recharts";
 import { Link, useNavigate } from "react-router-dom";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
-
+/**
+ * Measures a div reliably in production (ResizeObserver + a few delayed re-measures).
+ * This prevents "0 width" stuck states that can happen with responsive layouts after deploy.
+ */
 function useMeasuredSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -31,21 +68,30 @@ function useMeasuredSize<T extends HTMLElement>() {
     const ro = new ResizeObserver(() => measure());
     ro.observe(el);
 
-    // extra measurements after paint (production CSS/layout often settles late)
     const r1 = requestAnimationFrame(measure);
     const r2 = requestAnimationFrame(measure);
 
+    // Important: production layout/fonts often settle late
+    const t1 = window.setTimeout(measure, 0);
+    const t2 = window.setTimeout(measure, 50);
+    const t3 = window.setTimeout(measure, 250);
+
     window.addEventListener("resize", measure);
+
     return () => {
       ro.disconnect();
       cancelAnimationFrame(r1);
       cancelAnimationFrame(r2);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
       window.removeEventListener("resize", measure);
     };
   }, []);
 
   return { ref, size };
 }
+
 
 
 
