@@ -1472,11 +1472,11 @@ const deruNormalizedData = useMemo(() => {
 
                   <div className="w-full min-w-0" style={{ height: deruChartHeight }}>
                     <div
-                      ref={deruChartRef}
+                      ref={deruBarRef}
                       style={{ width: "100%", height: deruChartHeight }}
                       className="min-w-0"
                     >
-                      {deruChartSize.width > 10 ? (
+                      {deruBarSize.width > 10 ? (
                         <BarChart
 
                           key={`deru-${selectedDERUCategory}-${deruBarSize.width}x${deruChartHeight}`}
