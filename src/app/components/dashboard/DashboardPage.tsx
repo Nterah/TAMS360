@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, useMemo } from "react";
+import { useContext, useEffect, useState, useMemo, useRef } from "react";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -81,6 +81,49 @@ const toLabel = (r: any) =>
 const toAssetTypeName = (r: any) =>
   (r?.asset_type_name ?? r?.asset_type ?? r?.name ?? "Unknown").toString().trim() || "Unknown";
 
+
+/**
+ * Production-safe measurement hook for Recharts charts inside grids/tabs.
+ * In production builds, ResponsiveContainer can sometimes measure 0x0 and never recover.
+ */
+function useMeasuredSize<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      setSize((prev) => (prev.width !== w || prev.height !== h ? { width: w, height: h } : prev));
+    };
+
+    measure();
+
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+
+    // extra measure passes (prod layout/fonts/CSS often settle after paint)
+    const r1 = requestAnimationFrame(measure);
+    const r2 = requestAnimationFrame(measure);
+
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(r1);
+      cancelAnimationFrame(r2);
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  return { ref, size };
+}
+
+
+
 export default function DashboardPage() {
   const { user, accessToken } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -110,6 +153,47 @@ export default function DashboardPage() {
     urgency: [],
     ci: []
   });
+  
+  
+  // DERU chart sizing + normalization (avoid ResponsiveContainer production 0x0 measurements)
+const deruChartHeight = 300;
+const { ref: deruChartRef, size: deruChartSize } = useMeasuredSize<HTMLDivElement>();
+
+const deruStackKeys = useMemo(() => ({
+  degree: ["None (Good)", "Good defects", "Moderate defects", "Major defects", "Unable to inspect", "Not applicable"],
+  extent: ["None", "<10% affected", "10-30% affected", "30-60% affected", "Mostly affected (>60% affected)"],
+  relevancy: ["None", "Cosmetic", "Local dysfunction", "Moderate dysfunction", "Major dysfunction"],
+  urgency: ["Monitor only", "Routine maintenance", "Repair within 10 years", "Immediate action", "Not applicable"],
+  ci: ["Excellent (80-100)", "Good (60-79)", "Fair (40-59)", "Poor (20-39)", "Critical (0-19)"],
+}), []);
+
+const deruNormalizedData = useMemo(() => {
+  const keys = (deruStackKeys as any)[selectedDERUCategory] || [];
+  const raw = (deruData as any)?.[selectedDERUCategory] || [];
+
+  return raw.map((row: any) => {
+    const out: any = { name: row?.name };
+    keys.forEach((k: string) => {
+      const v = row?.[k];
+      out[k] = typeof v === "number" && !Number.isNaN(v) ? v : 0;
+    });
+
+    const sum = keys.reduce((t: number, k: string) => t + (out[k] || 0), 0);
+
+    // If rounding drift causes bars not to reach ~100%, renormalize when drift is noticeable
+    if (sum > 0 && Math.abs(sum - 100) > 0.5) {
+      keys.forEach((k: string) => {
+        out[k] = parseFloat(((out[k] / sum) * 100).toFixed(1));
+      });
+    }
+
+    return out;
+  });
+}, [deruData, deruStackKeys, selectedDERUCategory]);
+
+  
+  
+  
   const [overdueMaintenance, setOverdueMaintenance] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
@@ -1417,40 +1501,29 @@ export default function DashboardPage() {
             {/* Bar Chart - Asset Type Breakdown */}
             <div className="w-full  min-w-0" style={{ minHeight: '300px' }}>
               <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
+
+
               {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
                 <>
 
 
-                  const chartHeight = 300;
-
-                  const { ref: deruChartRef, size: deruSize } = useMeasuredSize<HTMLDivElement>();
-
-                  // optional: force a remount if size changes from 0 -> real size
-                  const deruChartKey = `deru-${selectedDERUCategory}-${deruSize.width}x${deruSize.height}`;
-
-                  ...
-
-                  <div className="w-full min-w-0" style={{ height: chartHeight }}>
+                  <div className="w-full min-w-0" style={{ height: deruChartHeight }}>
                     <div
                       ref={deruChartRef}
-                      style={{ width: "100%", height: chartHeight }}
+                      style={{ width: "100%", height: deruChartHeight }}
                       className="min-w-0"
                     >
-                      {deruSize.width > 10 ? (
+                      {deruChartSize.width > 10 ? (
                         <BarChart
-                          key={deruChartKey}
-                          width={deruSize.width}
-                          height={chartHeight}
-                          data={normalizedData}
+                          key={`deru-${selectedDERUCategory}-${deruChartSize.width}x${deruChartHeight}`}
+                          width={deruChartSize.width}
+                          height={deruChartHeight}
+                          data={deruNormalizedData}
                           layout="vertical"
                           margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
                         >
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
-                          <YAxis dataKey="name" type="category" width={120} />
-                          <Tooltip formatter={(v: any) => `${v}%`} />
-
-                          {/* your existing Bars exactly as you have them */}
+                          {/* KEEP EVERYTHING INSIDE YOUR BarChart EXACTLY AS IT IS NOW:
+                              CartesianGrid, XAxis, YAxis, Tooltip, and all the <Bar .../> blocks */}
                         </BarChart>
                       ) : (
                         <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -1462,12 +1535,16 @@ export default function DashboardPage() {
 
 
 
+
                 </>
               ) : (
                 <div className="flex items-center justify-center h-[300px] text-muted-foreground">
                   <p>No {selectedDERUCategory} data available</p>
                 </div>
               )}
+            
+            
+            
             </div>
 
             {/* Pie Chart - Overall Distribution */}
