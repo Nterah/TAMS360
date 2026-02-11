@@ -1,2584 +1,1742 @@
-import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useState, useEffect, useContext } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { AuthContext } from "../../App";
+import { 
+  Database, Activity, TrendingUp, AlertTriangle, ClipboardCheck, 
+  Wrench, MapPin, Users, FileText, Filter, Calendar, Building2,
+  Package, Layers, AlertCircle, ChevronRight, Eye, ImageIcon
+} from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import {
-  Database,
-  ClipboardCheck,
-  Wrench,
-  TrendingUp,
-  AlertCircle,
-  CheckCircle2,
-  Clock,
-  MapPin,
-  Shield,
-  Activity,
-  Banknote,
-  FileWarning,
-  CircleDollarSign,
-  AlertTriangle,
-  Calendar,
-  TrendingDown,
-  Eye,
-  BarChart3,
-} from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  Treemap,
-} from "recharts";
-import { Link, useNavigate } from "react-router-dom";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Badge } from "../ui/badge";
+import {
+  BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+} from "recharts";
+import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { AssetMap } from "../AssetMap";
+import { toast } from "sonner";
+import { BulkWorkOrderDialog } from "./BulkWorkOrderDialog";
+import { AssetListDialog } from "./AssetListDialog";
 
-/**
- * Measures a div reliably in production (ResizeObserver + a few delayed re-measures).
- * This prevents "0 width" stuck states that can happen with responsive layouts after deploy.
- */
-function useMeasuredSize<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  const [size, setSize] = useState({ width: 0, height: 0 });
+// Existing color scheme - DO NOT CHANGE
+const COLORS = ['#5DB32A', '#39AEDF', '#F8D227', '#d4183d', '#455B5E', '#9E9E9E', '#FF6B6B', '#4ECDC4'];
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+// Existing CI band logic - DO NOT CHANGE
+const getCIColor = (ci: number) => {
+  if (ci >= 80) return '#5DB32A';  // Excellent (Green)
+  if (ci >= 60) return '#39AEDF';  // Good (Blue)
+  if (ci >= 40) return '#F8D227';  // Fair (Yellow)
+  return '#EF4444';                // Poor (Red) - 0-39
+};
 
-    const measure = () => {
-      const rect = el.getBoundingClientRect();
-      const w = Math.round(rect.width);
-      const h = Math.round(rect.height);
-      setSize((prev) => (prev.width !== w || prev.height !== h ? { width: w, height: h } : prev));
-    };
+// Status color coding for work orders
+const getStatusColor = (status: string) => {
+  const normalizedStatus = (status || '').toLowerCase().trim();
+  if (normalizedStatus === 'scheduled') return { bg: '#E0F2FE', text: '#0369A1', border: '#39AEDF' }; // Blue
+  if (normalizedStatus === 'in_progress' || normalizedStatus === 'in progress') return { bg: '#FEF3C7', text: '#92400E', border: '#F8D227' }; // Yellow
+  if (normalizedStatus === 'completed') return { bg: '#D1FAE5', text: '#065F46', border: '#5DB32A' }; // Green
+  if (normalizedStatus === 'cancelled' || normalizedStatus === 'canceled') return { bg: '#F3F4F6', text: '#4B5563', border: '#94A3B8' }; // Grey
+  return { bg: '#F3F4F6', text: '#4B5563', border: '#94A3B8' }; // Default grey
+};
 
-    measure();
+const getCIBand = (ci: number | null | undefined) => {
+  if (ci === null || ci === undefined) return 'Not Inspected'; if (ci >= 80) return 'Excellent';
+  if (ci >= 60) return 'Good';
+  if (ci >= 40) return 'Fair';
+  return 'Poor';
+};
 
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(el);
+// Existing urgency logic - Updated to match DERU standards (R, 0, 1, 2, 3, 4)
+const getUrgencyColor = (urgency: string | number) => {
+  const urgencyStr = String(urgency).toUpperCase();
+  if (urgencyStr === '4') return '#d4183d';      // Immediate action - Red
+  if (urgencyStr === '3') return '#F8D227';      // Repair (short term) - Yellow
+  if (urgencyStr === '2') return '#F8D227';      // Repair (long term) - Yellow
+  if (urgencyStr === '1') return '#39AEDF';      // Routine maintenance - Blue
+  if (urgencyStr === '0') return '#5DB32A';      // Monitor only - Green
+  if (urgencyStr === 'R') return '#94A3B8';      // Record only - Grey
+  return '#94A3B8';                              // Default - Grey
+};
 
-    const r1 = requestAnimationFrame(measure);
-    const r2 = requestAnimationFrame(measure);
+const getUrgencyLevel = (urgency: string | number) => {
+  const urgencyStr = String(urgency).toUpperCase();
+  if (urgencyStr === '4') return '4';
+  if (urgencyStr === '3') return '3';
+  if (urgencyStr === '2') return '2';
+  if (urgencyStr === '1') return '1';
+  if (urgencyStr === '0') return '0';
+  if (urgencyStr === 'R') return 'R';
+  return 'N/A';
+};
 
-    // Important: production layout/fonts often settle late
-    const t1 = window.setTimeout(measure, 0);
-    const t2 = window.setTimeout(measure, 50);
-    const t3 = window.setTimeout(measure, 250);
+const getUrgencyDescription = (urgency: string | number) => {
+  const urgencyStr = String(urgency).toUpperCase();
+  if (urgencyStr === '4') return 'Immediate action';
+  if (urgencyStr === '3') return 'Repair (short term)';
+  if (urgencyStr === '2') return 'Repair (long term)';
+  if (urgencyStr === '1') return 'Routine maintenance';
+  if (urgencyStr === '0') return 'Monitor only';
+  if (urgencyStr === 'R') return 'Record only';
+  return 'Not assessed';
+};
 
-    window.addEventListener("resize", measure);
+// Helper function to extract urgency value from an asset
+// Tries multiple possible field names and formats
+const getAssetUrgency = (asset: any): string | null => {
+  // Try urgency_score first (most likely field from database)
+  if (asset.urgency_score !== null && asset.urgency_score !== undefined) {
+    return String(asset.urgency_score).trim();
+  }
+  
+  // Try parsing from latest_deru - can be either:
+  // 1. A numeric DERU value (e.g., 135.93) - convert to urgency level
+  // 2. A string format "D-E-R-U" - extract U directly
+  if (asset.latest_deru !== null && asset.latest_deru !== undefined) {
+    // Check if it's a string format "D-E-R-U"
+    if (typeof asset.latest_deru === 'string' && asset.latest_deru.includes('-')) {
+      const parts = asset.latest_deru.split('-');
+      if (parts.length === 4 && parts[3]) {
+        return parts[3].trim();
+      }
+    }
+    
+    // Otherwise, treat as numeric DERU value and convert to urgency
+    const deruValue = parseFloat(asset.latest_deru);
+    if (!isNaN(deruValue)) {
+      // DERU to Urgency conversion based on DERU methodology:
+      // > 120 = Urgency 4 (Immediate action)
+      // 80-120 = Urgency 3 (Repair short term)
+      // 40-80 = Urgency 2 (Repair long term)
+      // 20-40 = Urgency 1 (Routine maintenance)
+      // < 20 = Urgency 0 (Monitor only)
+      if (deruValue > 120) return '4';
+      if (deruValue >= 80) return '3';
+      if (deruValue >= 40) return '2';
+      if (deruValue >= 20) return '1';
+      if (deruValue >= 0) return '0';
+    }
+  }
+  
+  // Try other possible field names
+  if (asset.urgency !== null && asset.urgency !== undefined) {
+    return String(asset.urgency).trim();
+  }
+  
+  if (asset.latest_urgency !== null && asset.latest_urgency !== undefined) {
+    return String(asset.latest_urgency).trim();
+  }
+  
+  if (asset.calculated_urgency !== null && asset.calculated_urgency !== undefined) {
+    return String(asset.calculated_urgency).trim();
+  }
+  
+  return null;
+};
 
-    return () => {
-      ro.disconnect();
-      cancelAnimationFrame(r1);
-      cancelAnimationFrame(r2);
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-      window.clearTimeout(t3);
-      window.removeEventListener("resize", measure);
-    };
-  }, []);
-
-  return { ref, size };
+// KPI Card Component
+interface KPICardProps {
+  label: string;
+  value: string | number;
+  subtitle?: string;
+  trend?: string;
+  severity?: string;
+  onClick?: () => void;
+  leftBorderColor?: string;
 }
 
+function KPICard({ label, value, subtitle, trend, severity, onClick, leftBorderColor }: KPICardProps) {
+  const borderColor = leftBorderColor || (severity === 'critical' ? '#d4183d' : 'transparent');
+  
+  return (
+    <Card 
+      className={`cursor-pointer hover:shadow-md transition-shadow ${onClick ? 'hover:bg-gray-50' : ''}`}
+      style={{ borderLeft: `4px solid ${borderColor}` }}
+      onClick={onClick}
+    >
+      <CardContent className="p-4">
+        <p className="text-xs font-medium uppercase text-gray-500 mb-2">{label}</p>
+        <p className="text-2xl font-bold mb-1">{value.toLocaleString()}</p>
+        {subtitle && <p className="text-sm text-gray-600">{subtitle}</p>}
+        {trend && <p className="text-xs text-gray-500 mt-1">{trend}</p>}
+      </CardContent>
+    </Card>
+  );
+}
 
+// Alert Card Component
+interface AlertCardProps {
+  icon: React.ReactNode;
+  title: string;
+  count: number;
+  description: string;
+  onClick?: () => void;
+  bgColor?: string;
+  borderColor?: string;
+  actionButton?: {
+    label: string;
+    onClick: () => void;
+    icon?: React.ReactNode;
+  };
+}
 
-
-const COLORS = ["#39AEDF", "#5DB32A", "#F8D227", "#455B5E", "#010D13"];
-
-const URGENCY_ORDER = ["Immediate", "Critical", "High", "Medium", "Low", "Record Only", "Unknown"];
-
-const URGENCY_COLORS: Record<string, string> = {
-  Immediate: "#d4183d",
-  Critical: "#F57C00",
-  High: "#F8D227",
-  Medium: "#39AEDF",
-  Low: "#5DB32A",
-  "Record Only": "#455B5E",
-  Unknown: "#455B5E",
-};
-
-// Safe number conversion
-const toNumber = (v: any) => {
-  if (v === null || v === undefined || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
-
-// Extract label from various field names
-const toLabel = (r: any) =>
-  (r?.label ?? r?.name ?? r?.calculated_urgency ?? r?.urgency_label ?? "Unknown").toString().trim() || "Unknown";
-
-// Extract asset type name from various field names
-const toAssetTypeName = (r: any) =>
-  (r?.asset_type_name ?? r?.asset_type ?? r?.name ?? "Unknown").toString().trim() || "Unknown";
+function AlertCard({ icon, title, count, description, onClick, bgColor = '#FEF3F2', borderColor = '#EF4444', actionButton }: AlertCardProps) {
+  return (
+    <Card 
+      className="hover:shadow-md transition-shadow relative overflow-hidden"
+      style={{ backgroundColor: bgColor }}
+    >
+      {/* Color-coded left border */}
+      <div 
+        className="absolute left-0 top-0 bottom-0 w-1.5" 
+        style={{ backgroundColor: borderColor }}
+      />
+      <CardContent className="p-4 pl-5">
+        <div className="flex items-center gap-2 mb-2">
+          {icon}
+          <p className="text-xs font-medium uppercase text-gray-700">{title}</p>
+        </div>
+        <p className="text-3xl font-bold mb-1">{count.toLocaleString()}</p>
+        <p className="text-sm text-gray-600 mb-2">{description}</p>
+        <div className="flex gap-2 items-center">
+          {onClick && (
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                onClick();
+              }}
+              className="text-xs text-blue-600 hover:underline font-medium"
+            >
+              View all →
+            </button>
+          )}
+          {actionButton && (
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={(e) => {
+                e.stopPropagation();
+                actionButton.onClick();
+              }}
+              className="ml-auto text-xs h-7"
+            >
+              {actionButton.icon}
+              {actionButton.label}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function DashboardPage() {
-  const { user, accessToken } = useContext(AuthContext);
+  const auth = useContext(AuthContext);
   const navigate = useNavigate();
-  const [stats, setStats] = useState<any>(null);
-  const [maintenanceStats, setMaintenanceStats] = useState<any>(null);
-  const [inspectionStats, setInspectionStats] = useState<any>(null);
-  const [ciDistribution, setCiDistribution] = useState<any[]>([]);
-  const [ciTreemapData, setCiTreemapData] = useState<any[]>([]);
-  const [urgencySummary, setUrgencySummary] = useState<any[]>([]);
-  const [assetTypeSummary, setAssetTypeSummary] = useState<any[]>([]);
-  const [regionSummary, setRegionSummary] = useState<any[]>([]);
-  const [ciTrendData, setCiTrendData] = useState<any[]>([]);
-  const [urgencyDistribution, setUrgencyDistribution] = useState<any[]>([]);
-  const [highestCostAssets, setHighestCostAssets] = useState<any[]>([]);
-  const [criticalAlerts, setCriticalAlerts] = useState<any[]>([]);
-  const [recentActivity, setRecentActivity] = useState<any[]>([]);
-  const [worstAssets, setWorstAssets] = useState<any[]>([]);
-  const [overdueInspections, setOverdueInspections] = useState<number>(0);
-  const [dataQualityAlerts, setDataQualityAlerts] = useState<any>(null);
   
-  // DERU Analysis State
-  const [selectedDERUCategory, setSelectedDERUCategory] = useState<'degree' | 'extent' | 'relevancy' | 'urgency' | 'ci'>('degree');
-  const [deruData, setDeruData] = useState<any>({
-    degree: [],
-    extent: [],
-    relevancy: [],
-    urgency: [],
-    ci: []
-  });
-  // DERU Chart sizing + normalization (production-safe: avoids ResponsiveContainer 0x0 issues)
-  const deruChartHeight = 300;
-  const { ref: deruBarRef, size: deruBarSize } = useMeasuredSize<HTMLDivElement>();
-
-  const hasDeruRows = (deruData?.[selectedDERUCategory]?.length ?? 0) > 0;
-  const deruNormalizedData = useMemo(() => {
-    const rows: any[] = Array.isArray(deruData?.[selectedDERUCategory]) ? deruData[selectedDERUCategory] : [];
-    if (!rows.length) return [];
-
-    return rows.map((row: any) => {
-      const out: any = { ...row };
-      const keys = Object.keys(out).filter((k) => k !== "name" && typeof out[k] === "number" && Number.isFinite(out[k]));
-      if (!keys.length) return out;
-
-      const total = keys.reduce((s, k) => s + (out[k] as number), 0);
-      if (!total || total <= 0) return out;
-
-      // Scale to 100%, round to 1 decimal, then fix rounding drift by nudging the largest slice.
-      const factor = 100 / total;
-      let maxKey = keys[0];
-      let maxVal = -Infinity;
-
-      let roundedSum = 0;
-      for (const k of keys) {
-        const scaled = (out[k] as number) * factor;
-        const rounded = Math.round(scaled * 10) / 10; // 1 decimal
-        out[k] = rounded;
-        roundedSum += rounded;
-
-        if (rounded > maxVal) {
-          maxVal = rounded;
-          maxKey = k;
-        }
-      }
-
-      const drift = Math.round((100 - roundedSum) * 10) / 10; // keep 1 decimal drift
-      if (Math.abs(drift) >= 0.1 && maxKey) {
-        out[maxKey] = Math.round(((out[maxKey] as number) + drift) * 10) / 10;
-      }
-      return out;
-    });
-  }, [deruData, selectedDERUCategory]);
-  const [overdueMaintenance, setOverdueMaintenance] = useState<number>(0);
+  // Global Filters
+  const [dateRange, setDateRange] = useState("all");
+  const [selectedRegion, setSelectedRegion] = useState("all");
+  const [selectedDepot, setSelectedDepot] = useState("all");
+  const [selectedAssetType, setSelectedAssetType] = useState("all");
+  const [selectedCIBand, setSelectedCIBand] = useState("all");
+  const [selectedUrgency, setSelectedUrgency] = useState("all");
+  
+  // Data State
   const [loading, setLoading] = useState(true);
-
-  const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+  const [assets, setAssets] = useState<any[]>([]);
+  const [components, setComponents] = useState<any[]>([]);
+  const [maintenanceRecords, setMaintenanceRecords] = useState<any[]>([]);
+  const [regions, setRegions] = useState<string[]>([]);
+  const [depots, setDepots] = useState<string[]>([]);
+  const [assetTypes, setAssetTypes] = useState<string[]>([]);
+  
+  // Bulk Work Order Dialog State
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkDialogAssets, setBulkDialogAssets] = useState<any[]>([]);
+  const [bulkDialogDescription, setBulkDialogDescription] = useState("");
+  
+  // Asset List Dialog State (for viewing/managing assets)
+  const [assetListDialogOpen, setAssetListDialogOpen] = useState(false);
+  const [assetListDialogAssets, setAssetListDialogAssets] = useState<any[]>([]);
+  const [assetListDialogTitle, setAssetListDialogTitle] = useState("");
+  
+  // Computed Stats
+  const [dashboardData, setDashboardData] = useState<any>({
+    overview: {},
+    condition: {},
+    maintenance: {},
+    regional: {}
+  });
 
   useEffect(() => {
-    if (accessToken) {
-      // Create abort controller for cleanup
-      const abortController = new AbortController();
-      const signal = abortController.signal;
-
-      // Pass signal to all fetch functions
-      fetchDashboardStats(signal);
-      fetchMaintenanceStats(signal);
-      fetchInspectionStats(signal);
-      fetchCIDistribution(signal);
-      fetchCITreemapData(signal);
-      fetchUrgencySummary(signal);
-      fetchUrgencyDistribution(signal);
-      fetchAssetTypeSummary(signal);
-      fetchRegionSummary(signal);
-      fetchCiTrendData(signal);
-      fetchRecentActivity(signal);
-      fetchWorstAssets(signal);
-      fetchHighestCostAssets(signal);
-      fetchDERUAnalysis(signal);
-      fetchCriticalAlerts(signal);
-      // REMOVED: fetchOverdueInspections() - now using stats.uninspectedAssets from backend
-      fetchDataQualityAlerts(signal);
-      // REMOVED: fetchOverdueMaintenance() - now using maintenanceStats.overdue from backend
-      
-      // Cleanup function to abort all pending requests
-      return () => {
-        abortController.abort();
-      };
+    if (!auth.user || !auth.accessToken) {
+      console.log("⚠️ No authenticated user, redirecting to login");
+      toast.error("Please log in to access the dashboard");
+      navigate("/login");
+      return;
     }
-  }, [accessToken]);
+    loadAllData();
+  }, [auth.user, auth.accessToken]);
 
-  const fetchDashboardStats = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
+  // Separate effect for filters
+  useEffect(() => {
+    // Just trigger re-computation when filters change
+    // No need to reload data
+  }, [dateRange, selectedRegion, selectedDepot, selectedAssetType, selectedCIBand, selectedUrgency]);
+
+  const loadAllData = async () => {
     try {
-      const response = await fetch(`${API_URL}/dashboard/summary`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setStats({
-          totalAssets: data.totalAssets || 0,
-          totalInspections: data.totalInspections || 0,
-          pendingWorkOrders: data.openWorkOrders || 0,
-          criticalAssets: data.criticalCount || 0,
-          uninspectedAssets: data.uninspectedAssets || 0,
-        });
-        
-        // Set CI and urgency data from the summary endpoint
-        if (data.ciDistribution) setCiDistribution(data.ciDistribution);
-        if (data.urgencySummary) setUrgencySummary(data.urgencySummary);
+      setLoading(true);
+      const token = auth.accessToken;
+      if (!token) {
+        console.error("❌ No access token found");
+        toast.error("Please log in to view the dashboard");
+        navigate("/login");
+        setLoading(false);
+        return;
       }
+
+      console.log("📊 Loading dashboard data with token:", token.substring(0, 20) + "...");
+
+      const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+
+      // Load ALL assets - request all with high page size
+      const assetsRes = await fetch(`${API_URL}/assets?pageSize=5000`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (assetsRes.status === 401) {
+        console.error("❌ Unauthorized - token may be expired");
+        toast.error("Your session has expired. Please log in again.");
+        auth.logout();
+        navigate("/login");
+        setLoading(false);
+        return;
+      }
+      
+      if (assetsRes.ok) {
+        const assetsData = await assetsRes.json();
+        const assets = assetsData.assets || assetsData || [];
+        
+        if (!Array.isArray(assets)) {
+          console.error("❌ Assets data is not an array:", assets);
+          setAssets([]);
+        } else {
+          console.log(`✅ Loaded ${assets.length} assets`);
+          // DEBUG: Log sample asset to see all available fields including urgency
+          if (assets.length > 0) {
+            console.log('📋 Sample asset data (all fields):', assets[0]);
+            console.log('📋 Urgency-related fields:', {
+              asset_ref: assets[0].asset_ref,
+              urgency: assets[0].urgency,
+              latest_urgency: assets[0].latest_urgency,
+              calculated_urgency: assets[0].calculated_urgency,
+              latest_deru: assets[0].latest_deru,
+              asset_urgency: assets[0].asset_urgency,
+              urgency_score: assets[0].urgency_score
+            });
+            // Log what getAssetUrgency returns
+            console.log('📋 getAssetUrgency result:', getAssetUrgency(assets[0]));
+            
+            // Count urgency distribution in raw data
+            const urgencyCounts: any = {};
+            assets.forEach((a: any) => {
+              const u = getAssetUrgency(a) || 'null';
+              urgencyCounts[u] = (urgencyCounts[u] || 0) + 1;
+            });
+            console.log('📋 Urgency distribution in database:', urgencyCounts);
+          }
+          setAssets(assets);
+          
+          // Extract unique values for filters
+          const uniqueRegions = [...new Set(assets.map((a: any) => a.region).filter(Boolean))];
+          const uniqueDepots = [...new Set(assets.map((a: any) => a.depot).filter(Boolean))];
+          const uniqueTypes = [...new Set(assets.map((a: any) => a.type || a.asset_type_name || a.asset_type).filter(Boolean))];
+          
+          setRegions(uniqueRegions as string[]);
+          setDepots(uniqueDepots as string[]);
+          setAssetTypes(uniqueTypes as string[]);
+          
+          console.log(`✅ Filters extracted: ${uniqueRegions.length} regions, ${uniqueDepots.length} depots, ${uniqueTypes.length} asset types`);
+        }
+      } else {
+        console.error("❌ Failed to load assets:", assetsRes.status);
+        toast.error(`Failed to load assets (${assetsRes.status})`);
+        setAssets([]);
+      }
+
+      // Load inspections
+      const inspectionsRes = await fetch(`${API_URL}/inspections`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (inspectionsRes.status === 401) {
+        console.error("❌ Unauthorized - token may be expired");
+        toast.error("Your session has expired. Please log in again.");
+        auth.logout();
+        navigate("/login");
+        setLoading(false);
+        return;
+      }
+      
+      if (inspectionsRes.ok) {
+        const inspectionsData = await inspectionsRes.json();
+        const inspections = inspectionsData.inspections || inspectionsData || [];
+        console.log(`✅ Loaded ${Array.isArray(inspections) ? inspections.length : 0} inspections`);
+        
+        // Extract component scores from inspections
+        const allComponents: any[] = [];
+        if (Array.isArray(inspections)) {
+          inspections.forEach((inspection: any) => {
+            if (inspection.component_scores && Array.isArray(inspection.component_scores)) {
+              allComponents.push(...inspection.component_scores);
+            }
+          });
+        }
+        
+        console.log(`✅ Extracted ${allComponents.length} component scores`);
+        setComponents(allComponents);
+      } else {
+        console.error("❌ Failed to load inspections:", inspectionsRes.status);
+        toast.error(`Failed to load inspections (${inspectionsRes.status})`);
+        setComponents([]);
+      }
+
+      // Load maintenance records
+      const maintenanceRes = await fetch(`${API_URL}/maintenance`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (maintenanceRes.status === 401) {
+        console.error("❌ Unauthorized - token may be expired");
+        toast.error("Your session has expired. Please log in again.");
+        auth.logout();
+        navigate("/login");
+        setLoading(false);
+        return;
+      }
+      
+      if (maintenanceRes.ok) {
+        const maintenanceData = await maintenanceRes.json();
+        const maintenance = maintenanceData.records || maintenanceData.maintenance || maintenanceData || [];
+        console.log(`✅ Loaded ${Array.isArray(maintenance) ? maintenance.length : 0} maintenance records`);
+        setMaintenanceRecords(Array.isArray(maintenance) ? maintenance : []);
+      } else {
+        console.error("❌ Failed to load maintenance:", maintenanceRes.status);
+        toast.error(`Failed to load maintenance records (${maintenanceRes.status})`);
+        setMaintenanceRecords([]);
+      }
+
     } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching dashboard stats:", error);
+      console.error("❌ Error loading dashboard data:", error);
+      toast.error("Failed to load dashboard data. Please try again.");
+      setAssets([]);
+      setComponents([]);
+      setMaintenanceRecords([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchMaintenanceStats = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/maintenance/stats`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMaintenanceStats(data.stats);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching maintenance stats:", error);
-    }
-  };
-
-  const fetchInspectionStats = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/inspections/stats`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setInspectionStats(data.stats);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching inspection stats:", error);
-    }
-  };
-
-  const fetchCIDistribution = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/dashboard/ci-distribution`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setCiDistribution(data.distribution || []);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching CI distribution:", error);
-    }
-  };
-
-  const fetchCITreemapData = async (signal?: AbortSignal) => {
-    // Skip if no access token
-    if (!accessToken) {
-      console.log("Skipping CI treemap fetch - no access token");
-      setCiTreemapData([]);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_URL}/dashboard/ci-treemap`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log("CI Treemap data received:", data.treemapData);
-        setCiTreemapData(data.treemapData || []);
-      } else {
-        if (response.status === 401) {
-          console.log("CI treemap data requires authentication");
-        } else {
-          console.error("Failed to fetch CI treemap data:", response.status);
-        }
-        setCiTreemapData([]);
-      }
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        return; // Ignore abort errors
-      } else {
-        console.error("Error fetching CI treemap data:", error);
-      }
-      setCiTreemapData([]);
-    }
-  };
-
-  const fetchUrgencySummary = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/dashboard/urgency-summary`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setUrgencySummary(data.summary || []);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching urgency summary:", error);
-    }
-  };
-
-  const fetchAssetTypeSummary = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      console.log('📡 [Asset Type] Fetching asset type summary...');
-      const response = await fetch(`${API_URL}/dashboard/asset-type-summary`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('✅ [Asset Type] Received data:', data);
-        console.log('✅ [Asset Type] Summary array:', data.summary);
-        setAssetTypeSummary(data.summary || []);
-      } else {
-        console.error('❌ [Asset Type] Failed to fetch:', response.status, await response.text());
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("❌ [Asset Type] Error fetching asset type summary:", error);
-    }
-  };
-
-  const fetchRegionSummary = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/dashboard/stats`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.stats?.regionSummary) {
-          setRegionSummary(data.stats.regionSummary);
-        }
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching region summary:", error);
-    }
-  };
-
-  const fetchCiTrendData = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      let allInspections: any[] = [];
-      let page = 1;
+  // Apply filters to assets
+  const getFilteredAssets = () => {
+    return assets.filter(asset => {
+      // Region filter
+      if (selectedRegion !== 'all' && asset.region !== selectedRegion) return false;
       
-      while (true) {
-        const response = await fetch(`${API_URL}/inspections?page=${page}`, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          signal,
-        });
-
-        if (!response.ok) break;
-        
-        const data = await response.json();
-        const inspections = data.inspections || [];
-        
-        if (inspections.length === 0) break;
-        
-        allInspections = [...allInspections, ...inspections];
-        
-        if (!data.hasMore) break;
-        page++;
+      // Depot filter
+      if (selectedDepot !== 'all' && asset.depot !== selectedDepot) return false;
+      
+      // Asset Type filter
+      if (selectedAssetType !== 'all') {
+        const assetType = asset.type || asset.asset_type_name || asset.asset_type;
+        if (assetType !== selectedAssetType) return false;
       }
       
-      // Group by month and calculate average CI
-      const monthlyData: { [key: string]: { total: number; count: number } } = {};
-      
-      allInspections.forEach((insp: any) => {
-        const date = new Date(insp.inspection_date || insp.created_at);
-        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        const ci = insp.conditional_index !== null && insp.conditional_index !== undefined ? insp.conditional_index : 
-                   (insp.ci_final !== null && insp.ci_final !== undefined ? insp.ci_final : null);
-        
-        if (ci !== null) {
-          if (!monthlyData[monthKey]) {
-            monthlyData[monthKey] = { total: 0, count: 0 };
-          }
-          monthlyData[monthKey].total += ci;
-          monthlyData[monthKey].count++;
-        }
-      });
-
-      // Convert to array and calculate averages
-      const trend = Object.entries(monthlyData)
-        .map(([month, data]) => ({
-          month: new Date(month + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-          avgCI: Math.round(data.total / data.count),
-        }))
-        .sort((a, b) => a.month.localeCompare(b.month))
-        .slice(-12); // Last 12 months
-
-      setCiTrendData(trend);
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching CI trend:", error);
-    }
-  };
-
-  const fetchUrgencyDistribution = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      let allInspections: any[] = [];
-      let page = 1;
-      
-      while (true) {
-        const response = await fetch(`${API_URL}/inspections?page=${page}`, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          signal,
-        });
-
-        if (!response.ok) break;
-        
-        const data = await response.json();
-        const inspections = data.inspections || [];
-        
-        if (inspections.length === 0) break;
-        
-        allInspections = [...allInspections, ...inspections];
-        
-        if (!data.hasMore) break;
-        page++;
+      // CI Band filter
+      if (selectedCIBand !== 'all') {
+        const band = getCIBand(asset.latest_ci);
+        if (band !== selectedCIBand) return false;
       }
       
-      console.log('📊 Urgency Distribution - Raw inspections count:', allInspections.length);
-      console.log('📊 Sample inspection:', allInspections[0]);
+      // Urgency filter - only filter if urgency value exists
+      if (selectedUrgency !== 'all') {
+        // Use urgency_score as the primary field, fallback to parsing latest_deru
+        let urgency = getAssetUrgency(asset);
+        
+        // Only apply filter if asset has urgency data
+        if (urgency && urgency !== selectedUrgency) return false;
+        // If no urgency data, include the asset (don't filter it out)
+        if (!urgency && selectedUrgency !== 'none') return false;
+      }
       
-      // Count by calculated_urgency from inspections
-      const urgencyCounts: { [key: string]: number } = {};
-
-      allInspections.forEach((insp: any) => {
-        const urgency = insp.calculated_urgency || insp.urgency_label || insp.urgency || "Unknown";
-        urgencyCounts[urgency] = (urgencyCounts[urgency] || 0) + 1;
-      });
-
-      console.log('📊 Urgency Counts:', urgencyCounts);
-
-      // Map to standard urgency labels
-      const distribution = Object.entries(urgencyCounts).map(([label, count]) => ({
-        label,
-        name: label,
-        calculated_urgency: label,
-        count,
-        value: count,
-        inspection_count: count,
-      }));
-
-      console.log('📊 Final distribution array:', distribution);
-
-      setUrgencyDistribution(distribution);
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching urgency distribution:", error);
-      setUrgencyDistribution([]);
-    }
-  };
-
-  const fetchHighestCostAssets = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/inspections`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const inspections = data.inspections || [];
+      // Date range filter - filter by latest inspection date
+      if (dateRange !== 'all') {
+        const inspectionDate = asset.latest_inspection_date || asset.last_inspection;
+        if (!inspectionDate) return false; // No inspection date, exclude from filtered results
         
-        // Group by asset and sum remedial costs
-        const assetCosts: { [key: string]: any } = {};
-        
-        inspections.forEach((insp: any) => {
-          const assetId = insp.asset_id;
-          const cost = insp.total_remedial_cost || 0;
-          
-          if (!assetCosts[assetId]) {
-            assetCosts[assetId] = {
-              asset_id: assetId,
-              asset_ref: insp.asset_ref,
-              asset_type_name: insp.asset_type_name,
-              road_name: insp.road_name,
-              road_number: insp.road_number,
-              latest_ci: insp.ci_final,
-              total_remedial_cost: 0,
-            };
-          }
-          
-          // Take the highest remedial cost for this asset
-          if (cost > assetCosts[assetId].total_remedial_cost) {
-            assetCosts[assetId].total_remedial_cost = cost;
-            assetCosts[assetId].latest_ci = insp.ci_final;
-          }
-        });
-
-        const sorted = Object.values(assetCosts)
-          .filter((asset: any) => asset.total_remedial_cost > 0)
-          .sort((a: any, b: any) => b.total_remedial_cost - a.total_remedial_cost)
-          .slice(0, 10);
-
-        setHighestCostAssets(sorted);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching highest cost assets:", error);
-    }
-  };
-
-  const fetchDERUAnalysis = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/inspections/deru-analytics`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const inspections = data.inspections || [];
-        
-        // Debug: Log first inspection to see what fields are available
-        if (inspections.length > 0) {
-          const firstInsp = inspections[0];
-          console.log('[DERU Debug] First inspection sample:', {
-            Degree_1: firstInsp.Degree_1,
-            Degree_2: firstInsp.Degree_2,
-            Extent_1: firstInsp.Extent_1,
-            Extent_2: firstInsp.Extent_2,
-            Relevancy_1: firstInsp.Relevancy_1,
-            Relevancy_2: firstInsp.Relevancy_2,
-            'U - Comp 1': firstInsp['U - Comp 1'],
-            'U - Comp 2': firstInsp['U - Comp 2'],
-          });
-          console.log('[DERU Debug] Total inspections:', inspections.length);
-          console.log('[DERU Debug] Asset types found:', [...new Set(inspections.map((i: any) => i.asset_type_name).filter(Boolean))]);
-        }
-        
-        // Process DERU data by asset type
-        const assetTypes = [...new Set(inspections.map((i: any) => i.asset_type_name).filter(Boolean))];
-        
-        const processCategory = (categoryField: string, labels: { [key: string]: string }, isCI: boolean = false) => {
-          return assetTypes.map(assetType => {
-            const typeInspections = inspections.filter((i: any) => i.asset_type_name === assetType);
-            const counts: { [key: string]: number } = {};
-            
-            typeInspections.forEach((insp: any) => {
-              // DERU values are now at the top level (pre-extracted by server)
-              
-              // Helper to extract numeric value from strings like "1 = Minor", "4 = General"
-              const extractNumericValue = (str: string | null | undefined): string | null => {
-                if (!str || str === '#N/A' || str === 'null') return null;
-                const match = str.match(/^(\d+|[A-Z])\s*=/);
-                return match ? match[1] : null;
-              };
-              
-              let values: (string | null)[] = [];
-              
-              // Extract values from all 6 components based on category
-              if (categoryField === 'd_degree') {
-                // Extract Degree_1 through Degree_6
-                for (let i = 1; i <= 6; i++) {
-                  const rawVal = insp[`Degree_${i}`];
-                  const val = extractNumericValue(rawVal);
-                  if (val) values.push(val);
-                }
-              } else if (categoryField === 'e_extent') {
-                // Extract Extent_1 through Extent_6
-                for (let i = 1; i <= 6; i++) {
-                  const val = extractNumericValue(insp[`Extent_${i}`]);
-                  if (val) values.push(val);
-                }
-              } else if (categoryField === 'r_relevancy') {
-                // Extract Relevancy_1 through Relevancy_6
-                for (let i = 1; i <= 6; i++) {
-                  const val = extractNumericValue(insp[`Relevancy_${i}`]);
-                  if (val) values.push(val);
-                }
-              } else if (categoryField === 'u_urgency') {
-                // Extract U - Comp 1 through U - Comp 6
-                for (let i = 1; i <= 6; i++) {
-                  const val = insp[`U - Comp ${i}`];
-                  if (val && val !== 'null') values.push(val);
-                }
-              } else if (isCI) {
-                // Extract CI from top-level fields
-                const ciValue = insp.CI_Final || insp.conditional_index;
-                if (ciValue) values.push(ciValue);
-              }
-              
-              // Count each value
-              values.forEach(value => {
-                if (value !== null) {
-                  if (isCI) {
-                    // Handle CI ranges
-                    const ci = parseFloat(value);
-                    if (!isNaN(ci)) {
-                      if (ci >= 0 && ci < 20) counts['0-19'] = (counts['0-19'] || 0) + 1;
-                      else if (ci >= 20 && ci < 40) counts['20-39'] = (counts['20-39'] || 0) + 1;
-                      else if (ci >= 40 && ci < 60) counts['40-59'] = (counts['40-59'] || 0) + 1;
-                      else if (ci >= 60 && ci < 80) counts['60-79'] = (counts['60-79'] || 0) + 1;
-                      else if (ci >= 80 && ci <= 100) counts['80-100'] = (counts['80-100'] || 0) + 1;
-                    }
-                  } else {
-                    counts[value] = (counts[value] || 0) + 1;
-                  }
-                }
-              });
-            });
-            
-            // Debug logging
-            if (categoryField === 'd_degree' && assetType === 'Gantry') {
-              console.log('[DERU Debug] Gantry Degree counts:', counts);
-              console.log('[DERU Debug] Labels:', labels);
-            }
-            
-            // Calculate total for percentage conversion
-            const total = Object.values(counts).reduce((sum: number, val: any) => sum + (val || 0), 0);
-            
-            // Build row with ALL label keys initialized (critical for stacking)
-            const row: any = { name: assetType };
-            Object.keys(labels).forEach(key => {
-              const count = counts[key] || 0;
-              // Convert to percentage (0-100 scale), ensuring ALL keys exist
-              row[labels[key]] = total > 0 ? Math.round((count / total) * 100) : 0;
-            });
-            
-            return row;
-          }).filter(item => {
-            // Keep rows with at least one non-zero value (excluding 'name')
-            return Object.keys(item).some(k => k !== 'name' && item[k] > 0);
-          });
-        };
-        
-        console.log('[DERU Debug] Processing categories...');
-        
-        // Wrap in try-catch to prevent silent failures
-        try {
-          const degreeData = processCategory('d_degree', {
-            '0': 'None (Good)',
-            '1': 'Not applicable',
-            'U': 'Unable to inspect', 
-            '2': 'Good defects',
-            '3': 'Moderate defects',
-            '4': 'Major defects'
-          });
-          
-          // Debug: Validate 100% stacked chart structure
-          if (degreeData.length > 0) {
-            const firstItem = degreeData[0];
-            const categoryKeys = Object.keys(firstItem).filter(k => k !== 'name');
-            const total = categoryKeys.reduce((sum, k) => sum + (firstItem[k] || 0), 0);
-            console.log('[DERU Debug] First degree item:', firstItem);
-            console.log('[DERU Debug] Category keys:', categoryKeys);
-            console.log('[DERU Debug] Row total:', total, '% (should be ~100%)');
-          }
-          
-          const extentData = processCategory('e_extent', {
-            '0': 'None',
-            '1': '<10% affected',
-            '2': '10-30% affected',
-            '3': '30-60% affected',
-            '4': 'Mostly affected (>60%)'
-          });
-          
-          const relevancyData = processCategory('r_relevancy', {
-            '0': 'None',
-            '1': 'Cosmetic',
-            '2': 'Local dysfunction',
-            '3': 'Moderate dysfunction',
-            '4': 'Major dysfunction'
-          });
-          
-          const urgencyData = processCategory('u_urgency', {
-            'X': 'Not applicable',
-            '0': 'Monitor only',
-            '1': 'Routine maintenance',
-            '2': 'Repair within 10 years',
-            '3': 'Repair within 10 years',
-            '4': 'Immediate action'
-          });
-          
-          const ciData = processCategory('ci_final', {
-            '0-19': 'Critical (0-19)',
-            '20-39': 'Poor (20-39)',
-            '40-59': 'Fair (40-59)',
-            '60-79': 'Good (60-79)',
-            '80-100': 'Excellent (80-100)'
-          }, true);
-          
-          const newDeruData = {
-            degree: degreeData,
-            extent: extentData,
-            relevancy: relevancyData,
-            urgency: urgencyData,
-            ci: ciData
-          };
-          
-          console.log('📊 [DERU] Setting DERU data:', newDeruData);
-          console.log('📊 [DERU] Degree data length:', newDeruData.degree.length);
-          console.log('📊 [DERU] Degree sample:', newDeruData.degree[0]);
-          
-          setDeruData(newDeruData);
-          console.log('✅ [DERU] State updated successfully!');
-        } catch (categoryError) {
-          console.error('❌ [DERU] Error processing categories:', categoryError);
-          // Set empty data so the chart at least initializes
-          setDeruData({
-            degree: [],
-            extent: [],
-            relevancy: [],
-            urgency: [],
-            ci: []
-          });
-        }
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching DERU analysis:", error);
-    }
-  };
-
-  const fetchCriticalAlerts = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/dashboard/critical-alerts`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setCriticalAlerts(data.alerts || []);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching critical alerts:", error);
-      setCriticalAlerts([]);
-    }
-  };
-
-  const fetchRecentActivity = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      // Fetch recent inspections
-      const inspectionsResponse = await fetch(`${API_URL}/inspections`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      // Fetch recent maintenance
-      const maintenanceResponse = await fetch(`${API_URL}/maintenance`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      const activities: any[] = [];
-
-      if (inspectionsResponse.ok) {
-        const inspectionsData = await inspectionsResponse.json();
-        const recentInspections = (inspectionsData.inspections || []).slice(0, 3);
-        
-        recentInspections.forEach((insp: any) => {
-          activities.push({
-            type: "inspection",
-            action: "Inspection completed",
-            detail: `${insp.asset_type_name || 'Asset'} ${insp.asset_ref || ''} - CI: ${insp.conditional_index || insp.ci_final || 'N/A'}`,
-            time: formatTimeAgo(insp.inspection_date || insp.created_at),
-            color: insp.calculated_urgency === "4" ? "text-destructive" : "text-success",
-          });
-        });
-      }
-
-      if (maintenanceResponse.ok) {
-        const maintenanceData = await maintenanceResponse.json();
-        const recentMaintenance = (maintenanceData.records || maintenanceData.maintenance || []).slice(0, 2);
-        
-        recentMaintenance.forEach((maint: any) => {
-          activities.push({
-            type: "maintenance",
-            action: maint.status === "Completed" ? "Maintenance completed" : "Maintenance scheduled",
-            detail: `${maint.asset_type_name || 'Asset'} ${maint.asset_ref || ''} - ${maint.maintenance_type || 'Work'}`,
-            time: formatTimeAgo(maint.completed_date || maint.scheduled_date || maint.created_at),
-            color: maint.status === "Completed" ? "text-success" : "text-warning",
-          });
-        });
-      }
-
-      // Sort by most recent
-      activities.sort((a, b) => {
-        // This is a simple sort, in reality you'd compare actual dates
-        return 0;
-      });
-
-      setRecentActivity(activities.slice(0, 5));
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching recent activity:", error);
-    }
-  };
-
-  const fetchWorstAssets = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/assets`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const assets = data.assets || [];
-        
-        // Get assets with CI values and sort by lowest CI (worst condition)
-        const assetsWithCI = assets
-          .filter((a: any) => a.latest_ci !== null && a.latest_ci !== undefined)
-          .map((a: any) => ({
-            ...a,
-            normalized_ci: Math.min(Math.max(a.latest_ci, 0), 100),
-          }))
-          .sort((a: any, b: any) => a.normalized_ci - b.normalized_ci)
-          .slice(0, 10);
-
-        setWorstAssets(assetsWithCI);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching worst assets:", error);
-    }
-  };
-
-  const fetchOverdueInspections = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      // Fetch all assets to see which ones have never been inspected
-      const assetsResponse = await fetch(`${API_URL}/assets?pageSize=2000`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (assetsResponse.ok) {
-        const assetsData = await assetsResponse.json();
-        const assets = assetsData.assets || [];
-        
-        console.log(`[Overdue Inspections] Checking ${assets.length} assets for uninspected`);
-        console.log(`[Overdue Inspections] Sample asset:`, assets[0]);
-        
-        // Count assets that have never been inspected (latest_ci is null/undefined)
-        const uninspectedAssets = assets.filter((asset: any) => 
-          asset.latest_ci === null || asset.latest_ci === undefined
-        );
-
-        console.log(`[Overdue Inspections] Found ${uninspectedAssets.length} uninspected assets`);
-        console.log(`[Overdue Inspections] Uninspected sample:`, uninspectedAssets[0]);
-        setOverdueInspections(uninspectedAssets.length);
-      } else {
-        console.error(`[Overdue Inspections] Failed to fetch assets: ${assetsResponse.status}`);
-        setOverdueInspections(0);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching overdue inspections:", error);
-      setOverdueInspections(0);
-    }
-  };
-
-  const fetchOverdueMaintenance = async (signal?: AbortSignal) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`${API_URL}/maintenance`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const maintenance = data.maintenance || [];
-        
-        console.log(`[Overdue Maintenance] Checking ${maintenance.length} maintenance records`);
-        console.log(`[Overdue Maintenance] Sample record:`, maintenance[0]);
-        
+        const inspDate = new Date(inspectionDate);
         const now = new Date();
+        const daysDiff = Math.floor((now.getTime() - inspDate.getTime()) / (1000 * 60 * 60 * 24));
         
-        // Count maintenance items that are past their scheduled date and not completed
-        const overdueItems = maintenance.filter((item: any) => {
-          // Skip if status is Completed
-          if (item.status === 'Completed' || item.status === 'completed') {
-            return false;
-          }
-          
-          // Check if it's past the scheduled date
-          if (!item.scheduled_date) {
-            return false; // No scheduled date means can't be overdue
-          }
-          
-          const scheduledDate = new Date(item.scheduled_date);
-          const isOverdue = scheduledDate < now;
-          
-          return isOverdue;
-        });
-
-        console.log(`[Overdue Maintenance] Found ${overdueItems.length} overdue maintenance items`);
-        console.log(`[Overdue Maintenance] Sample overdue item:`, overdueItems[0]);
-        setOverdueMaintenance(overdueItems.length);
-      } else {
-        console.error(`[Overdue Maintenance] Failed to fetch: ${response.status}`);
-        setOverdueMaintenance(0);
-      }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching overdue maintenance:", error);
-      setOverdueMaintenance(0);
-    }
-  };
-
-  const fetchDataQualityAlerts = async (signal?: AbortSignal) => {
-    // Skip if no access token
-    if (!accessToken) {
-      console.log("Skipping data quality fetch - no access token");
-      setDataQualityAlerts({ count: 0, details: {} });
-      return;
-    }
-
-    try {
-      // Use lightweight count query with head:true
-      const response = await fetch(`${API_URL}/assets?pageSize=2000`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const assets = data.assets || [];
-        
-        console.log(`[Data Quality] Checking ${assets.length} assets for quality issues`);
-        
-        // Count all critical missing data fields
-        const missingGPS = assets.filter((asset: any) => 
-          !asset.gps_lat || !asset.gps_lng
-        ).length;
-
-        const missingType = assets.filter((asset: any) => 
-          !asset.asset_type_name
-        ).length;
-
-        const missingDepot = assets.filter((asset: any) => 
-          !asset.depot_name
-        ).length;
-
-        const missingRegion = assets.filter((asset: any) => 
-          !asset.region_name
-        ).length;
-
-        const missingRoadName = assets.filter((asset: any) => 
-          !asset.road_name
-        ).length;
-
-        const missingOwner = assets.filter((asset: any) => 
-          !asset.owner_name
-        ).length;
-
-        const missingResponsibleParty = assets.filter((asset: any) => 
-          !asset.responsible_party_name
-        ).length;
-        
-        const totalIssues = missingGPS + missingType + missingDepot + missingRegion + missingRoadName + missingOwner + missingResponsibleParty;
-
-        console.log(`[Data Quality] Found ${totalIssues} issues (GPS: ${missingGPS}, Type: ${missingType}, Depot: ${missingDepot}, Region: ${missingRegion}, Road: ${missingRoadName}, Owner: ${missingOwner}, Responsible: ${missingResponsibleParty})`);
-
-        setDataQualityAlerts({ 
-          count: totalIssues,
-          details: {
-            missingGPS,
-            missingType,
-            missingDepot,
-            missingRegion,
-            missingRoadName,
-            missingOwner,
-            missingResponsibleParty
-          }
-        });
-      } else {
-        if (response.status === 401) {
-          console.log("[Data Quality] Asset data requires authentication");
-        } else {
-          console.error(`[Data Quality] Failed to fetch assets: ${response.status}`);
+        if (dateRange === 'last30' && daysDiff > 30) return false;
+        if (dateRange === 'last90' && daysDiff > 90) return false;
+        if (dateRange === 'ytd') {
+          const yearStart = new Date(now.getFullYear(), 0, 1);
+          if (inspDate < yearStart) return false;
         }
-        setDataQualityAlerts({ count: 0, details: {} });
       }
-    } catch (error) {
-      // Ignore abort errors
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error("Error fetching data quality alerts:", error);
-      setDataQualityAlerts({ count: 0, details: {} });
-    }
-  };
-
-  const formatTimeAgo = (dateString: string) => {
-    if (!dateString) return "Recently";
-    
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
-    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
-    if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
-    return date.toLocaleDateString();
-  };
-
-  // Map CI band names to colors
-  const getCIColor = (bandName: string) => {
-    const name = bandName?.toLowerCase() || "";
-    
-    if (name.includes("excellent") || name.includes("80-100")) return "#5DB32A"; // Green
-    if (name.includes("good") || name.includes("60-79")) return "#39AEDF"; // Blue
-    if (name.includes("fair") || name.includes("40-59")) return "#F8D227"; // Yellow
-    if (name.includes("poor") || name.includes("20-39")) return "#F57C00"; // Orange
-    if (name.includes("critical") || name.includes("0-19")) return "#d4183d"; // Red
-    
-    return "#F8D227"; // Default to yellow/fair
-  };
-
-  // Memoized urgency chart data with robust normalization
-  const urgencyChartData = useMemo(() => {
-    console.log('🔄 Normalizing urgency chart data...');
-    console.log('📥 Raw urgencyDistribution:', urgencyDistribution);
-    
-    const raw = Array.isArray(urgencyDistribution)
-      ? urgencyDistribution
-      : (urgencyDistribution ? Object.values(urgencyDistribution) : []);
-
-    console.log('📦 Converted to array:', raw);
-
-    // Normalize rows from API → { label, count }
-    const normalized = raw.map((r: any) => ({
-      label: toLabel(r),
-      count: toNumber(r?.count ?? r?.value ?? r?.inspection_count ?? r?.asset_count ?? r?.total ?? 0),
-    }));
-
-    console.log('✨ Normalized data:', normalized);
-
-    // Merge duplicates (e.g., multiple "Low" rows)
-    const merged = new Map<string, number>();
-    for (const row of normalized) {
-      merged.set(row.label, (merged.get(row.label) || 0) + row.count);
-    }
-
-    console.log('🔗 Merged duplicates:', Array.from(merged.entries()));
-
-    // Seed all categories so chart never disappears (optional - helps with debugging)
-    for (const key of URGENCY_ORDER) {
-      if (!merged.has(key)) merged.set(key, 0);
-    }
-
-    // Sort in fixed order; anything unknown goes last
-    const sorted = Array.from(merged.entries())
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => {
-        const ai = URGENCY_ORDER.indexOf(a.label);
-        const bi = URGENCY_ORDER.indexOf(b.label);
-        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-      });
-
-    console.log('📊 Sorted data:', sorted);
-
-    // Filter out zero counts only after seeding (helps keep chart stable)
-    const final = sorted.filter(x => x.count > 0);
-    
-    console.log('✅ Final chart data:', final);
-
-    return final;
-  }, [urgencyDistribution]);
-
-  // Memoized asset type chart data with robust normalization
-  const assetTypeChartData = useMemo(() => {
-    console.log('🔍 [Asset Type Chart] Raw assetTypeSummary:', assetTypeSummary);
-    
-    const raw = Array.isArray(assetTypeSummary)
-      ? assetTypeSummary
-      : (assetTypeSummary ? Object.values(assetTypeSummary) : []);
-
-    console.log('🔍 [Asset Type Chart] Processed raw data:', raw);
-
-    const normalized = raw.map((r: any) => ({
-      name: toAssetTypeName(r),
-      count: toNumber(r?.asset_count ?? r?.total_assets ?? r?.count ?? r?.value ?? 0),
-    }));
-
-    console.log('🔍 [Asset Type Chart] Normalized data:', normalized);
-
-    // Sort biggest first
-    const final = normalized
-      .filter(x => x.count > 0) // Only show types with assets
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
       
-    console.log('✅ [Asset Type Chart] Final chart data:', final);
-    
-    return final;
-  }, [assetTypeSummary]);
+      return true;
+    });
+  };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading dashboard...</p>
-        </div>
-      </div>
-    );
+  const filteredAssets = getFilteredAssets();
+  
+  // Clear all filters function
+  const clearAllFilters = () => {
+    setDateRange('all');
+    setSelectedRegion('all');
+    setSelectedDepot('all');
+    setSelectedAssetType('all');
+    setSelectedCIBand('all');
+    setSelectedUrgency('all');
+  };
+
+  // Helper functions to open bulk work order dialog with filtered assets
+  const openBulkDialog = (assetList: any[], description: string) => {
+    setBulkDialogAssets(assetList);
+    setBulkDialogDescription(description);
+    setBulkDialogOpen(true);
+  };
+
+  const openBulkDialogCriticalCI = () => {
+    const criticalCIAssets = filteredAssets.filter(a => (a.latest_ci || 0) < 40);
+    openBulkDialog(criticalCIAssets, `Critical CI Assets (CI < 40)`);
+  };
+
+  const openBulkDialogHighUrgency = () => {
+    const highUrgencyAssets = filteredAssets.filter(a => {
+      const urgency = getAssetUrgency(a);
+      return urgency === '4' || urgency === '3';
+    });
+    openBulkDialog(highUrgencyAssets, `High Urgency Assets (Urgency 3-4)`);
+  };
+
+  const openBulkDialogDataIssues = () => {
+    const dataIssueAssets = filteredAssets.filter(a => !a.gps_lat || !a.gps_lng);
+    openBulkDialog(dataIssueAssets, `Assets with Data Quality Issues`);
+  };
+
+  // Calculate Overview Stats
+  const totalAssets = filteredAssets.length;
+  const avgCI = filteredAssets.length > 0 
+    ? filteredAssets.reduce((sum, a) => sum + (a.latest_ci || 0), 0) / filteredAssets.length 
+    : 0;
+  const criticalAssets = filteredAssets.filter(a => (a.latest_ci || 0) < 40).length;
+  const highUrgencyAssets = filteredAssets.filter(a => {
+    const urgency = getAssetUrgency(a);
+    return urgency === '4' || urgency === '3';
+  }).length;
+  
+  // Active Work Orders - flexible status matching
+  const activeWorkOrders = maintenanceRecords.filter(wo => {
+    const status = (wo.status || '').toLowerCase().trim().replace(/[_\s]/g, '');
+    return status === 'inprogress' || status === 'scheduled';
+  }).length;
+  
+  // Debug logging for data quality
+  console.log('[Dashboard] Checking data quality for', filteredAssets.length, 'assets');
+  
+  // South Africa GPS bounds for outlier detection
+  // Latitude: -35° to -22° (negative, southern hemisphere)
+  // Longitude: 16° to 33° (positive, eastern hemisphere)
+  const SA_LAT_MIN = -35;
+  const SA_LAT_MAX = -22;
+  const SA_LNG_MIN = 16;
+  const SA_LNG_MAX = 33;
+  
+  // 1. Asset Basic Information Issues - GPS outliers or missing GPS
+  const assetsWithGPSIssues = filteredAssets.filter(a => {
+    // Missing GPS coordinates
+    if (!a.gps_lat || !a.gps_lng) {
+      return true;
+    }
+    // Invalid GPS coordinates (0,0 - equator/null island)
+    const lat = parseFloat(a.gps_lat);
+    const lng = parseFloat(a.gps_lng);
+    if (lat === 0 && lng === 0) {
+      return true;
+    }
+    // GPS outliers - coordinates outside South Africa bounds
+    if (lat < SA_LAT_MIN || lat > SA_LAT_MAX || lng < SA_LNG_MIN || lng > SA_LNG_MAX) {
+      console.log('[Dashboard] GPS outlier detected:', a.asset_ref, 'lat:', lat, 'lng:', lng);
+      return true;
+    }
+    return false;
+  });
+  const gpsDataIssues = assetsWithGPSIssues.length;
+  
+  // 2. Inspection Integrity Issues - Assets with no inspections or incomplete recent inspections
+  const assetsWithInspectionIssues = filteredAssets.filter(a => {
+    // No inspection recorded
+    if (!a.latest_inspection_date) {
+      return true;
+    }
+    // Incomplete inspection data (missing CI or urgency)
+    if ((a.latest_ci === null || a.latest_ci === undefined) && 
+        (a.latest_urgency === null || a.latest_urgency === undefined)) {
+      return true;
+    }
+    return false;
+  });
+  const inspectionIntegrityIssues = assetsWithInspectionIssues.length;
+  
+  // 3. Photo Integrity Issues - Assets missing main image (photo_number = 0)
+  // This will need to be fetched from the backend or calculated from photo data
+  // For now, we'll set it to 0 and implement the backend check later
+  const photoIntegrityIssues = 0; // TODO: Implement photo check via backend
+  
+  // Total data quality issues
+  const dataQualityIssues = gpsDataIssues + inspectionIntegrityIssues + photoIntegrityIssues;
+  
+  console.log('[Dashboard] Data Quality Summary:', {
+    gpsDataIssues,
+    inspectionIntegrityIssues,
+    photoIntegrityIssues,
+    total: dataQualityIssues
+  });
+
+  // Data Quality Issue Click Handlers (defined after data calculations)
+  const openAssetListDialogGPSIssues = () => {
+    setAssetListDialogAssets(assetsWithGPSIssues);
+    setAssetListDialogTitle("Assets with GPS Data Issues");
+    setAssetListDialogOpen(true);
+  };
+
+  const openAssetListDialogInspectionIssues = () => {
+    setAssetListDialogAssets(assetsWithInspectionIssues);
+    setAssetListDialogTitle("Assets with Inspection Integrity Issues");
+    setAssetListDialogOpen(true);
+  };
+
+  const openAssetListDialogPhotoIssues = () => {
+    setAssetListDialogAssets([]);
+    setAssetListDialogTitle("Assets with Photo Integrity Issues");
+    setAssetListDialogOpen(true);
+  };
+
+  // Critical CI Handlers
+  const openAssetListDialogPoorCondition = () => {
+    const poorConditionAssets = filteredAssets.filter(a => (a.latest_ci || 0) >= 20 && (a.latest_ci || 0) < 40);
+    setAssetListDialogAssets(poorConditionAssets);
+    setAssetListDialogTitle("Assets with Poor Condition (CI 20-39)");
+    setAssetListDialogOpen(true);
+  };
+
+  // Calculate Inspection Data Integrity Metrics
+  const missingGPS = filteredAssets.filter(a => {
+    // Missing GPS coordinates
+    if (!a.gps_lat || !a.gps_lng) return true;
+    // Invalid GPS coordinates (0,0 - equator/null island)
+    if (parseFloat(a.gps_lat) === 0 && parseFloat(a.gps_lng) === 0) return true;
+    return false;
+  }).length;
+  const incompleteDERU = components.filter(c => {
+    // Check if any D-E-R values are missing or zero
+    const hasMissingD = !c.degree_value || parseFloat(c.degree_value) === 0;
+    const hasMissingE = !c.extent_value || parseFloat(c.extent_value) === 0;
+    const hasMissingR = !c.relevancy_value || parseFloat(c.relevancy_value) === 0;
+    return hasMissingD || hasMissingE || hasMissingR;
+  }).length;
+  
+  // Calculate overdue inspections (assets not inspected in last 365 days)
+  const now = new Date();
+  const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+  const overdueInspections = filteredAssets.filter(a => {
+    if (!a.latest_inspection_date && !a.last_inspection) return true; // Never inspected = overdue
+    const lastInspection = new Date(a.latest_inspection_date || a.last_inspection);
+    return lastInspection < oneYearAgo;
+  }).length;
+
+  // Calculate CI Distribution (match UI legend, include Not Inspected)
+  const ciDistribution = [
+    { name: '80-100 (Excellent)', count: filteredAssets.filter(a => a.latest_ci !== null && a.latest_ci !== undefined && (a.latest_ci || 0) >= 80).length, range: '80–100', band: 'Excellent' },
+    { name: '60-79 (Good)', count: filteredAssets.filter(a => a.latest_ci !== null && a.latest_ci !== undefined && (a.latest_ci || 0) >= 60 && (a.latest_ci || 0) < 80).length, range: '60–79', band: 'Good' },
+    { name: '40-59 (Fair)', count: filteredAssets.filter(a => a.latest_ci !== null && a.latest_ci !== undefined && (a.latest_ci || 0) >= 40 && (a.latest_ci || 0) < 60).length, range: '40–59', band: 'Fair' },
+    { name: '0-39 (Poor)', count: filteredAssets.filter(a => a.latest_ci !== null && a.latest_ci !== undefined && (a.latest_ci || 0) < 40).length, range: '0–39', band: 'Poor' }, { name: 'Not Inspected', count: filteredAssets.filter(a => a.latest_ci === null || a.latest_ci === undefined).length, range: 'N/A', band: 'Not Inspected' }
+  ];
+
+  // Calculate Urgency Distribution - DERU urgency levels (R, 0, 1, 2, 3, 4)
+  const urgencyDistribution = [
+    { name: 'R - Record only', count: filteredAssets.filter(a => getAssetUrgency(a) === 'R').length, level: 'R' },
+    { name: '0 - Monitor only', count: filteredAssets.filter(a => getAssetUrgency(a) === '0').length, level: '0' },
+    { name: '1 - Routine maintenance', count: filteredAssets.filter(a => getAssetUrgency(a) === '1').length, level: '1' },
+    { name: '2 - Repair (long term)', count: filteredAssets.filter(a => getAssetUrgency(a) === '2').length, level: '2' },
+    { name: '3 - Repair (short term)', count: filteredAssets.filter(a => getAssetUrgency(a) === '3').length, level: '3' },
+    { name: '4 - Immediate action', count: filteredAssets.filter(a => getAssetUrgency(a) === '4').length, level: '4' }
+  ];
+
+  // Calculate DERU Component Drivers
+  const deruDrivers = calculateDERUDrivers(components);
+
+  // Calculate Regional Performance
+  const regionalPerformance = calculateRegionalPerformance(filteredAssets);
+
+  // Top 10 Worst Assets
+  const worstAssets = [...filteredAssets]
+    .sort((a, b) => (a.latest_ci || 0) - (b.latest_ci || 0))
+    .slice(0, 10);
+
+  // Top Hotspots (Regions with worst CI)
+  const topHotspots = regionalPerformance
+    .sort((a, b) => a.avgCI - b.avgCI)
+    .slice(0, 5);
+
+  // Calculate Monthly Maintenance Spend Data
+  const calculateMonthlySpend = () => {
+    if (!maintenanceRecords || maintenanceRecords.length === 0) return [];
+    
+    // Group by month from scheduled_date
+    const monthlyData: { [key: string]: { planned: number; actual: number } } = {};
+    
+    maintenanceRecords.forEach(wo => {
+      const date = wo.scheduled_date || wo.completed_date;
+      if (!date) return;
+      
+      // Parse date (format: "DD MM YYYY" or standard date format)
+      let monthKey = '';
+      try {
+        // Try parsing DD MM YYYY format first
+        if (date.includes(' ')) {
+          const parts = date.split(' ');
+          if (parts.length === 3) {
+            const month = parseInt(parts[1]);
+            const year = parseInt(parts[2]);
+            monthKey = `${year}-${String(month).padStart(2, '0')}`;
+          }
+        } else {
+          // Standard date format
+          const d = new Date(date);
+          monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        }
+      } catch (e) {
+        return;
+      }
+      
+      if (!monthKey) return;
+      
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { planned: 0, actual: 0 };
+      }
+      
+      // Add estimated cost to planned
+      if (wo.estimated_cost) {
+        monthlyData[monthKey].planned += parseFloat(wo.estimated_cost) / 1000; // Convert to thousands
+      }
+      
+      // Add actual cost to actual (only if completed)
+      if (wo.actual_cost && wo.status?.toLowerCase() === 'completed') {
+        monthlyData[monthKey].actual += parseFloat(wo.actual_cost) / 1000; // Convert to thousands
+      }
+    });
+    
+    // Convert to array and sort by date
+    return Object.entries(monthlyData)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-12) // Last 12 months
+      .map(([key, data]) => {
+        // Format month as "Jan 2026"
+        const [year, month] = key.split('-');
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthName = monthNames[parseInt(month) - 1];
+        
+        return {
+          month: `${monthName} ${year.substring(2)}`,
+          planned: parseFloat(data.planned.toFixed(1)),
+          actual: parseFloat(data.actual.toFixed(1))
+        };
+      });
+  };
+  
+  const monthlySpendData = calculateMonthlySpend();
+
+  // Calculate Cost by Activity Type
+  const calculateCostByActivity = () => {
+    if (!maintenanceRecords || maintenanceRecords.length === 0) return [];
+    
+    const activityCosts: { [key: string]: number } = {};
+    
+    maintenanceRecords.forEach(wo => {
+      const activity = wo.maintenance_type || 'Unknown';
+      const cost = parseFloat(wo.actual_cost || wo.estimated_cost || '0');
+      
+      if (!activityCosts[activity]) {
+        activityCosts[activity] = 0;
+      }
+      
+      activityCosts[activity] += cost / 1000; // Convert to thousands
+    });
+    
+    // Convert to array and sort by cost (highest first)
+    return Object.entries(activityCosts)
+      .map(([activity, cost]) => ({
+        activity,
+        cost: parseFloat(cost.toFixed(1))
+      }))
+      .sort((a, b) => b.cost - a.cost);
+  };
+  
+  const costByActivityData = calculateCostByActivity();
+
+  function calculateDERUDrivers(comps: any[]) {
+    if (!comps || comps.length === 0) return [];
+    
+    // Group by component name
+    const grouped: { [key: string]: any[] } = {};
+    comps.forEach(c => {
+      const name = c.component_name || 'Unknown';
+      if (!grouped[name]) grouped[name] = [];
+      grouped[name].push(c);
+    });
+
+    return Object.entries(grouped).map(([name, items]) => {
+      const avgDegree = items.reduce((sum, i) => {
+        const degree = parseFloat(i.degree_value) || 0;
+        return sum + degree;
+      }, 0) / items.length;
+      
+      const avgExtent = items.reduce((sum, i) => {
+        const extent = parseFloat(i.extent_value) || 0;
+        return sum + extent;
+      }, 0) / items.length;
+      
+      const avgRelevancy = items.reduce((sum, i) => {
+        const relevancy = parseFloat(i.relevancy_value) || 0;
+        return sum + relevancy;
+      }, 0) / items.length;
+      
+      const avgCI = items.reduce((sum, i) => sum + (i.component_score || 0), 0) / items.length;
+      
+      return {
+        component: name,
+        avgDegree: avgDegree.toFixed(1),
+        avgExtent: avgExtent.toFixed(1),
+        avgRelevancy: avgRelevancy.toFixed(1),
+        impactOnCI: avgCI.toFixed(1),
+        count: items.length
+      };
+    }).sort((a, b) => parseFloat(a.impactOnCI) - parseFloat(b.impactOnCI)); // Sort by lowest CI (worst)
+  }
+
+  function calculateRegionalPerformance(assetList: any[]) {
+    const grouped: { [key: string]: any[] } = {};
+    assetList.forEach(a => {
+      const region = a.region || 'Unknown';
+      if (!grouped[region]) grouped[region] = [];
+      grouped[region].push(a);
+    });
+
+    return Object.entries(grouped).map(([region, items]) => {
+      const avgCI = items.reduce((sum, i) => sum + (i.latest_ci || 0), 0) / items.length;
+      const criticals = items.filter(i => (i.latest_ci || 0) < 40).length;
+      const totalCost = items.reduce((sum, i) => sum + (i.replacement_value || 0), 0);
+      
+      return {
+        region,
+        totalAssets: items.length,
+        avgCI: avgCI.toFixed(1),
+        criticals,
+        lifetimeCost: totalCost,
+        urgentItems: items.filter(i => (i.latest_deru || 0) >= 80).length
+      };
+    });
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 max-w-[1920px] mx-auto">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Welcome back, {user?.name}. Here's an overview of your road asset management system.
+      <div className="mb-6">
+        <h1 className="text-xl font-bold text-[#010D13]">Dashboard</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Network-wide asset condition and performance analytics
         </p>
       </div>
 
-      {/* Dashboard Tabs */}
-      <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+      {/* Global Filter Bar */}
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-gray-700 uppercase">Filters</h3>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={clearAllFilters}
+              className="text-xs h-7"
+            >
+              Clear All
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Date Range</label>
+              <Select value={dateRange} onValueChange={setDateRange}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="last30">Last 30 Days</SelectItem>
+                  <SelectItem value="last90">Last 90 Days</SelectItem>
+                  <SelectItem value="ytd">Year to Date</SelectItem>
+                  <SelectItem value="all">All Time</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Region</label>
+              <Select value={selectedRegion} onValueChange={setSelectedRegion}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Regions</SelectItem>
+                  {regions.map(r => (
+                    <SelectItem key={r} value={r}>{r}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Depot</label>
+              <Select value={selectedDepot} onValueChange={setSelectedDepot}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Depots</SelectItem>
+                  {depots.map(d => (
+                    <SelectItem key={d} value={d}>{d}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Asset Type</label>
+              <Select value={selectedAssetType} onValueChange={setSelectedAssetType}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {assetTypes.map(t => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">CI Band</label>
+              <Select value={selectedCIBand} onValueChange={setSelectedCIBand}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All CI Bands</SelectItem>
+                  <SelectItem value="Excellent">Excellent (80-100)</SelectItem>
+                  <SelectItem value="Good">Good (60-79)</SelectItem>
+                  <SelectItem value="Fair">Fair (40-59)</SelectItem>
+                  <SelectItem value="Poor">Poor (0-39)</SelectItem><SelectItem value="Not Inspected">Not Inspected</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Urgency</label>
+              <Select value={selectedUrgency} onValueChange={setSelectedUrgency}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Urgency</SelectItem>
+                  <SelectItem value="4">4 - Immediate action</SelectItem>
+                  <SelectItem value="3">3 - Repair (short term)</SelectItem>
+                  <SelectItem value="2">2 - Repair (long term)</SelectItem>
+                  <SelectItem value="1">1 - Routine maintenance</SelectItem>
+                  <SelectItem value="0">0 - Monitor only</SelectItem>
+                  <SelectItem value="R">R - Record only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tab Navigation */}
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="bg-white border-b w-full justify-start rounded-none">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="condition">Condition & DERU Analysis</TabsTrigger>
+          <TabsTrigger value="condition">Condition & DERU</TabsTrigger>
           <TabsTrigger value="maintenance">Maintenance & Costs</TabsTrigger>
-          <TabsTrigger value="regional">Regional & Activity</TabsTrigger>
+          <TabsTrigger value="regional">Regional Performance</TabsTrigger>
         </TabsList>
 
-        {/* ========== TAB 1: OVERVIEW ========== */}
-        <TabsContent value="overview" className="space-y-6 mt-6">
-          {/* Primary KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/assets')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
-            <Database className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.totalAssets || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats?.totalAssets > 0 ? (
-                <>
-                  <TrendingUp className="inline w-3 h-3 text-success" /> Active and managed
-                </>
-              ) : (
-                "Import assets to get started"
-              )}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/inspections')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Inspections This Month</CardTitle>
-            <ClipboardCheck className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{inspectionStats?.thisMonth || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {inspectionStats?.total > 0 ? (
-                <>
-                  <CheckCircle2 className="inline w-3 h-3 text-success" /> {inspectionStats?.total} total inspections
-                </>
-              ) : (
-                "No inspections yet"
-              )}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/maintenance?status=in_progress,scheduled')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Maintenance Tasks</CardTitle>
-            <Wrench className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {(maintenanceStats?.scheduled || 0) + (maintenanceStats?.inProgress || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {maintenanceStats?.completed > 0 ? (
-                <>
-                  <CheckCircle2 className="inline w-3 h-3 text-success" /> {maintenanceStats?.completed} completed
-                </>
-              ) : (
-                "No maintenance records"
-              )}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/assets?urgency=immediate')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Immediate Urgency</CardTitle>
-            <AlertCircle className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-destructive">
-              {stats?.criticalUrgency || inspectionStats?.criticalUrgency || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {(stats?.criticalUrgency || inspectionStats?.criticalUrgency || 0) > 0 ? (
-                <>
-                  <AlertCircle className="inline w-3 h-3 text-destructive" /> Requires immediate action
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="inline w-3 h-3 text-success" /> No immediate issues
-                </>
-              )}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* New Executive KPI Row - Overdue & Data Quality */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Overdue Inspections */}
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/assets?ciRange=not-inspected')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Overdue Inspections</CardTitle>
-            <Calendar className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-warning">
-              {stats?.uninspectedAssets || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {(stats?.uninspectedAssets || 0) > 0 ? (
-                <>
-                  <AlertCircle className="inline w-3 h-3 text-warning" /> Require rescheduling
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="inline w-3 h-3 text-success" /> All up to date
-                </>
-              )}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Data Quality Alerts */}
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/assets?dataQuality=true')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Data Quality Alerts</CardTitle>
-            <FileWarning className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-warning">
-              {dataQualityAlerts?.count || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {dataQualityAlerts?.count > 0 ? (
-                <>
-                  <AlertTriangle className="inline w-3 h-3 text-warning" /> Missing required data
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="inline w-3 h-3 text-success" /> Data quality good
-                </>
-              )}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Total Maintenance Cost */}
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => navigate('/maintenance')}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Total Maintenance Cost</CardTitle>
-            <Banknote className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-[#5DB32A]">
-              R {maintenanceStats?.totalCost ? (maintenanceStats.totalCost / 1000).toFixed(1) + 'k' : '0'}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {maintenanceStats?.totalCost > 0 ? (
-                <>
-                  <Banknote className="inline w-3 h-3 text-[#5DB32A]" /> All time expenditure
-                </>
-              ) : (
-                <>
-                  <Banknote className="inline w-3 h-3" /> No costs recorded
-                </>
-              )}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Overdue Maintenance */}
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onClick={() => {
-            // Navigate to maintenance page with filter for overdue
-            navigate('/maintenance?status=Overdue');
-          }}
-        >
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Overdue Maintenance</CardTitle>
-            <Clock className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-warning">
-              {maintenanceStats?.overdue || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {(maintenanceStats?.overdue || 0) > 0 ? (
-                <>
-                  <AlertTriangle className="inline w-3 h-3 text-warning" /> Flagged over 30 days ago
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="inline w-3 h-3 text-success" /> All on track
-                </>
-              )}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* DERU Inspection Analysis */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>DERU Inspection Analysis</CardTitle>
-              <CardDescription>Worst values across all components using DERU methodology (Degree, Extent, Relevancy, Urgency)</CardDescription>
-            </div>
-            <Select value={selectedDERUCategory} onValueChange={(v: any) => setSelectedDERUCategory(v)}>
-              <SelectTrigger className="w-[260px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="degree">D - Degree (Condition Severity)</SelectItem>
-                <SelectItem value="extent">E - Extent (How Widespread)</SelectItem>
-                <SelectItem value="relevancy">R - Relevancy (Functional Importance)</SelectItem>
-                <SelectItem value="urgency">U - Urgency (How Soon to Attend)</SelectItem>
-                <SelectItem value="ci">CI - Condition Index (Final)</SelectItem>
-              </SelectContent>
-            </Select>
+        {/* TAB 1: OVERVIEW */}
+        <TabsContent value="overview" className="space-y-4">
+          {/* KPI Cards Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <KPICard
+              label="Total Assets"
+              value={totalAssets}
+              subtitle="Across all regions"
+              leftBorderColor="#39AEDF"
+              onClick={() => navigate('/assets')}
+            />
+            <KPICard
+              label="Average CI"
+              value={avgCI.toFixed(1)}
+              subtitle={`↓ ${(100 - avgCI).toFixed(1)} to target`}
+              leftBorderColor="#5DB32A"
+              onClick={() => {}}
+            />
+            <KPICard
+              label="Critical CI"
+              value={criticalAssets}
+              subtitle="CI 0-39"
+              severity="critical"
+              leftBorderColor="#d4183d"
+              onClick={() => {}}
+            />
+            <KPICard
+              label="High Urgency"
+              value={highUrgencyAssets}
+              subtitle="Requires action now"
+              leftBorderColor="#F8D227"
+              onClick={() => {}}
+            />
+            <KPICard
+              label="Open Work Orders"
+              value={activeWorkOrders}
+              subtitle="In progress"
+              leftBorderColor="#455B5E"
+              onClick={() => navigate('/maintenance')}
+            />
+            <KPICard
+              label="Data Quality Issues"
+              value={dataQualityIssues}
+              subtitle="Missing/invalid data"
+              leftBorderColor="#94A3B8"
+              onClick={() => {}}
+            />
           </div>
-        </CardHeader>
-        <CardContent className="pt-3">
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]  min-w-0">
-            {/* Bar Chart - Asset Type Breakdown */}
-            <div className="w-full  min-w-0" style={{ minHeight: '300px' }}>
-              <h4 className="text-sm font-semibold mb-3">Breakdown by Asset Type</h4>
-              {hasDeruRows ? (
 
-
-
-              
-                <div className="w-full min-w-0" style={{ height: deruChartHeight }}>
-                  <div
-                    ref={deruBarRef}
-                    style={{ width: "100%", height: deruChartHeight }}
-                    className="min-w-0"
-                  >
-                    {Math.max(deruBarSize.width, 600) > 10 ? (
-                      <BarChart
-                        key={`deru-${selectedDERUCategory}-${Math.max(deruBarSize.width, 600)}x${deruChartHeight}`}
-                        width={Math.max(deruBarSize.width, 600)}
-                        height={deruChartHeight}
-                        data={deruNormalizedData}
-                        layout="vertical"
-                        margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} />
-                        <YAxis dataKey="name" type="category" width={120} />
-                        <Tooltip formatter={(v: any) => `${v}%`} />
-
-                        {selectedDERUCategory === "degree" && (
-                          <>
-                            <Bar dataKey="None (Good)" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="Good defects" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="Moderate defects" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="Major defects" stackId="a" fill="#d4183d" />
-                            <Bar dataKey="Unable to inspect" stackId="a" fill="#9E9E9E" />
-                            <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
-                          </>
-                        )}
-
-                        {selectedDERUCategory === "extent" && (
-                          <>
-                            <Bar dataKey="None" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="<10% affected" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="10-30% affected" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="30-60% affected" stackId="a" fill="#F57C00" />
-                            <Bar dataKey="Mostly affected (>60% affected)" stackId="a" fill="#d4183d" />
-                          </>
-                        )}
-
-                        {selectedDERUCategory === "relevancy" && (
-                          <>
-                            <Bar dataKey="None" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="Cosmetic" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="Local dysfunction" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="Moderate dysfunction" stackId="a" fill="#F57C00" />
-                            <Bar dataKey="Major dysfunction" stackId="a" fill="#d4183d" />
-                          </>
-                        )}
-
-                        {selectedDERUCategory === "urgency" && (
-                          <>
-                            <Bar dataKey="Monitor only" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="Routine maintenance" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="Repair within 10 years" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="Immediate action" stackId="a" fill="#d4183d" />
-                            <Bar dataKey="Not applicable" stackId="a" fill="#455B5E" />
-                          </>
-                        )}
-
-                        {selectedDERUCategory === "ci" && (
-                          <>
-                            <Bar dataKey="Excellent (80-100)" stackId="a" fill="#5DB32A" />
-                            <Bar dataKey="Good (60-79)" stackId="a" fill="#A8D96E" />
-                            <Bar dataKey="Fair (40-59)" stackId="a" fill="#F8D227" />
-                            <Bar dataKey="Poor (20-39)" stackId="a" fill="#F57C00" />
-                            <Bar dataKey="Critical (0-19)" stackId="a" fill="#d4183d" />
-                          </>
-                        )}
-                      </BarChart>
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-muted-foreground">
-                        Measuring chart…
-                      </div>
-                    )}
+          {/* Attention Required Module */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-bold uppercase">Attention Required</CardTitle>
+              <CardDescription className="text-xs">Critical items requiring immediate action</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="critical" className="w-full">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="critical" className="text-xs">Critical CI ({criticalAssets})</TabsTrigger>
+                  <TabsTrigger value="urgent" className="text-xs">High Urgency ({highUrgencyAssets})</TabsTrigger>
+                  <TabsTrigger value="cost" className="text-xs">High Cost</TabsTrigger>
+                  <TabsTrigger value="data" className="text-xs">Data Issues ({dataQualityIssues})</TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="critical">
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <AlertCard
+                      icon={<AlertCircle className="w-4 h-4 text-red-600" />}
+                      title="Critical Condition"
+                      count={criticalAssets}
+                      description="CI 0-39, immediate intervention required"
+                      bgColor="#FEF3F2"
+                      borderColor="#DC2626"
+                      actionButton={criticalAssets > 0 ? {
+                        label: "Allocate Work Orders",
+                        onClick: openBulkDialogCriticalCI,
+                        icon: <Wrench className="w-3 h-3 mr-1" />
+                      } : undefined}
+                    />
+                    <AlertCard
+                      icon={<AlertTriangle className="w-4 h-4 text-orange-600" />}
+                      title="Poor Condition"
+                      count={filteredAssets.filter(a => (a.latest_ci || 0) >= 20 && (a.latest_ci || 0) < 40).length}
+                      description="CI 20-39, monthly maintenance needed"
+                      bgColor="#FFF4ED"
+                      borderColor="#F97316"
+                      onClick={filteredAssets.filter(a => (a.latest_ci || 0) >= 20 && (a.latest_ci || 0) < 40).length > 0 ? openAssetListDialogPoorCondition : undefined}
+                    />
+                    <AlertCard
+                      icon={<Activity className="w-4 h-4 text-blue-600" />}
+                      title="Active Work Orders"
+                      count={activeWorkOrders}
+                      description="In progress this month"
+                      onClick={() => navigate('/maintenance')}
+                      bgColor="#F0F9FF"
+                      borderColor="#39AEDF"
+                    />
                   </div>
+                </TabsContent>
+
+                <TabsContent value="urgent">
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <AlertCard
+                      icon={<AlertCircle className="w-4 h-4 text-red-600" />}
+                      title="Immediate Action"
+                      count={highUrgencyAssets}
+                      description="Urgency 3-4, attend immediately"
+                      bgColor="#FEF3F2"
+                      borderColor="#F8D227"
+                      actionButton={highUrgencyAssets > 0 ? {
+                        label: "Allocate Work Orders",
+                        onClick: openBulkDialogHighUrgency,
+                        icon: <Wrench className="w-3 h-3 mr-1" />
+                      } : undefined}
+                    />
+                    <AlertCard
+                      icon={<ClipboardCheck className="w-4 h-4 text-orange-600" />}
+                      title="Scheduled Inspections"
+                      count={0}
+                      description="Due this month"
+                      bgColor="#FFF4ED"
+                      borderColor="#F97316"
+                    />
+                    <AlertCard
+                      icon={<Wrench className="w-4 h-4 text-yellow-600" />}
+                      title="Preventive Maintenance"
+                      count={0}
+                      description="Scheduled this quarter"
+                      bgColor="#FFFBEB"
+                      borderColor="#EAB308"
+                    />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="cost">
+                  <p className="text-sm text-gray-500">High cost asset analysis coming soon</p>
+                </TabsContent>
+
+                <TabsContent value="data">
+                  <div className="space-y-4">
+                    <p className="text-sm font-medium text-gray-700 mb-3">
+                      {dataQualityIssues} total data quality issues across {filteredAssets.length} assets
+                    </p>
+                    <div className="grid md:grid-cols-3 gap-3">
+                      <AlertCard
+                        icon={<MapPin className="w-4 h-4 text-blue-600" />}
+                        title="GPS Data Issues"
+                        count={gpsDataIssues}
+                        description="Missing or invalid coordinates"
+                        bgColor="#EFF6FF"
+                        borderColor="#3B82F6"
+                        onClick={gpsDataIssues > 0 ? openAssetListDialogGPSIssues : undefined}
+                      />
+                      <AlertCard
+                        icon={<ClipboardCheck className="w-4 h-4 text-orange-600" />}
+                        title="Inspection Issues"
+                        count={inspectionIntegrityIssues}
+                        description="Missing or incomplete inspections"
+                        bgColor="#FFF4ED"
+                        borderColor="#F97316"
+                        onClick={inspectionIntegrityIssues > 0 ? openAssetListDialogInspectionIssues : undefined}
+                      />
+                      <AlertCard
+                        icon={<ImageIcon className="w-4 h-4 text-purple-600" />}
+                        title="Photo Issues"
+                        count={photoIntegrityIssues}
+                        description="Missing main asset photos"
+                        bgColor="#FAF5FF"
+                        borderColor="#A855F7"
+                        onClick={photoIntegrityIssues > 0 ? openAssetListDialogPhotoIssues : undefined}
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+
+          {/* Top Hotspots & Network Map */}
+          <div className="grid lg:grid-cols-[300px_1fr] gap-4">
+            {/* Top Hotspots */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold uppercase">Top Hotspots by Region</CardTitle>
+                <CardDescription className="text-xs">Critical assets by network region</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {topHotspots.map((hotspot, idx) => (
+                  <div 
+                    key={idx}
+                    className="flex items-center justify-between p-2 border rounded hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setSelectedRegion(hotspot.region)}
+                  >
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{hotspot.region}</p>
+                      <p className="text-xs text-gray-500">{hotspot.criticals} critical assets</p>
+                    </div>
+                    <Badge 
+                      className="text-xs"
+                      style={{ backgroundColor: getCIColor(parseFloat(hotspot.avgCI)) }}
+                    >
+                      CI {hotspot.avgCI}
+                    </Badge>
+                  </div>
+                ))}
+                {topHotspots.length === 0 && (
+                  <p className="text-sm text-gray-500 text-center py-4">No data available</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Network Map */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-sm font-bold uppercase">Network Map (Interactive)</CardTitle>
+                    <CardDescription className="text-xs">Asset clusters by condition category</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => navigate('/map')}>
+                    <MapPin className="w-4 h-4 mr-2" />
+                    Open Full Map
+                  </Button>
                 </div>
-
-
-
-
-              ) : (
-                <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                  <p>No {selectedDERUCategory} data available</p>
+              </CardHeader>
+              <CardContent>
+                <div style={{ height: '400px' }}>
+                  <AssetMap 
+                    assets={filteredAssets.map(a => ({
+                      ...a,
+                      asset_id: a.id,
+                      asset_ref: a.asset_ref,
+                      asset_type: a.asset_type,
+                      latitude: a.latitude,
+                      longitude: a.longitude,
+                      ci_score: a.ci_score,
+                      urgency_score: a.urgency_score
+                    }))}
+                    onViewAsset={(asset) => navigate(`/assets/${asset.asset_id}`)}
+                  />
                 </div>
-              )}
-            </div>
+              </CardContent>
+            </Card>
+          </div>
 
-            {/* Pie Chart - Overall Distribution */}
-            <div>
-              <h4 className="text-sm font-semibold mb-3">Overall Distribution (All Assets)</h4>
-              {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 ? (
+          {/* Top 10 Worst Assets Table */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm font-bold uppercase">Top 10 Worst Assets</CardTitle>
+                  <CardDescription className="text-xs">Assets with lowest condition index scores</CardDescription>
+                </div>
+                <Button variant="link" size="sm">View all →</Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs uppercase bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Asset Ref</th>
+                      <th className="px-3 py-2 text-left">Type</th>
+                      <th className="px-3 py-2 text-left">Region</th>
+                      <th className="px-3 py-2 text-right">CI</th>
+                      <th className="px-3 py-2 text-left">Urgency</th>
+                      <th className="px-3 py-2 text-left">Last Inspection</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {worstAssets.map((asset, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{asset.asset_ref || 'N/A'}</td>
+                        <td className="px-3 py-2">{asset.asset_type || asset.type || asset.asset_type_name || 'N/A'}</td>
+                        <td className="px-3 py-2">{asset.region || 'N/A'}</td>
+                        <td className="px-3 py-2 text-right">
+                          <Badge style={{ backgroundColor: getCIColor(asset.latest_ci || 0) }}>
+                            {(asset.latest_ci || 0).toFixed(0)}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2">
+                          {(() => {
+                            const urgency = getAssetUrgency(asset);
+                            return urgency ? (
+                              <Badge 
+                                style={{ backgroundColor: getUrgencyColor(urgency) }}
+                                title={getUrgencyDescription(urgency)}
+                              >
+                                {getUrgencyLevel(urgency)}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline">N/A</Badge>
+                            );
+                          })()}
+                        </td>
+                        <td className="px-3 py-2 text-gray-600">
+                          {asset.latest_inspection_date || asset.last_inspection ? 
+                            new Date(asset.latest_inspection_date || asset.last_inspection).toLocaleDateString() : 
+                            'Not inspected'}
+                        </td>
+                        <td className="px-3 py-2">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => navigate(`/assets/${asset.asset_id || asset.id}`)}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* TAB 2: CONDITION & DERU */}
+        <TabsContent value="condition" className="space-y-4">
+          {/* CI Band Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {ciDistribution.map((band, idx) => (
+              <KPICard
+                key={idx}
+                label={band.name}
+                value={band.count}
+                subtitle={`${((band.count / totalAssets) * 100).toFixed(1)}% of assets`}
+                leftBorderColor={band.band === 'Not Inspected' ? getCIColor(null) : getCIColor(band.band === 'Excellent' ? 90 : band.band === 'Good' ? 70 : band.band === 'Fair' ? 50 : 30)}
+                onClick={() => setSelectedCIBand(band.band)}
+              />
+            ))}
+          </div>
+
+          {/* CI Distribution & Urgency Distribution Charts */}
+          <div className="grid lg:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold uppercase">Condition Index Distribution</CardTitle>
+                <CardDescription className="text-xs">Asset count per CI band</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={ciDistribution} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis type="number" />
+                    <YAxis dataKey="name" type="category" width={140} />
+                    <Tooltip 
+                      formatter={(value: any, name: any, props: any) => {
+                        const pct = ((value / totalAssets) * 100).toFixed(1);
+                        return [`${value} assets (${pct}%)`, props.payload.name];
+                      }}
+                    />
+                    <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                      {ciDistribution.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.band === 'Not Inspected' ? getCIColor(null) : getCIColor(entry.band === 'Excellent' ? 90 : entry.band === 'Good' ? 70 : entry.band === 'Fair' ? 50 : 30)} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold uppercase">DERU Urgency Distribution</CardTitle>
+                <CardDescription className="text-xs">Assets by urgency classification</CardDescription>
+              </CardHeader>
+              <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
                     <Pie
-                      data={(() => {
-                        // Aggregate all values across asset types
-                        const aggregated: any = {};
-                        deruData[selectedDERUCategory].forEach((item: any) => {
-                          Object.keys(item).forEach(key => {
-                            if (key !== 'name' && typeof item[key] === 'number') {
-                              aggregated[key] = (aggregated[key] || 0) + item[key];
-                            }
-                          });
-                        });
-                        return Object.entries(aggregated).map(([name, value]) => ({ name, value }));
-                      })()}
+                      data={urgencyDistribution}
                       cx="50%"
                       cy="50%"
                       labelLine={false}
-                      label={((entry: any) => {
-                        const aggregated: any = {};
-                        deruData[selectedDERUCategory].forEach((item: any) => {
-                          Object.keys(item).forEach(key => {
-                            if (key !== 'name' && typeof item[key] === 'number') {
-                              aggregated[key] = (aggregated[key] || 0) + item[key];
-                            }
-                          });
-                        });
-                        const total = Object.values(aggregated).reduce((sum: any, val: any) => sum + val, 0) as number;
-                        const pct = total > 0 ? ((entry.value / total) * 100) : 0;
-                        
-                        // Only show label if slice is large enough (>5%)
-                        if (pct < 5) return null;
-                        
-                        const RADIAN = Math.PI / 180;
-                        const radius = 70 + (110 - 70) / 2; // Middle of donut ring
-                        const x = entry.cx + radius * Math.cos(-entry.midAngle * RADIAN);
-                        const y = entry.cy + radius * Math.sin(-entry.midAngle * RADIAN);
-                        
-                        return (
-                          <text 
-                            x={x} 
-                            y={y} 
-                            fill="white" 
-                            textAnchor="middle" 
-                            dominantBaseline="middle"
-                            className="text-xs font-semibold"
-                            style={{ textShadow: '0 0 3px rgba(0,0,0,0.8)' }}
-                          >
-                            {pct.toFixed(1)}%
-                          </text>
-                        );
-                      })}
-                      innerRadius={70}
-                      outerRadius={110}
+                      label={(entry) => {
+                        const pct = ((entry.count / totalAssets) * 100).toFixed(1);
+                        if (parseFloat(pct) < 3) return null;
+                        return `${pct}%`;
+                      }}
+                      outerRadius={100}
                       fill="#8884d8"
-                      dataKey="value"
+                      dataKey="count"
                     >
-                      {Object.entries((() => {
-                        const aggregated: any = {};
-                        deruData[selectedDERUCategory].forEach((item: any) => {
-                          Object.keys(item).forEach(key => {
-                            if (key !== 'name' && typeof item[key] === 'number') {
-                              aggregated[key] = (aggregated[key] || 0) + item[key];
-                            }
-                          });
-                        });
-                        return aggregated;
-                      })()).map(([name], index) => {
-                        // Unified color map
-                        const colorMap: { [key: string]: string } = {
-                          'None (Good)': '#5DB32A',
-                          'Good defects': '#A8D96E',
-                          'Moderate defects': '#F8D227',
-                          'Major defects': '#d4183d',
-                          'Unable to inspect': '#9E9E9E',
-                          'Not applicable': '#455B5E',
-                          'None': '#5DB32A',
-                          '<10% affected': '#A8D96E',
-                          '10-30% affected': '#F8D227',
-                          '30-60% affected': '#F57C00',
-                          'Mostly affected (>60%)': '#d4183d',
-                          'Cosmetic': '#A8D96E',
-                          'Local dysfunction': '#F8D227',
-                          'Moderate dysfunction': '#F57C00',
-                          'Major dysfunction': '#d4183d',
-                          'Monitor only': '#5DB32A',
-                          'Routine maintenance': '#A8D96E',
-                          'Repair within 10 years': '#F8D227',
-                          'Immediate action': '#d4183d',
-                          'Excellent (80-100)': '#5DB32A',
-                          'Good (60-79)': '#A8D96E',
-                          'Fair (40-59)': '#F8D227',
-                          'Poor (20-39)': '#F57C00',
-                          'Critical (0-19)': '#d4183d',
-                        };
-                        return (
-                          <Cell key={`cell-${index}`} fill={colorMap[name] || COLORS[index % COLORS.length]} />
-                        );
-                      })}
+                      {urgencyDistribution.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={getUrgencyColor(entry.level)} />
+                      ))}
                     </Pie>
-                    <Tooltip formatter={(value: any, name: any) => {
-                      const aggregated: any = {};
-                      deruData[selectedDERUCategory].forEach((item: any) => {
-                        Object.keys(item).forEach(key => {
-                          if (key !== 'name' && typeof item[key] === 'number') {
-                            aggregated[key] = (aggregated[key] || 0) + item[key];
-                          }
-                        });
-                      });
-                      const total = Object.values(aggregated).reduce((sum: any, val: any) => sum + val, 0) as number;
-                      const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0';
-                      return [`${pct}% (${value} components)`, name];
-                    }} />
-                    {(() => {
-                      const result = (() => {
-                        // Calculate weighted average rating
-                        const aggregated: any = {};
-                        deruData[selectedDERUCategory].forEach((item: any) => {
-                          Object.keys(item).forEach(key => {
-                            if (key !== 'name' && typeof item[key] === 'number') {
-                              aggregated[key] = (aggregated[key] || 0) + item[key];
-                            }
-                          });
-                        });
-                        
-                        // Score maps (lower = better)
-                        const scoreMap: { [key: string]: { [key: string]: number } } = {
-                          degree: {
-                            'None (Good)': 1,
-                            'Good defects': 2,
-                            'Moderate defects': 3,
-                            'Major defects': 4
-                          },
-                          extent: {
-                            'None': 1,
-                            '<10% affected': 2,
-                            '10-30% affected': 3,
-                            '30-60% affected': 4,
-                            'Mostly affected (>60%)': 5
-                          },
-                          relevancy: {
-                            'None': 1,
-                            'Cosmetic': 2,
-                            'Local dysfunction': 3,
-                            'Moderate dysfunction': 4,
-                            'Major dysfunction': 5
-                          },
-                          urgency: {
-                            'Monitor only': 1,
-                            'Routine maintenance': 2,
-                            'Repair within 10 years': 3,
-                            'Immediate action': 4
-                          },
-                          ci: {
-                            'Excellent (80-100)': 1,
-                            'Good (60-79)': 2,
-                            'Fair (40-59)': 3,
-                            'Poor (20-39)': 4,
-                            'Critical (0-19)': 5
-                          }
-                        };
-                        
-                        const scores = scoreMap[selectedDERUCategory] || {};
-                        let weightedSum = 0;
-                        let totalWeight = 0;
-                        
-                        Object.entries(aggregated).forEach(([label, value]) => {
-                          if (scores[label] !== undefined) {
-                            weightedSum += scores[label] * (value as number);
-                            totalWeight += value as number;
-                          }
-                        });
-                        
-                        const avgNum = totalWeight > 0 ? (weightedSum / totalWeight) : 0;
-                        const avg = avgNum > 0 ? avgNum.toFixed(2) : 'N/A';
-                        
-                        // Determine status label and color based on average
-                        let statusLabel = '';
-                        let statusColor = '#010D13';
-                        
-                        if (selectedDERUCategory === 'degree') {
-                          if (avgNum <= 1.0) { statusLabel = 'Good overall'; statusColor = '#5DB32A'; }
-                          else if (avgNum <= 2.0) { statusLabel = 'Minor defects'; statusColor = '#A8D96E'; }
-                          else if (avgNum <= 2.9) { statusLabel = 'Moderate defects'; statusColor = '#F8D227'; }
-                          else { statusLabel = 'Major defects'; statusColor = '#d4183d'; }
-                        } else if (selectedDERUCategory === 'extent') {
-                          if (avgNum <= 1.5) { statusLabel = 'Isolated issues'; statusColor = '#5DB32A'; }
-                          else if (avgNum <= 2.5) { statusLabel = 'Localized issues'; statusColor = '#A8D96E'; }
-                          else if (avgNum <= 3.5) { statusLabel = 'Widespread issues'; statusColor = '#F8D227'; }
-                          else { statusLabel = 'Systemic failure'; statusColor = '#d4183d'; }
-                        } else if (selectedDERUCategory === 'relevancy') {
-                          if (avgNum <= 1.5) { statusLabel = 'Cosmetic'; statusColor = '#5DB32A'; }
-                          else if (avgNum <= 2.5) { statusLabel = 'Local dysfunctional'; statusColor = '#A8D96E'; }
-                          else if (avgNum <= 3.5) { statusLabel = 'Moderate dysfunctional'; statusColor = '#F8D227'; }
-                          else { statusLabel = 'Major dysfunctional'; statusColor = '#d4183d'; }
-                        } else if (selectedDERUCategory === 'urgency') {
-                          if (avgNum <= 1.5) { statusLabel = 'Monitor only'; statusColor = '#5DB32A'; }
-                          else if (avgNum <= 2.5) { statusLabel = 'Routine maintenance'; statusColor = '#A8D96E'; }
-                          else if (avgNum <= 3.5) { statusLabel = 'Repair within 10 years'; statusColor = '#F8D227'; }
-                          else { statusLabel = 'Immediate action'; statusColor = '#d4183d'; }
-                        } else if (selectedDERUCategory === 'ci') {
-                          // For CI, calculate actual CI value from bands
-                          const ciValue = totalWeight > 0 ? (() => {
-                            let ciSum = 0;
-                            let ciCount = 0;
-                            Object.entries(aggregated).forEach(([label, value]) => {
-                              if (label === 'Excellent (80-100)') { ciSum += 90 * (value as number); ciCount += value as number; }
-                              else if (label === 'Good (60-79)') { ciSum += 69.5 * (value as number); ciCount += value as number; }
-                              else if (label === 'Fair (40-59)') { ciSum += 49.5 * (value as number); ciCount += value as number; }
-                              else if (label === 'Poor (20-39)') { ciSum += 29.5 * (value as number); ciCount += value as number; }
-                              else if (label === 'Critical (0-19)') { ciSum += 9.5 * (value as number); ciCount += value as number; }
-                            });
-                            return ciCount > 0 ? (ciSum / ciCount).toFixed(1) : 'N/A';
-                          })() : 'N/A';
-                          
-                          // Determine CI status color
-                          const ciNum = parseFloat(ciValue);
-                          if (ciNum >= 80) statusColor = '#5DB32A';
-                          else if (ciNum >= 60) statusColor = '#A8D96E';
-                          else if (ciNum >= 40) statusColor = '#F8D227';
-                          else if (ciNum >= 20) statusColor = '#F57C00';
-                          else statusColor = '#d4183d';
-                          
-                          return { text: `Avg CI: ${ciValue}`, color: statusColor };
-                        }
-                        
-                        // For D/E/R/U: show only status label, no numeric value
-                        return { text: statusLabel, color: statusColor };
-                      })();
-                      
-                      // Render text with color (wrapping for long text)
-                      const text = result.text;
-                      const words = text.split(' ');
-                      const lines: string[] = [];
-                      let currentLine = '';
-                      
-                      // Wrap text: new line if current line exceeds 11 chars or word is >8 chars
-                      words.forEach((word, idx) => {
-                        if (word.length > 8 && currentLine.length > 0) {
-                          // Long word starts on new line
-                          lines.push(currentLine.trim());
-                          currentLine = word;
-                        } else if ((currentLine + ' ' + word).length > 11 && currentLine.length > 0) {
-                          // Line too long, wrap
-                          lines.push(currentLine.trim());
-                          currentLine = word;
-                        } else {
-                          // Add word to current line
-                          currentLine += (currentLine.length > 0 ? ' ' : '') + word;
-                        }
-                        
-                        // Last word
-                        if (idx === words.length - 1 && currentLine.length > 0) {
-                          lines.push(currentLine.trim());
-                        }
-                      });
-                      
-                      const lineHeight = 16;
-                      const startY = 50 - ((lines.length - 1) * lineHeight / 2);
-                      
-                      return (
-                        <>
-                          {lines.map((line, idx) => (
-                            <text 
-                              key={idx}
-                              x="50%" 
-                              y={`${startY + (idx * lineHeight)}%`} 
-                              textAnchor="middle" 
-                              dominantBaseline="middle" 
-                              className="text-sm font-bold" 
-                              fill={result.color}
-                            >
-                              {line}
-                            </text>
-                          ))}
-                        </>
-                      );
-                    })()}
+                    <Tooltip 
+                      formatter={(value: any, name: any, props: any) => {
+                        const pct = ((value / totalAssets) * 100).toFixed(1);
+                        return [`${value} assets (${pct}%)`, props.payload.name];
+                      }}
+                    />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36}
+                      formatter={(value: any, entry: any) => {
+                        return <span style={{ color: '#374151', fontSize: '12px' }}>{entry.payload.name}</span>;
+                      }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* DERU Component Drivers Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-bold uppercase">DERU Component Drivers</CardTitle>
+              <CardDescription className="text-xs">Top 10 component defects impacting condition scores</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {deruDrivers.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-500">No component data available</p>
+                  <p className="text-xs text-gray-400 mt-1">Component scores will appear here after inspections are conducted</p>
+                </div>
               ) : (
-                <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                  <p>No {selectedDERUCategory} data available</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-xs uppercase bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Component</th>
+                        <th className="px-3 py-2 text-right">Avg Degree</th>
+                        <th className="px-3 py-2 text-right">Avg Extent (%)</th>
+                        <th className="px-3 py-2 text-center">Relevancy</th>
+                        <th className="px-3 py-2 text-right">Avg CI Impact</th>
+                        <th className="px-3 py-2 text-right">Count</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {deruDrivers.slice(0, 10).map((driver, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{driver.component}</td>
+                          <td className="px-3 py-2 text-right">{driver.avgDegree}</td>
+                          <td className="px-3 py-2 text-right">{driver.avgExtent}%</td>
+                          <td className="px-3 py-2 text-center">
+                            <Badge 
+                              style={{ 
+                                backgroundColor: parseFloat(driver.avgRelevancy) >= 3 ? '#EF4444' : 
+                                                 parseFloat(driver.avgRelevancy) >= 2 ? '#F8D227' : '#5DB32A'
+                              }}
+                            >
+                              {parseFloat(driver.avgRelevancy) >= 3 ? 'HIGH' : parseFloat(driver.avgRelevancy) >= 2 ? 'MEDIUM' : 'LOW'}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <Badge style={{ backgroundColor: getCIColor(parseFloat(driver.impactOnCI)) }}>
+                              {driver.impactOnCI}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-600">{driver.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </div>
+            </CardContent>
+          </Card>
+
+          {/* Inspection Data Integrity */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-bold uppercase">Inspection Data Integrity</CardTitle>
+              <CardDescription className="text-xs">Data completeness and quality metrics</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid md:grid-cols-3 gap-3">
+                <KPICard
+                  label="Missing GPS Coordinates"
+                  value={missingGPS}
+                  subtitle={`${((missingGPS / totalAssets) * 100).toFixed(1)}% of assets`}
+                  leftBorderColor="#F8D227"
+                />
+                <KPICard
+                  label="Incomplete DERU Scores"
+                  value={incompleteDERU}
+                  subtitle={`${components.length > 0 ? ((incompleteDERU / components.length) * 100).toFixed(1) : 0}% of components`}
+                  leftBorderColor="#39AEDF"
+                />
+                <KPICard
+                  label="Overdue Inspections"
+                  value={overdueInspections}
+                  subtitle={`${((overdueInspections / totalAssets) * 100).toFixed(1)}% not inspected in 1yr`}
+                  leftBorderColor="#EF4444"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* TAB 3: MAINTENANCE & COSTS */}
+        <TabsContent value="maintenance" className="space-y-4">
+          {/* Work Order Pipeline */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KPICard
+              label="Scheduled"
+              value={maintenanceRecords.filter(wo => wo.status?.toLowerCase() === 'scheduled').length}
+              subtitle="Upcoming work"
+              leftBorderColor="#39AEDF"
+            />
+            <KPICard
+              label="In Progress"
+              value={maintenanceRecords.filter(wo => wo.status?.toLowerCase() === 'in progress').length}
+              subtitle="Active now"
+              leftBorderColor="#F8D227"
+            />
+            <KPICard
+              label="Overdue"
+              value={0}
+              subtitle="Past due date"
+              severity="critical"
+              leftBorderColor="#DC2626"
+            />
+            <KPICard
+              label="Completed YTD"
+              value={maintenanceRecords.filter(wo => wo.status?.toLowerCase() === 'completed').length}
+              subtitle="This year"
+              leftBorderColor="#5DB32A"
+            />
           </div>
-          
-          {/* Shared Legend */}
-          {deruData[selectedDERUCategory] && deruData[selectedDERUCategory].length > 0 && (
-            <div className="flex flex-wrap gap-4 justify-center mt-4 pt-3 border-t">
-              {(() => {
-                const legendItems: { [key: string]: Array<{ label: string; color: string }> } = {
-                  degree: [
-                    { label: 'None (Good)', color: '#5DB32A' },
-                    { label: 'Good defects', color: '#A8D96E' },
-                    { label: 'Moderate defects', color: '#F8D227' },
-                    { label: 'Major defects', color: '#d4183d' },
-                    { label: 'Unable to inspect', color: '#9E9E9E' },
-                    { label: 'Not applicable', color: '#455B5E' }
-                  ],
-                  extent: [
-                    { label: 'None', color: '#5DB32A' },
-                    { label: '<10% affected', color: '#A8D96E' },
-                    { label: '10-30% affected', color: '#F8D227' },
-                    { label: '30-60% affected', color: '#F57C00' },
-                    { label: 'Mostly affected (>60%)', color: '#d4183d' }
-                  ],
-                  relevancy: [
-                    { label: 'None', color: '#5DB32A' },
-                    { label: 'Cosmetic', color: '#A8D96E' },
-                    { label: 'Local dysfunction', color: '#F8D227' },
-                    { label: 'Moderate dysfunction', color: '#F57C00' },
-                    { label: 'Major dysfunction', color: '#d4183d' }
-                  ],
-                  urgency: [
-                    { label: 'Monitor only', color: '#5DB32A' },
-                    { label: 'Routine maintenance', color: '#A8D96E' },
-                    { label: 'Repair within 10 years', color: '#F8D227' },
-                    { label: 'Immediate action', color: '#d4183d' },
-                    { label: 'Not applicable', color: '#455B5E' }
-                  ],
-                  ci: [
-                    { label: 'Excellent (80-100)', color: '#5DB32A' },
-                    { label: 'Good (60-79)', color: '#A8D96E' },
-                    { label: 'Fair (40-59)', color: '#F8D227' },
-                    { label: 'Poor (20-39)', color: '#F57C00' },
-                    { label: 'Critical (0-19)', color: '#d4183d' }
-                  ]
-                };
-                
-                return legendItems[selectedDERUCategory]?.map((item) => (
-                  <div key={item.label} className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: item.color }} />
-                    <span className="text-xs text-muted-foreground">{item.label}</span>
-                  </div>
-                ));
-              })()}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-        </TabsContent>
 
-        {/* ========== TAB 2: CONDITION & DERU ANALYSIS ========== */}
-        <TabsContent value="condition" className="space-y-6 mt-6">
-      {/* Condition & Risk Overview Charts */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* CI Distribution Bar Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Condition Index Distribution</CardTitle>
-            <CardDescription>Overall asset condition (hover bars for asset type breakdown)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {ciTreemapData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart
-                  data={(() => {
-                    // Flatten and aggregate data by CI band
-                    const aggregated = ciTreemapData.flatMap((assetType: any) => 
-                      assetType.children.map((band: any) => ({
-                        ...band,
-                        assetType: assetType.name,
-                      }))
-                    ).reduce((acc: any[], item: any) => {
-                      const existing = acc.find(x => x.name === item.name);
-                      if (existing) {
-                        existing.size += item.size;
-                        existing.breakdown = existing.breakdown || [];
-                        existing.breakdown.push({ assetType: item.assetType, count: item.size });
-                      } else {
-                        acc.push({
-                          name: item.name,
-                          size: item.size,
-                          ci_band: item.ci_band,
-                          breakdown: [{ assetType: item.assetType, count: item.size }]
-                        });
-                      }
-                      return acc;
-                    }, []);
-                    
-                    // Sort by CI band order
-                    const order = ['Excellent', 'Good', 'Fair', 'Poor', 'Critical'];
-                    return aggregated.sort((a: any, b: any) => order.indexOf(a.name) - order.indexOf(b.name));
-                  })()}
-                  margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                  <XAxis 
-                    dataKey="name" 
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <YAxis 
-                    label={{ value: 'Number of Assets', angle: -90, position: 'insideLeft' }}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <Tooltip 
-                    content={(props: any) => {
-                      if (!props.active || !props.payload || !props.payload[0]) return null;
-                      const data = props.payload[0].payload;
+          {/* Charts */}
+          <div className="grid lg:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold uppercase">Monthly Maintenance Spend</CardTitle>
+                <CardDescription className="text-xs">Planned vs Actual (R Thousands)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={monthlySpendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip 
+                      formatter={(value: any) => `R ${value}k`}
+                      contentStyle={{ fontSize: '12px' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '12px' }} />
+                    <Line type="monotone" dataKey="planned" stroke="#39AEDF" name="Estimated" strokeWidth={2} />
+                    <Line type="monotone" dataKey="actual" stroke="#5DB32A" name="Actual" strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+                {monthlySpendData.length === 0 && (
+                  <p className="text-xs text-center text-gray-500 mt-2">No spend data available</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold uppercase">Cost by Activity Type</CardTitle>
+                <CardDescription className="text-xs">Where expenditure is highest (R Thousands)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={costByActivityData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="activity" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip 
+                      formatter={(value: any) => `R ${value}k`}
+                      contentStyle={{ fontSize: '12px' }}
+                    />
+                    <Bar dataKey="cost" fill="#F8D227" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+                {costByActivityData.length === 0 && (
+                  <p className="text-xs text-center text-gray-500 mt-2">No cost breakdown available</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Active Work Orders Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-bold uppercase">Active Work Orders</CardTitle>
+              <CardDescription className="text-xs">Current maintenance activities</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs uppercase bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Work Order #</th>
+                      <th className="px-3 py-2 text-left">Asset ID</th>
+                      <th className="px-3 py-2 text-left">Type</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                      <th className="px-3 py-2 text-right">Est. Cost</th>
+                      <th className="px-3 py-2 text-right">Actual Cost</th>
+                      <th className="px-3 py-2 text-left">Scheduled Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {maintenanceRecords.slice(0, 10).map((wo, idx) => {
+                      const statusColors = getStatusColor(wo.status);
                       return (
-                        <div className="bg-white p-3 border border-gray-300 rounded shadow-lg">
-                          <p className="font-bold text-sm mb-2">{data.name}</p>
-                          <p className="text-sm mb-2">Total: <strong>{data.size}</strong> assets</p>
-                          {data.breakdown && data.breakdown.length > 0 && (
-                            <>
-                              <div className="border-t pt-2 mt-2">
-                                <p className="text-xs text-gray-600 mb-1">Breakdown by type:</p>
-                                {data.breakdown.sort((a: any, b: any) => b.count - a.count).map((item: any, i: number) => (
-                                  <div key={i} className="text-xs flex justify-between gap-4">
-                                    <span className="text-gray-700">{item.assetType}:</span>
-                                    <span className="font-semibold">{item.count}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </>
-                          )}
-                        </div>
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{wo.work_order_number || wo.maintenance_id?.substring(0, 8) || 'N/A'}</td>
+                          <td className="px-3 py-2 text-xs">{wo.asset_id?.substring(0, 8) || 'N/A'}</td>
+                          <td className="px-3 py-2">{wo.maintenance_type || 'N/A'}</td>
+                          <td className="px-3 py-2">
+                            <span 
+                              className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border"
+                              style={{ 
+                                backgroundColor: statusColors.bg,
+                                color: statusColors.text,
+                                borderColor: statusColors.border
+                              }}
+                            >
+                              {wo.status || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {wo.estimated_cost ? `R ${parseFloat(wo.estimated_cost).toLocaleString()}` : 'N/A'}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {wo.actual_cost ? `R ${parseFloat(wo.actual_cost).toLocaleString()}` : '-'}
+                          </td>
+                          <td className="px-3 py-2">{wo.scheduled_date || 'N/A'}</td>
+                        </tr>
                       );
-                    }}
-                  />
-                  <Bar 
-                    dataKey="size" 
-                    radius={[8, 8, 0, 0]}
-                  >
-                    {(() => {
-                      // Flatten and aggregate data by CI band
-                      const aggregated = ciTreemapData.flatMap((assetType: any) => 
-                        assetType.children.map((band: any) => ({
-                          ...band,
-                          assetType: assetType.name,
-                        }))
-                      ).reduce((acc: any[], item: any) => {
-                        const existing = acc.find(x => x.name === item.name);
-                        if (existing) {
-                          existing.size += item.size;
-                          existing.breakdown = existing.breakdown || [];
-                          existing.breakdown.push({ assetType: item.assetType, count: item.size });
-                        } else {
-                          acc.push({
-                            name: item.name,
-                            size: item.size,
-                            ci_band: item.ci_band,
-                            breakdown: [{ assetType: item.assetType, count: item.size }]
-                          });
-                        }
-                        return acc;
-                      }, []);
-                      
-                      // Sort by CI band order
-                      const order = ['Excellent', 'Good', 'Fair', 'Poor', 'Critical'];
-                      return aggregated.sort((a: any, b: any) => order.indexOf(a.name) - order.indexOf(b.name)).map((entry: any, index: number) => (
-                        <Cell key={`cell-${index}`} fill={getCIColor(entry.ci_band)} />
-                      ));
-                    })()}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[400px] text-muted-foreground">
-                <div className="text-center">
-                  <BarChart3 className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                  <p>No CI distribution data available</p>
-                </div>
+                    })}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-        {/* Urgency Distribution */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Urgency Distribution</CardTitle>
-            <CardDescription>Urgency levels across all inspections (click bars to view details)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {urgencyChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={urgencyChartData} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        const urgencyLabel = data.label;
-                        const count = data.count;
-                        const percentage = urgencyChartData.length > 0 
-                          ? ((count / urgencyChartData.reduce((sum, item) => sum + item.count, 0)) * 100).toFixed(1)
-                          : 0;
-                        
-                        return (
-                          <div className="bg-white border border-gray-300 rounded-lg shadow-lg p-3">
-                            <p className="font-semibold text-sm mb-1">{urgencyLabel}</p>
-                            <p className="text-sm">
-                              <span className="font-bold">{count}</span> inspection{count !== 1 ? 's' : ''}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {percentage}% of total
-                            </p>
-                            <p className="text-xs text-primary mt-2">
-                              Click to view inspections →
-                            </p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Bar 
-                    dataKey="count" 
-                    cursor="pointer"
-                    radius={[8, 8, 0, 0]}
-                    onClick={(data) => {
-                      if (data && data.label) {
-                        navigate(`/inspections?urgency=${encodeURIComponent(data.label)}`);
-                      }
-                    }}
-                  >
-                    {urgencyChartData.map((entry, idx) => (
-                      <Cell 
-                        key={`u-${idx}`} 
-                        fill={URGENCY_COLORS[entry.label] || URGENCY_COLORS.Unknown}
-                        className="hover:opacity-80 transition-opacity"
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                <p>No urgency data available</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* CI Trend Over Time */}
-      <Card>
-        <CardHeader>
-          <CardTitle>CI Trend Over Time</CardTitle>
-          <CardDescription>Average condition index history</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {ciTrendData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={ciTrendData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip />
-                <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="avgCI" 
-                  name="Average CI"
-                  stroke="#39AEDF" 
-                  strokeWidth={3}
-                  dot={{ r: 5 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-              <p>Insufficient data for trend analysis. Complete more inspections over time.</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Breakdown Charts: Region & Asset Type */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Region Breakdown */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Breakdown by Region</CardTitle>
-            <CardDescription>Asset count per region</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {regionSummary.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={regionSummary} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" />
-                  <YAxis dataKey="name" type="category" width={150} />
-                  <Tooltip 
-                    formatter={(value: any) => [`${value} assets`, 'Count']}
-                    labelStyle={{ color: '#000' }}
-                  />
-                  <Bar dataKey="count" fill="#5DB32A" radius={[0, 4, 4, 0]}>
-                    {regionSummary.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                <p>No region data available</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Critical Alerts Panel */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Critical Alerts</CardTitle>
-            <CardDescription>Issues requiring immediate attention</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {criticalAlerts.length > 0 ? (
-              <div className="space-y-3 max-h-[300px] overflow-y-auto">
-                {criticalAlerts.map((alert, index) => (
-                  <div key={index} className="flex items-start gap-3 p-3 border rounded-lg border-destructive/30 bg-destructive/5">
-                    <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm">{alert.title || alert.message}</p>
-                      <p className="text-xs text-muted-foreground">{alert.description || alert.detail}</p>
-                      {alert.asset_ref && (
-                        <p className="text-xs font-mono mt-1">{alert.asset_ref}</p>
-                      )}
-                    </div>
-                    {alert.count && (
-                      <Badge variant="destructive" className="flex-shrink-0">
-                        {alert.count}
-                      </Badge>
-                    )}
+        {/* TAB 4: REGIONAL PERFORMANCE */}
+        <TabsContent value="regional" className="space-y-4">
+          {/* Region Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {regionalPerformance.slice(0, 4).map((region, idx) => (
+              <Card key={idx} className="cursor-pointer hover:shadow-md" onClick={() => setSelectedRegion(region.region)}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-medium uppercase text-gray-500">{region.region}</p>
+                    <Building2 className="w-4 h-4 text-gray-400" />
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground">
-                <CheckCircle2 className="w-12 h-12 mb-4 opacity-50 text-success" />
-                <p className="font-medium">No critical alerts</p>
-                <p className="text-sm">System is operating within normal parameters</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Top 10 Worst Assets by CI */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Top 10 Worst Assets</CardTitle>
-          <CardDescription>Assets with lowest CI scores requiring attention</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {worstAssets.length > 0 ? (
-            <div className="space-y-3">
-              {worstAssets.map((asset, index) => (
-                <div 
-                  key={asset.asset_id || index} 
-                  className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${asset.asset_id ? 'hover:bg-accent/50 cursor-pointer' : ''}`}
-                  onClick={() => asset.asset_id && navigate(`/assets/${asset.asset_id}`)}
-                >
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center font-bold text-sm">
-                    #{index + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{asset.asset_ref}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {asset.asset_type_name} • {asset.road_name || asset.road_number || 'Location N/A'}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <Badge variant="destructive" className="font-bold">
-                      CI: {asset.normalized_ci.toFixed(0)}
+                  <p className="text-lg font-bold mb-1">{region.totalAssets} Assets</p>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Badge style={{ backgroundColor: getCIColor(parseFloat(region.avgCI)) }}>
+                      CI {region.avgCI}
                     </Badge>
-                    {asset.replacement_value && (
-                      <span className="text-xs text-muted-foreground flex items-center gap-0.5">
-                        <Banknote className="w-3 h-3" />
-                        R {(asset.replacement_value / 1000).toFixed(0)}k
-                      </span>
-                    )}
+                    <span className="text-xs text-gray-600">{region.criticals} Critical</span>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-              <AlertCircle className="w-12 h-12 mb-4 opacity-50" />
-              <p>No assets with CI scores</p>
-              <p className="text-sm">Perform inspections to see assets ranked by condition</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-        </TabsContent>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
-        {/* ========== TAB 3: MAINTENANCE & COSTS ========== */}
-        <TabsContent value="maintenance" className="space-y-6 mt-6">
-      {/* Highest Cost Assets */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Highest Remedial Cost Assets */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Top 10 Highest Remedial Cost</CardTitle>
-            <CardDescription>Assets requiring most expensive repairs</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {highestCostAssets.length > 0 ? (
-              <div className="space-y-3">
-                {highestCostAssets.slice(0, 10).map((asset, index) => (
-                  <div 
-                    key={asset.asset_id || index} 
-                    className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${asset.asset_id ? 'hover:bg-accent/50 cursor-pointer' : ''}`}
-                    onClick={() => asset.asset_id && navigate(`/assets/${asset.asset_id}`)}
-                  >
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-warning/10 text-warning flex items-center justify-center font-bold text-sm">
-                      #{index + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{asset.asset_ref || 'Unknown'}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {asset.asset_type_name} • {asset.road_name || asset.road_number || 'Location N/A'}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <Badge variant="outline" className="font-bold text-warning border-warning">
-                        R {((asset.total_remedial_cost || asset.remedial_cost || 0) / 1000).toFixed(0)}k
-                      </Badge>
-                      {asset.latest_ci !== null && asset.latest_ci !== undefined && (
-                        <span className="text-xs text-muted-foreground">
-                          CI: {Math.min(Math.max(asset.latest_ci, 0), 100).toFixed(0)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-                <Banknote className="w-12 h-12 mb-4 opacity-50" />
-                <p>No remedial cost data</p>
-                <p className="text-sm">Complete inspections to see repair cost estimates</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-        </TabsContent>
-
-        {/* ========== TAB 4: REGIONAL & ACTIVITY ========== */}
-        <TabsContent value="regional" className="space-y-6 mt-6">
-      {/* Regional & Asset Type Distribution */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Asset Distribution by Type */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Asset Distribution by Type</CardTitle>
-            <CardDescription>Breakdown of assets by category</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {assetTypeChartData.length > 0 ? (
+          {/* Region Comparison Chart */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-bold uppercase">Regional Asset Distribution</CardTitle>
+              <CardDescription className="text-xs">Asset counts and condition category across regions</CardDescription>
+            </CardHeader>
+            <CardContent>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart 
-                  data={assetTypeChartData}
-                  layout="vertical"
-                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                >
+                <BarChart data={regionalPerformance}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" allowDecimals={false} />
-                  <YAxis dataKey="name" type="category" />
-                  <Tooltip 
-                    formatter={(v: any) => [`${v} assets`, "Count"]} 
-                    labelStyle={{ color: "#000" }} 
-                  />
-                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                    {assetTypeChartData.map((_, idx) => (
-                      <Cell key={`a-${idx}`} fill={COLORS[idx % COLORS.length]} />
-                    ))}
-                  </Bar>
+                  <XAxis dataKey="region" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="totalAssets" fill="#39AEDF" name="Total Assets" />
+                  <Bar dataKey="criticals" fill="#d4183d" name="Critical" />
                 </BarChart>
               </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                <p>No asset data available</p>
+            </CardContent>
+          </Card>
+
+          {/* Region Performance Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-bold uppercase">Regional Performance Summary</CardTitle>
+              <CardDescription className="text-xs">Comparative analysis across network regions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs uppercase bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Region</th>
+                      <th className="px-3 py-2 text-right">Total Assets</th>
+                      <th className="px-3 py-2 text-right">Avg CI</th>
+                      <th className="px-3 py-2 text-right">Criticals</th>
+                      <th className="px-3 py-2 text-right">Urgent Items</th>
+                      <th className="px-3 py-2 text-right">Lifetime Cost</th>
+                      <th className="px-3 py-2 text-center">Trend</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {regionalPerformance.map((region, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{region.region}</td>
+                        <td className="px-3 py-2 text-right">{region.totalAssets}</td>
+                        <td className="px-3 py-2 text-right">
+                          <Badge style={{ backgroundColor: getCIColor(parseFloat(region.avgCI)) }}>
+                            {region.avgCI}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2 text-right">{region.criticals}</td>
+                        <td className="px-3 py-2 text-right">{region.urgentItems}</td>
+                        <td className="px-3 py-2 text-right">R {region.lifetimeCost.toLocaleString()}</td>
+                        <td className="px-3 py-2 text-center">
+                          <TrendingUp className="w-4 h-4 text-gray-400 mx-auto" />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Activity */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
-            <CardDescription>Latest updates and actions in the system</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {recentActivity.length > 0 ? (
-              <div className="space-y-4">
-                {recentActivity.map((activity, index) => (
-                  <div key={index} className="flex items-start gap-4 pb-4 border-b last:border-0">
-                    <div className={`w-2 h-2 rounded-full mt-2 ${activity.color.replace("text-", "bg-")}`}></div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium">{activity.action}</p>
-                      <p className="text-sm text-muted-foreground">{activity.detail}</p>
-                    </div>
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">{activity.time}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-                <Activity className="w-12 h-12 mb-4 opacity-50" />
-                <p>No recent activity</p>
-                <p className="text-sm">Import assets and create inspections to see activity here</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Asset Condition Overview & Quick Actions */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Asset Condition */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Asset Condition Overview</CardTitle>
-            <CardDescription>Current state of all managed assets (hover bars for asset type breakdown)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart 
-                data={(() => {
-                  // Flatten and aggregate data by CI band from ciTreemapData
-                  if (!ciTreemapData || ciTreemapData.length === 0) return [];
-                  
-                  const aggregated = ciTreemapData.flatMap((assetType: any) => 
-                    assetType.children.map((band: any) => ({
-                      ...band,
-                      assetType: assetType.name,
-                    }))
-                  ).reduce((acc: any[], item: any) => {
-                    const existing = acc.find(x => x.name === item.name);
-                    if (existing) {
-                      existing.value += item.size;
-                      existing.breakdown = existing.breakdown || [];
-                      existing.breakdown.push({ assetType: item.assetType, count: item.size });
-                    } else {
-                      acc.push({
-                        name: item.name,
-                        value: item.size,
-                        ci_band: item.ci_band,
-                        breakdown: [{ assetType: item.assetType, count: item.size }]
-                      });
-                    }
-                    return acc;
-                  }, []);
-                  
-                  // Sort by CI band order
-                  const order = ['Excellent', 'Good', 'Fair', 'Poor', 'Critical'];
-                  return aggregated.sort((a: any, b: any) => order.indexOf(a.name) - order.indexOf(b.name));
-                })()} 
-                layout="vertical"
-                margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                <XAxis type="number" tick={{ fontSize: 12 }} />
-                <YAxis dataKey="name" type="category" width={80} tick={{ fontSize: 12 }} />
-                <Tooltip 
-                  content={(props: any) => {
-                    if (!props.active || !props.payload || !props.payload[0]) return null;
-                    const data = props.payload[0].payload;
-                    return (
-                      <div className="bg-white p-3 border border-gray-300 rounded shadow-lg">
-                        <p className="font-bold text-sm mb-2">{data.name}</p>
-                        <p className="text-sm mb-2">Total: <strong>{data.value}</strong> assets</p>
-                        {data.breakdown && data.breakdown.length > 0 && (
-                          <>
-                            <div className="border-t pt-2 mt-2">
-                              <p className="text-xs text-gray-600 mb-1">Breakdown by type:</p>
-                              {data.breakdown.sort((a: any, b: any) => b.count - a.count).map((item: any, i: number) => (
-                                <div key={i} className="text-xs flex justify-between gap-4">
-                                  <span className="text-gray-700">{item.assetType}:</span>
-                                  <span className="font-semibold">{item.count}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    );
-                  }}
-                />
-                <Bar dataKey="value" radius={[0, 8, 8, 0]}>
-                  {(() => {
-                    // Flatten and aggregate data by CI band from ciTreemapData
-                    if (!ciTreemapData || ciTreemapData.length === 0) return [];
-                    
-                    const aggregated = ciTreemapData.flatMap((assetType: any) => 
-                      assetType.children.map((band: any) => ({
-                        ...band,
-                        assetType: assetType.name,
-                      }))
-                    ).reduce((acc: any[], item: any) => {
-                      const existing = acc.find(x => x.name === item.name);
-                      if (existing) {
-                        existing.value += item.size;
-                        existing.breakdown = existing.breakdown || [];
-                        existing.breakdown.push({ assetType: item.assetType, count: item.size });
-                      } else {
-                        acc.push({
-                          name: item.name,
-                          value: item.size,
-                          ci_band: item.ci_band,
-                          breakdown: [{ assetType: item.assetType, count: item.size }]
-                        });
-                      }
-                      return acc;
-                    }, []);
-                    
-                    // Sort by CI band order
-                    const order = ['Excellent', 'Good', 'Fair', 'Poor', 'Critical'];
-                    return aggregated.sort((a: any, b: any) => order.indexOf(a.name) - order.indexOf(b.name)).map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={getCIColor(entry.ci_band)} />
-                    ));
-                  })()}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-            <CardDescription>Common tasks and shortcuts</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Link to="/assets">
-              <Button variant="outline" className="w-full justify-start">
-                <Database className="w-4 h-4 mr-2" />
-                Add New Asset
-              </Button>
-            </Link>
-            <Link to="/inspections/new">
-              <Button variant="outline" className="w-full justify-start">
-                <ClipboardCheck className="w-4 h-4 mr-2" />
-                Schedule Inspection
-              </Button>
-            </Link>
-            <Link to="/maintenance/new">
-              <Button variant="outline" className="w-full justify-start">
-                <Wrench className="w-4 h-4 mr-2" />
-                Log Maintenance
-              </Button>
-            </Link>
-            <Link to="/map">
-              <Button variant="outline" className="w-full justify-start">
-                <MapPin className="w-4 h-4 mr-2" />
-                View GIS Map
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Bulk Work Order Dialog */}
+      <BulkWorkOrderDialog
+        open={bulkDialogOpen}
+        onOpenChange={setBulkDialogOpen}
+        preFilteredAssets={bulkDialogAssets}
+        filterDescription={bulkDialogDescription}
+        onSuccess={() => {
+          // Reload dashboard data after successful work order creation
+          loadAllData();
+        }}
+      />
+
+      {/* Asset List Dialog - for viewing/managing assets */}
+      <AssetListDialog
+        open={assetListDialogOpen}
+        onOpenChange={setAssetListDialogOpen}
+        assets={assetListDialogAssets}
+        title={assetListDialogTitle}
+        onAssetDeleted={() => {
+          // Reload dashboard data after asset deletion
+          loadAllData();
+          setAssetListDialogOpen(false);
+        }}
+      />
     </div>
   );
 }
-
-// Custom content for Treemap
-const CustomTreemapContent = ({ colors }: { colors: (bandName: string) => string }) => {
-  return (
-    <div className="flex flex-col items-center justify-center h-full w-full">
-      <p className="text-sm font-bold text-white">Asset Type</p>
-      <p className="text-xs text-white">CI Band</p>
-    </div>
-  );
-};

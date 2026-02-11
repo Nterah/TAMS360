@@ -623,8 +623,22 @@ export default function ReportsPage() {
           // Fetch photos for each asset
           const assetsWithPhotos = await Promise.all(
             assets.map(async (asset: any) => {
+              // Validate asset_id before fetching photos
+              const assetId = asset.asset_id;
+              if (!assetId || assetId === 'undefined') {
+                console.log('[Photos] Skipping asset with invalid ID:', asset.asset_ref);
+                return { ...asset, photos: [] };
+              }
+
+              // Validate assetId is a UUID
+              const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              if (!uuidRegex.test(assetId)) {
+                console.log('[Photos] Skipping asset with invalid UUID format:', asset.asset_ref);
+                return { ...asset, photos: [] };
+              }
+
               try {
-                const photosRes = await fetch(`${API_URL}/assets/${asset.asset_id}/photos`, {
+                const photosRes = await fetch(`${API_URL}/assets/${assetId}/photos`, {
                   headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
                 });
                 
@@ -718,7 +732,7 @@ export default function ReportsPage() {
             chainage_km: asset.km_marker || '-',
             condition_index: asset.latest_ci || '-',
             urgency_category: asset.latest_urgency || '-',
-            coordinates: asset.latitude && asset.longitude ? `${asset.latitude.toFixed(6)}, ${asset.longitude.toFixed(6)}` : '-',
+            coordinates: asset.gps_lat && asset.gps_lng ? `${Number(asset.gps_lat).toFixed(6)}, ${Number(asset.gps_lng).toFixed(6)}` : '-',
             description: asset.description || asset.asset_type_name || '-',
           }));
           

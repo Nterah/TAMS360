@@ -84,6 +84,15 @@ const getCIBadge = (ci?: number) => {
   return { label: 'Poor', color: '#EF4444', bgColor: '#EF444420' };
 };
 
+// Helper function to get CI color for clusters
+const getCIColor = (ci?: number) => {
+  if (ci === undefined || ci === null) return '#94A3B8'; // Not Inspected - Grey
+  if (ci >= 80) return '#5DB32A'; // Excellent - Green
+  if (ci >= 60) return '#39AEDF'; // Good - Blue
+  if (ci >= 40) return '#F8D227'; // Fair - Yellow
+  return '#EF4444'; // Poor - Red
+};
+
 interface AssetMapProps {
   assets: Asset[];
   onViewAsset?: (asset: Asset) => void;
@@ -138,10 +147,11 @@ export function AssetMap({
 
     mapRef.current = map;
 
-    // Add tile layer
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
+    // Add satellite tile layer (Google Satellite)
+    L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      attribution: '&copy; Google',
+      maxZoom: 20,
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
     }).addTo(map);
 
     // Create marker cluster group
@@ -152,10 +162,22 @@ export function AssetMap({
       showCoverageOnHover: false,
       iconCreateFunction: (cluster) => {
         const count = cluster.getChildCount();
+        // Calculate average CI from all assets in cluster
+        const markers = cluster.getAllChildMarkers();
+        const ciValues = markers
+          .map(marker => (marker.options as any).asset?.latest_ci)
+          .filter(ci => ci !== undefined && ci !== null);
+        
+        const avgCI = ciValues.length > 0 
+          ? ciValues.reduce((sum, ci) => sum + ci, 0) / ciValues.length 
+          : undefined;
+        
+        const color = getCIColor(avgCI);
+        
         return L.divIcon({
           html: `
             <div style="
-              background-color: #39AEDF;
+              background-color: ${color};
               color: white;
               border-radius: 50%;
               width: 40px;
@@ -207,6 +229,7 @@ export function AssetMap({
 
       const marker = L.marker([lat, lng], {
         icon: createCustomIcon(asset.asset_type, asset.latest_ci),
+        asset: asset // Store asset data in marker options
       });
 
       // Create popup content as a DOM element
@@ -301,12 +324,45 @@ export function AssetMap({
       markerCluster.addLayer(marker);
     });
 
-    // Fit bounds if we have markers
+    // Fit bounds if we have markers - handle outliers by using padding and max zoom
     if (assetsWithGPS.length > 0) {
-      const bounds = L.latLngBounds(
-        assetsWithGPS.map(asset => [asset.gps_lat || asset.gps_latitude || asset.latitude!, asset.gps_lng || asset.gps_longitude || asset.longitude!])
-      );
-      mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+      const latLngs = assetsWithGPS.map(asset => {
+        const lat = asset.gps_lat || asset.gps_latitude || asset.latitude!;
+        const lng = asset.gps_lng || asset.gps_longitude || asset.longitude!;
+        return [lat, lng] as [number, number];
+      });
+      
+      // Calculate bounds
+      const bounds = L.latLngBounds(latLngs);
+      
+      // If there are potential outliers (very spread out data), adjust bounds
+      // by removing extreme outliers (beyond 3 std deviations)
+      if (latLngs.length > 10) {
+        const lats = latLngs.map(([lat]) => lat);
+        const lngs = latLngs.map(([, lng]) => lng);
+        
+        const avgLat = lats.reduce((sum, v) => sum + v, 0) / lats.length;
+        const avgLng = lngs.reduce((sum, v) => sum + v, 0) / lngs.length;
+        
+        const stdLat = Math.sqrt(lats.reduce((sum, v) => sum + Math.pow(v - avgLat, 2), 0) / lats.length);
+        const stdLng = Math.sqrt(lngs.reduce((sum, v) => sum + Math.pow(v - avgLng, 2), 0) / lngs.length);
+        
+        // Filter out outliers (beyond 2.5 standard deviations)
+        const filtered = latLngs.filter(([lat, lng]) => 
+          Math.abs(lat - avgLat) <= 2.5 * stdLat && 
+          Math.abs(lng - avgLng) <= 2.5 * stdLng
+        );
+        
+        // Use filtered bounds if we have enough points remaining
+        if (filtered.length > latLngs.length * 0.7) {
+          const adjustedBounds = L.latLngBounds(filtered);
+          mapRef.current.fitBounds(adjustedBounds, { padding: [50, 50], maxZoom: 13 });
+        } else {
+          mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 13 });
+        }
+      } else {
+        mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 13 });
+      }
     }
   }, [assets, onViewAsset]);
 
@@ -326,6 +382,38 @@ export function AssetMap({
             <span className="text-sm font-medium text-[#010D13]">
               {assetsWithGPS.length} {assetsWithGPS.length === 1 ? 'Asset' : 'Assets'} on Map
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* CI Legend */}
+      {assetsWithGPS.length > 0 && (
+        <div className="absolute top-20 right-4 bg-white rounded shadow-md p-2.5 z-[1000] border border-gray-300" style={{ minWidth: '150px' }}>
+          <h4 className="text-[10px] font-semibold text-gray-700 mb-1.5" style={{ letterSpacing: '0.02em' }}>
+            Condition Index (CI)
+          </h4>
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full border border-gray-300" style={{ backgroundColor: '#5DB32A' }}></div>
+              <span className="text-[10px] text-gray-600">80-100 (Excellent)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full border border-gray-300" style={{ backgroundColor: '#39AEDF' }}></div>
+              <span className="text-[10px] text-gray-600">60-79 (Good)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full border border-gray-300" style={{ backgroundColor: '#F8D227' }}></div>
+              <span className="text-[10px] text-gray-600">40-59 (Fair)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full border border-gray-300" style={{ backgroundColor: '#EF4444' }}></div>
+              <span className="text-[10px] text-gray-600">0-39 (Poor)</span>
+            </div>
+            <div className="pt-0.5 border-t border-gray-200"></div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full border border-gray-300" style={{ backgroundColor: '#94A3B8' }}></div>
+              <span className="text-[10px] text-gray-500 italic">Not Inspected</span>
+            </div>
           </div>
         </div>
       )}

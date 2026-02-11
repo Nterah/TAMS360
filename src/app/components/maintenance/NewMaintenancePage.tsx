@@ -32,7 +32,8 @@ export default function NewMaintenancePage() {
     scheduled_date: "",
     completed_date: "",
     technician_name: user?.name || "",
-    cost: "",
+    estimated_cost: "",
+    actual_cost: "",
     status: "Scheduled",
     description: "",
     work_performed: "",
@@ -48,6 +49,9 @@ export default function NewMaintenancePage() {
     // If inspection_id is provided, fetch inspection details
     if (inspectionIdFromUrl) {
       fetchInspectionDetails(inspectionIdFromUrl);
+    } else if (assetIdFromUrl) {
+      // If only asset_id is provided (not from inspection), show confirmation
+      toast.info("Asset pre-selected for maintenance record");
     }
   }, []);
 
@@ -76,7 +80,7 @@ export default function NewMaintenancePage() {
             : inspData.calculated_urgency === "3" || inspData.calculated_urgency === "High"
             ? "Corrective"
             : "Preventive",
-          cost: inspData.total_remedial_cost?.toString() || "",
+          estimated_cost: inspData.total_remedial_cost?.toString() || "",
           notes: `Linked to Inspection ID: ${inspectionId}\nCI Score: ${inspData.conditional_index || 'N/A'}\nUrgency: ${inspData.calculated_urgency || 'N/A'}`,
         }));
         
@@ -145,7 +149,8 @@ export default function NewMaintenancePage() {
         },
         body: JSON.stringify({
           ...formData,
-          cost: formData.cost ? parseFloat(formData.cost) : null,
+          estimated_cost: formData.estimated_cost ? parseFloat(formData.estimated_cost) : null,
+          actual_cost: formData.actual_cost ? parseFloat(formData.actual_cost) : null,
           logged_by: user?.id,
         }),
       });
@@ -294,15 +299,28 @@ export default function NewMaintenancePage() {
               />
             </div>
 
-            <div className="space-y-2 md:col-span-2">
-              <Label>Cost (R)</Label>
+            <div className="space-y-2">
+              <Label>Estimated Cost (R)</Label>
               <Input
                 type="number"
                 step="0.01"
-                value={formData.cost}
-                onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
+                value={formData.estimated_cost}
+                onChange={(e) => setFormData({ ...formData, estimated_cost: e.target.value })}
                 placeholder="0.00"
               />
+              <p className="text-xs text-muted-foreground">Planned/budgeted cost for this work</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Actual Cost (R)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={formData.actual_cost}
+                onChange={(e) => setFormData({ ...formData, actual_cost: e.target.value })}
+                placeholder="0.00"
+              />
+              <p className="text-xs text-muted-foreground">Final cost after work completion</p>
             </div>
           </div>
 

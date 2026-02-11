@@ -86,6 +86,13 @@ export default function AssetDetailPage() {
 
   const fetchAssetInspections = async () => {
     try {
+      // Validate assetId before making the request
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!assetId || !uuidRegex.test(assetId)) {
+        console.log('[Inspections] Invalid asset ID, skipping inspection fetch');
+        return;
+      }
+
       const response = await fetch(`${API_URL}/assets/${assetId}/inspections`, {
         headers: {
           Authorization: `Bearer ${accessToken || publicAnonKey}`,
@@ -103,6 +110,13 @@ export default function AssetDetailPage() {
 
   const fetchAssetMaintenance = async () => {
     try {
+      // Validate assetId before making the request
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!assetId || !uuidRegex.test(assetId)) {
+        console.log('[Maintenance] Invalid asset ID, skipping maintenance fetch');
+        return;
+      }
+
       const response = await fetch(`${API_URL}/assets/${assetId}/maintenance`, {
         headers: {
           Authorization: `Bearer ${accessToken || publicAnonKey}`,
@@ -119,6 +133,19 @@ export default function AssetDetailPage() {
   };
 
   const fetchAssetPhotos = async () => {
+    // Don't fetch if assetId is invalid
+    if (!assetId) {
+      console.log('[Photos] No asset ID provided, skipping photo fetch');
+      return;
+    }
+
+    // Validate assetId is a UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(assetId)) {
+      console.log('[Photos] Invalid asset ID format, skipping photo fetch');
+      return;
+    }
+
     try {
       console.log(`[Photos] Fetching photos for asset ${assetId}...`);
       console.log(`[Photos] Asset ref: ${asset?.asset_ref || 'unknown'}`);
@@ -177,11 +204,12 @@ export default function AssetDetailPage() {
     if (ci === null || ci === undefined) {
       return <Badge variant="outline">No CI</Badge>;
     }
-    const normalizedCI = Math.min(Math.max(ci, 0), 100);
-    if (normalizedCI >= 80) return <Badge className="bg-[#5DB32A]">Excellent ({normalizedCI})</Badge>;
-    if (normalizedCI >= 60) return <Badge className="bg-[#39AEDF]">Good ({normalizedCI})</Badge>;
+    // Ensure CI is a number and handle 0 properly
+    const normalizedCI = Math.min(Math.max(Number(ci), 0), 100);
+    if (normalizedCI >= 80) return <Badge className="bg-[#5DB32A] text-white">Excellent ({normalizedCI})</Badge>;
+    if (normalizedCI >= 60) return <Badge className="bg-[#39AEDF] text-white">Good ({normalizedCI})</Badge>;
     if (normalizedCI >= 40) return <Badge className="bg-[#F8D227] text-black">Fair ({normalizedCI})</Badge>;
-    return <Badge variant="destructive">Poor ({normalizedCI})</Badge>;
+    return <Badge className="bg-[#d4183d] text-white">Poor ({normalizedCI})</Badge>;
   };
 
   const getUrgencyBadge = (urgency: any) => {
@@ -398,7 +426,7 @@ export default function AssetDetailPage() {
                   Latitude
                 </p>
                 <p className="font-medium font-mono text-sm">
-                  {asset.latitude ? asset.latitude.toFixed(6) : "N/A"}
+                  {asset.gps_lat ? Number(asset.gps_lat).toFixed(6) : "N/A"}
                 </p>
               </div>
               <div>
@@ -407,7 +435,7 @@ export default function AssetDetailPage() {
                   Longitude
                 </p>
                 <p className="font-medium font-mono text-sm">
-                  {asset.longitude ? asset.longitude.toFixed(6) : "N/A"}
+                  {asset.gps_lng ? Number(asset.gps_lng).toFixed(6) : "N/A"}
                 </p>
               </div>
             </div>
@@ -533,7 +561,7 @@ export default function AssetDetailPage() {
                 {maintenance.length} maintenance record{maintenance.length !== 1 ? 's' : ''}
               </CardDescription>
             </div>
-            <Link to={`/maintenance/new?assetId=${assetId}`}>
+            <Link to={`/maintenance/new?asset_id=${assetId}`}>
               <Button size="sm">
                 <Wrench className="w-4 h-4 mr-2" />
                 Log Maintenance

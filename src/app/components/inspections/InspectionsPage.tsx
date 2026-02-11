@@ -4,7 +4,7 @@ import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { ClipboardCheck, Plus, Calendar, User, FileText, AlertTriangle, TrendingUp, MoreVertical, Eye, Edit, Trash2, Clock, Banknote, Filter, X, LayoutGrid, Table as TableIcon, Search } from "lucide-react";
+import { ClipboardCheck, Plus, Calendar, User, FileText, AlertTriangle, TrendingUp, MoreVertical, Eye, Edit, Trash2, Clock, Banknote, Filter, X, LayoutGrid, Table as TableIcon, Search, Pencil } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator } from "../ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Label } from "../ui/label";
@@ -528,10 +528,10 @@ export default function InspectionsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[160px]">Actions</TableHead>
                   {columns.filter(col => col.visible).map(col => (
                     <TableHead key={col.id}>{col.label}</TableHead>
                   ))}
-                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -544,6 +544,37 @@ export default function InspectionsPage() {
                   
                   return (
                     <TableRow key={inspection.inspection_id}>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => navigate(`/inspections/${inspection.inspection_id}`)}
+                            className="h-8 w-8 p-0"
+                            title="View details"
+                          >
+                            <Eye className="h-4 w-4 text-blue-600" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => navigate(`/inspections/${inspection.inspection_id}/edit`)}
+                            className="h-8 w-8 p-0"
+                            title="Edit inspection"
+                          >
+                            <Pencil className="h-4 w-4 text-gray-600" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleDeleteInspection(inspection.inspection_id)}
+                            className="h-8 w-8 p-0"
+                            title="Delete inspection"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                          </Button>
+                        </div>
+                      </TableCell>
                       {columns.find(c => c.id === "asset_ref")?.visible && (
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2">
@@ -606,38 +637,6 @@ export default function InspectionsPage() {
                           {inspection.finding_summary || "—"}
                         </TableCell>
                       )}
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => navigate(`/inspections/${inspection.inspection_id}`)}
-                          >
-                            <Eye className="w-4 h-4 mr-1" />
-                            View
-                          </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => navigate(`/inspections/${inspection.inspection_id}/edit`)}>
-                                <Edit className="h-4 w-4 mr-2" />
-                                Update
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={() => handleDeleteInspection(inspection.inspection_id)}
-                                className="text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </TableCell>
                     </TableRow>
                   );
                 })}

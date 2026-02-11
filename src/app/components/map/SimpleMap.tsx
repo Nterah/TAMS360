@@ -185,6 +185,19 @@ export function SimpleMap({
 
   // Fetch photos for an asset
   const fetchAssetPhotos = async (assetId: string, accessToken: string) => {
+    // Validate assetId before fetching
+    if (!assetId || assetId === 'undefined') {
+      console.log('[Photos] No valid asset ID provided, skipping photo fetch');
+      return [];
+    }
+
+    // Validate assetId is a UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(assetId)) {
+      console.log('[Photos] Invalid asset ID format, skipping photo fetch');
+      return [];
+    }
+
     if (photoCache[assetId]) {
       return photoCache[assetId];
     }
@@ -211,6 +224,13 @@ export function SimpleMap({
   // Fetch latest inspection for an asset to get repair cost
   const fetchLatestInspection = async (assetId: string, accessToken: string) => {
     try {
+      // Validate assetId before making the request
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!assetId || !uuidRegex.test(assetId)) {
+        console.log('[SimpleMap] Invalid asset ID, skipping inspection fetch');
+        return null;
+      }
+
       const response = await fetch(`${API_URL}/assets/${assetId}/inspections?limit=1`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,

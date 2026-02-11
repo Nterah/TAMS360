@@ -2755,9 +2755,9 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     }
 
     const page = parseInt(c.req.query("page") || "1");
-    // Cap pageSize at 100 to prevent timeouts
+    // Allow larger page sizes for dashboard (up to 5000)
     const requestedPageSize = parseInt(c.req.query("pageSize") || "100");
-    const pageSize = Math.min(requestedPageSize, 100);
+    const pageSize = Math.min(requestedPageSize, 5000);
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
@@ -3312,6 +3312,19 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
     const assetId = c.req.param("id");
     console.log(`[PHOTOS] Fetching photos for asset ID: ${assetId}`);
 
+    // Validate assetId format
+    if (!assetId || assetId === 'undefined' || assetId === 'null') {
+      console.error(`[PHOTOS] Invalid asset ID received: ${assetId}`);
+      return c.json({ error: "Invalid asset ID" }, 400);
+    }
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(assetId)) {
+      console.error(`[PHOTOS] Asset ID is not a valid UUID: ${assetId}`);
+      return c.json({ error: "Asset ID must be a valid UUID" }, 400);
+    }
+
     // Get user profile for tenant_id
     const { data: userProfile, error: profileError } = await supabase
       .from("tams360_user_profiles_v")
@@ -3336,7 +3349,12 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
 
     if (assetError) {
       console.error(`[PHOTOS] Database error checking asset: ${assetId}`, assetError);
-      return c.json({ error: "Database error" }, 500);
+      return c.json({ 
+        error: "Database error", 
+        details: assetError.message || String(assetError),
+        code: assetError.code,
+        hint: assetError.hint
+      }, 500);
     }
     
     if (!asset) {
@@ -3764,6 +3782,13 @@ app.get("/make-server-c894a9ff/assets/:id/inspections", async (c) => {
 
     const assetId = c.req.param("id");
     
+    // Validate assetId is a valid UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!assetId || assetId === 'undefined' || !uuidRegex.test(assetId)) {
+      console.error(`[Inspections] Invalid asset ID received: ${assetId}`);
+      return c.json({ error: "Invalid asset ID format" }, 400);
+    }
+    
     // Use public view filtered by asset_id and tenant_id
     const { data: inspections, error } = await supabase
       .from("tams360_inspections_v")
@@ -3858,7 +3883,7 @@ app.post("/make-server-c894a9ff/maintenance", async (c) => {
         status: finalStatus,
         description: maintenance.description,
         notes: maintenance.notes,
-        estimated_cost: maintenance.cost || null,
+        estimated_cost: maintenance.estimated_cost || null,
         actual_cost: maintenance.actual_cost || null,
         created_by: userData.user.id,
       })
@@ -3884,6 +3909,96 @@ app.post("/make-server-c894a9ff/maintenance", async (c) => {
   } catch (error) {
     console.error("Error creating maintenance record:", error);
     return c.json({ error: "Failed to create maintenance record" }, 500);
+  }
+});
+
+// Bulk create maintenance records
+app.post("/make-server-c894a9ff/maintenance/bulk", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(
+      accessToken,
+    );
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    // Get user profile from Postgres view to retrieve tenant_id
+    const { data: userProfile, error: profileError } = await supabase
+      .from('tams360_user_profiles_v')
+      .select('id, tenant_id, role')
+      .eq('id', userData.user.id)
+      .single();
+
+    if (profileError || !userProfile || !userProfile.tenant_id) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
+    const bulkData = await c.req.json();
+    const { asset_ids, maintenance_type, scheduled_date, technician_name, estimated_cost, description, notes, status } = bulkData;
+
+    if (!asset_ids || !Array.isArray(asset_ids) || asset_ids.length === 0) {
+      return c.json({ error: "asset_ids array is required" }, 400);
+    }
+
+    if (!maintenance_type) {
+      return c.json({ error: "maintenance_type is required" }, 400);
+    }
+
+    if (!scheduled_date) {
+      return c.json({ error: "scheduled_date is required" }, 400);
+    }
+
+    // Validate scheduled date is in the future
+    const scheduledDateObj = new Date(scheduled_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (scheduledDateObj < today) {
+      return c.json({ error: "Scheduled date cannot be in the past" }, 400);
+    }
+
+    // Prepare records for bulk insert
+    const records = asset_ids.map(asset_id => ({
+      asset_id,
+      tenant_id: userProfile.tenant_id,
+      maintenance_type,
+      scheduled_date,
+      technician_name: technician_name || null,
+      estimated_cost: estimated_cost || null,
+      actual_cost: null,
+      status: status || "Scheduled",
+      description: description || null,
+      notes: notes || null,
+      created_by: userData.user.id,
+    }));
+
+    // Insert all records in one transaction
+    const { data: insertedRecords, error } = await supabase
+      .from("maintenance_records")
+      .insert(records)
+      .select();
+
+    if (error) {
+      console.error("❌ [Supabase] Error creating bulk maintenance records:", JSON.stringify(error, null, 2));
+      return c.json({ error: "Failed to create bulk maintenance records", details: error.message }, 500);
+    }
+
+    console.log(`✅ Created ${insertedRecords?.length || 0} maintenance records`);
+
+    return c.json({ 
+      success: true, 
+      count: insertedRecords?.length || 0,
+      records: insertedRecords 
+    });
+  } catch (error) {
+    console.error("Error creating bulk maintenance records:", error);
+    return c.json({ error: "Failed to create bulk maintenance records" }, 500);
   }
 });
 
@@ -7788,6 +7903,19 @@ const listPhotosHandler = async (c: any) => {
   try {
     const assetId = c.req.param("assetId");
     
+    // Validate assetId format
+    if (!assetId || assetId === 'undefined' || assetId === 'null') {
+      console.error(`[PHOTOS] Invalid asset ID received in listPhotosHandler: ${assetId}`);
+      return c.json({ error: "Invalid asset ID" }, 400);
+    }
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(assetId)) {
+      console.error(`[PHOTOS] Asset ID is not a valid UUID in listPhotosHandler: ${assetId}`);
+      return c.json({ error: "Asset ID must be a valid UUID" }, 400);
+    }
+    
     // Get auth token to validate user
     const authHeader = c.req.header("Authorization");
     const token = getBearerToken(authHeader);
@@ -7808,7 +7936,15 @@ const listPhotosHandler = async (c: any) => {
       .eq("asset_id", assetId)
       .order("photo_number");
 
-    if (error) return c.json({ error: error.message }, 500);
+    if (error) {
+      console.error(`[PHOTOS] Database error fetching photos for asset ${assetId}:`, error);
+      return c.json({ 
+        error: error.message || "Database error",
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      }, 500);
+    }
     
     // Generate signed URLs for each photo
     const photosWithUrls = await Promise.all(
@@ -7842,7 +7978,12 @@ const listPhotosHandler = async (c: any) => {
 
     return c.json({ photos: photosWithUrls });
   } catch (error: any) {
-    return c.json({ error: error?.message || "Unknown error" }, 500);
+    console.error('[PHOTOS] Unexpected error in listPhotosHandler:', error);
+    return c.json({ 
+      error: error?.message || "Unknown error",
+      details: String(error),
+      code: error?.code
+    }, 500);
   }
 };
 
@@ -7878,7 +8019,15 @@ const listPhotosByRefHandler = async (c: any) => {
       .eq("tenant_id", tenantId)
       .order("photo_number");
 
-    if (error) return c.json({ error: error.message }, 500);
+    if (error) {
+      console.error(`[PHOTOS] Database error fetching photos for asset_ref ${assetRef}:`, error);
+      return c.json({ 
+        error: error.message || "Database error",
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      }, 500);
+    }
     
     // Generate signed URLs for each photo
     const photosWithUrls = await Promise.all(
@@ -7912,7 +8061,12 @@ const listPhotosByRefHandler = async (c: any) => {
 
     return c.json({ photos: photosWithUrls });
   } catch (error: any) {
-    return c.json({ error: error?.message || "Unknown error" }, 500);
+    console.error('[PHOTOS] Unexpected error in listPhotosByRefHandler:', error);
+    return c.json({ 
+      error: error?.message || "Unknown error",
+      details: String(error),
+      code: error?.code
+    }, 500);
   }
 };
 

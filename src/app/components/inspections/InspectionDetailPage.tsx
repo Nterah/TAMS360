@@ -66,6 +66,19 @@ export default function InspectionDetailPage() {
   }, [inspection?.asset_type_name]);
 
   const fetchAssetPhotos = async (assetId: string) => {
+    // Validate assetId before fetching
+    if (!assetId) {
+      console.log('[Photos] No asset ID provided, skipping photo fetch');
+      return;
+    }
+
+    // Validate assetId is a UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(assetId)) {
+      console.log('[Photos] Invalid asset ID format, skipping photo fetch');
+      return;
+    }
+
     try {
       console.log(`[Photos] Fetching photos for asset ${assetId}...`);
       

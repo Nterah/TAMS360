@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { Wrench, Plus, TrendingUp, Calendar, User, Filter, X, Banknote, LayoutGrid, Table as TableIcon, Eye, Edit, Trash2, MoreVertical, Search } from "lucide-react";
+import { Wrench, Plus, TrendingUp, Calendar, User, Filter, X, Banknote, LayoutGrid, Table as TableIcon, Eye, Edit, Trash2, MoreVertical, Search, Pencil } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Label } from "../ui/label";
@@ -139,6 +139,17 @@ export default function MaintenancePage() {
     }
   };
 
+  // Color-coded status styling for work orders
+  const getStatusColors = (status: string) => {
+    const normalizedStatus = (status || '').toLowerCase().trim();
+    if (normalizedStatus === 'scheduled') return { bg: '#E0F2FE', text: '#0369A1', border: '#39AEDF' }; // Blue
+    if (normalizedStatus === 'in_progress' || normalizedStatus === 'in progress') return { bg: '#FEF3C7', text: '#92400E', border: '#F8D227' }; // Yellow
+    if (normalizedStatus === 'completed') return { bg: '#D1FAE5', text: '#065F46', border: '#5DB32A' }; // Green
+    if (normalizedStatus === 'cancelled' || normalizedStatus === 'canceled') return { bg: '#F3F4F6', text: '#4B5563', border: '#94A3B8' }; // Grey
+    if (normalizedStatus === 'overdue') return { bg: '#FEE2E2', text: '#991B1B', border: '#DC2626' }; // Red
+    return { bg: '#F3F4F6', text: '#4B5563', border: '#94A3B8' }; // Default grey
+  };
+
   // Filter logic
   const filteredRecords = maintenanceRecords.filter((record) => {
     // Search term filter
@@ -194,6 +205,42 @@ export default function MaintenancePage() {
     (filterAssetType !== "all" ? 1 : 0) +
     (filterTechnician !== "all" ? 1 : 0) +
     (filterPriority !== "all" ? 1 : 0);
+
+  const handleEditMaintenance = (maintenanceId: string) => {
+    // Implement edit logic here
+    toast.info("Edit functionality is not yet implemented.");
+  };
+
+  const handleDeleteMaintenance = (maintenanceId: string) => {
+    // Implement delete logic here
+    toast.info("Delete functionality is not yet implemented.");
+  };
+
+  const handleDeleteWorkOrder = async (workOrderId: string) => {
+    if (!confirm("Are you sure you want to delete this work order? This action cannot be undone.")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/maintenance/${workOrderId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      if (response.ok) {
+        toast.success("Work order deleted successfully");
+        fetchMaintenanceRecords(); // Refresh the list
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || "Failed to delete work order");
+      }
+    } catch (error) {
+      console.error("Error deleting work order:", error);
+      toast.error("An error occurred while deleting the work order");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -428,15 +475,46 @@ export default function MaintenancePage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[160px]">Actions</TableHead>
                   {columns.filter(col => col.visible).map(col => (
                     <TableHead key={col.id}>{col.label}</TableHead>
                   ))}
-                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredRecords.slice(0, 50).map((maintenance) => (
                   <TableRow key={maintenance.maintenance_id}>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => navigate(`/maintenance/${maintenance.maintenance_id}`)}
+                          className="h-8 w-8 p-0"
+                          title="View details"
+                        >
+                          <Eye className="h-4 w-4 text-blue-600" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => handleEditMaintenance(maintenance.maintenance_id)}
+                          className="h-8 w-8 p-0"
+                          title="Edit maintenance"
+                        >
+                          <Pencil className="h-4 w-4 text-gray-600" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => handleDeleteWorkOrder(maintenance.maintenance_id)}
+                          className="h-8 w-8 p-0"
+                          title="Delete maintenance"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </div>
+                    </TableCell>
                     {columns.find(c => c.id === "asset_ref")?.visible && (
                       <TableCell className="font-medium">{maintenance.asset_ref || "Unknown"}</TableCell>
                     )}
@@ -452,9 +530,21 @@ export default function MaintenancePage() {
                     )}
                     {columns.find(c => c.id === "status")?.visible && (
                       <TableCell>
-                        <Badge variant={getStatusVariant(maintenance.status)}>
-                          {maintenance.status}
-                        </Badge>
+                        {(() => {
+                          const colors = getStatusColors(maintenance.status);
+                          return (
+                            <span 
+                              className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border"
+                              style={{ 
+                                backgroundColor: colors.bg,
+                                color: colors.text,
+                                borderColor: colors.border
+                              }}
+                            >
+                              {maintenance.status}
+                            </span>
+                          );
+                        })()}
                       </TableCell>
                     )}
                     {columns.find(c => c.id === "technician_name")?.visible && (
@@ -479,35 +569,6 @@ export default function MaintenancePage() {
                         {maintenance.description || "—"}
                       </TableCell>
                     )}
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => navigate(`/maintenance/${maintenance.maintenance_id}`)}
-                        >
-                          <Eye className="w-4 h-4 mr-1" />
-                          View
-                        </Button>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => {/* Handle edit */}}>
-                              <Edit className="h-4 w-4 mr-2" />
-                              Update
-                            </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive" onClick={() => {/* Handle delete */}}>
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -524,9 +585,21 @@ export default function MaintenancePage() {
                         <h4 className="font-semibold">{maintenance.asset_ref || "Unknown Asset"}</h4>
                         <p className="text-sm text-muted-foreground">{maintenance.maintenance_type}</p>
                       </div>
-                      <Badge variant={getStatusVariant(maintenance.status)}>
-                        {maintenance.status}
-                      </Badge>
+                      {(() => {
+                        const colors = getStatusColors(maintenance.status);
+                        return (
+                          <span 
+                            className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border"
+                            style={{ 
+                              backgroundColor: colors.bg,
+                              color: colors.text,
+                              borderColor: colors.border
+                            }}
+                          >
+                            {maintenance.status}
+                          </span>
+                        );
+                      })()}
                     </div>
                     {maintenance.description && (
                       <p className="text-sm">{maintenance.description}</p>
@@ -568,11 +641,15 @@ export default function MaintenancePage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => {/* Handle edit */}}>
+                        <DropdownMenuItem onClick={() => navigate(`/maintenance/${maintenance.maintenance_id}`)}>
+                          <Eye className="h-4 w-4 mr-2" />
+                          View
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate(`/maintenance/${maintenance.maintenance_id}`)}>
                           <Edit className="h-4 w-4 mr-2" />
                           Update
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive" onClick={() => {/* Handle delete */}}>
+                        <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteMaintenance(maintenance.maintenance_id)}>
                           <Trash2 className="h-4 w-4 mr-2" />
                           Delete
                         </DropdownMenuItem>

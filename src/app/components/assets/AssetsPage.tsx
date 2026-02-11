@@ -4,7 +4,7 @@ import { AuthContext } from "../../App";
 import { 
   Plus, Search, LayoutGrid, List, Download, Upload, Settings2, Filter, 
   Database, MapPin, TrendingUp, CheckCircle2, AlertTriangle, Clock, 
-  Banknote, Eye, Edit, Trash2, MoreVertical, X, TableIcon
+  Banknote, Eye, Edit, Trash2, MoreVertical, X, TableIcon, Pencil
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../ui/button";
@@ -751,10 +751,10 @@ export default function AssetsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[160px]">Actions</TableHead>
                   {columns.filter(col => col.visible).map(col => (
                     <TableHead key={col.id}>{col.label}</TableHead>
                   ))}
-                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -762,6 +762,37 @@ export default function AssetsPage() {
                   const ciBadge = getCIBadge(asset.latest_ci);
                   return (
                     <TableRow key={`${asset.asset_id}-${index}`}>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleViewAsset(asset.asset_id)}
+                            className="h-8 w-8 p-0"
+                            title="View details"
+                          >
+                            <Eye className="h-4 w-4 text-blue-600" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleEditAsset(asset.asset_id)}
+                            className="h-8 w-8 p-0"
+                            title="Edit asset"
+                          >
+                            <Pencil className="h-4 w-4 text-gray-600" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleDeleteAsset(asset.asset_id)}
+                            className="h-8 w-8 p-0"
+                            title="Delete asset"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                          </Button>
+                        </div>
+                      </TableCell>
                       {columns.find(c => c.id === "asset_ref")?.visible && (
                         <TableCell className="font-medium">{asset.asset_ref || "N/A"}</TableCell>
                       )}
@@ -804,15 +835,37 @@ export default function AssetsPage() {
                           {asset.latest_urgency ? (
                             <Badge
                               variant={
-                                asset.latest_urgency === "4" || asset.latest_urgency === "Immediate"
+                                asset.latest_urgency === "4"
                                   ? "destructive"
-                                  : asset.latest_urgency === "3" || asset.latest_urgency === "High"
+                                  : asset.latest_urgency === "3"
                                   ? "default"
-                                  : asset.latest_urgency === "2" || asset.latest_urgency === "Medium"
+                                  : asset.latest_urgency === "2"
                                   ? "secondary"
-                                  : asset.latest_urgency === "1" || asset.latest_urgency === "Low" || asset.latest_urgency === "0"
+                                  : asset.latest_urgency === "1" || asset.latest_urgency === "0"
+                                  ? "outline"
+                                  : asset.latest_urgency === "R"
                                   ? "outline"
                                   : "outline"
+                              }
+                              style={{
+                                backgroundColor: 
+                                  asset.latest_urgency === "4" ? "#d4183d" :
+                                  asset.latest_urgency === "3" ? "#F8D227" :
+                                  asset.latest_urgency === "2" ? "#F8D227" :
+                                  asset.latest_urgency === "1" ? "#39AEDF" :
+                                  asset.latest_urgency === "0" ? "#5DB32A" :
+                                  asset.latest_urgency === "R" ? "#94A3B8" :
+                                  undefined,
+                                color: "white"
+                              }}
+                              title={
+                                asset.latest_urgency === "4" ? "Immediate action" :
+                                asset.latest_urgency === "3" ? "Repair (short term)" :
+                                asset.latest_urgency === "2" ? "Repair (long term)" :
+                                asset.latest_urgency === "1" ? "Routine maintenance" :
+                                asset.latest_urgency === "0" ? "Monitor only" :
+                                asset.latest_urgency === "R" ? "Record only" :
+                                "Not assessed"
                               }
                             >
                               {asset.latest_urgency}
@@ -875,38 +928,6 @@ export default function AssetsPage() {
                       {columns.find(c => c.id === "owner")?.visible && (
                         <TableCell>{asset.owned_by || "—"}</TableCell>
                       )}
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleViewAsset(asset.asset_id)}
-                          >
-                            <Eye className="w-4 h-4 mr-1" />
-                            View
-                          </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleEditAsset(asset.asset_id)}>
-                                <Edit className="h-4 w-4 mr-2" />
-                                Update
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={() => handleDeleteAsset(asset.asset_id)}
-                                className="text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </TableCell>
                     </TableRow>
                   );
                 })}

@@ -383,6 +383,23 @@ export default function GISMapPage() {
   };
 
   const fetchPhotosForSelectedAsset = async (assetId: string) => {
+    // Validate assetId before fetching
+    if (!assetId || assetId === 'undefined') {
+      console.log('[Photos] No valid asset ID provided, skipping photo fetch');
+      setSelectedAssetPhotos([]);
+      setLoadingPhotos(false);
+      return;
+    }
+
+    // Validate assetId is a UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(assetId)) {
+      console.log('[Photos] Invalid asset ID format, skipping photo fetch');
+      setSelectedAssetPhotos([]);
+      setLoadingPhotos(false);
+      return;
+    }
+
     setLoadingPhotos(true);
     try {
       const response = await fetch(`${API_URL}/assets/${assetId}/photos`, {
