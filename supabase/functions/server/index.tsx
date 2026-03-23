@@ -6351,15 +6351,15 @@ app.post("/make-server-c894a9ff/inspections", async (c) => {
     const inspection = await c.req.json();
 
     // Prepare calculation metadata
-    const ci_value = inspection.ci || inspection.ci_final || inspection.conditional_index;
+    const ci_value = inspection.ci ?? inspection.ci_final ?? inspection.conditional_index ?? null;
     const calculationMetadata = {
-      ci_health: inspection.conditional_index,
-      ci_safety: inspection.ci_safety,
+      ci_health: inspection.ci_health ?? null,
+      ci_safety: inspection.ci_safety ?? null,
       ci_final: ci_value,
-      degree: inspection.degree,
-      extent: inspection.extent,
-      relevancy: inspection.relevancy,
-      worst_urgency: inspection.calculated_urgency,
+      degree: inspection.degree ?? null,
+      extent: inspection.extent ?? null,
+      relevancy: inspection.relevancy ?? null,
+      worst_urgency: inspection.calculated_urgency ?? null,
       component_count: inspection.component_scores?.length || 0,
     };
 
@@ -7016,19 +7016,18 @@ app.put("/make-server-c894a9ff/inspections/:id", async (c) => {
     const inspection = await c.req.json();
 
     // Prepare calculation metadata
+    const ciValue = inspection.ci ?? inspection.ci_final ?? inspection.conditional_index ?? null;
+    
     const calculationMetadata = {
-      ci_health: inspection.conditional_index,
-      ci_safety: inspection.ci_safety,
-      ci_final: inspection.ci || inspection.ci_final || inspection.conditional_index,
-      degree: inspection.degree,
-      extent: inspection.extent,
-      relevancy: inspection.relevancy,
-      worst_urgency: inspection.calculated_urgency,
+      ci_health: inspection.ci_health ?? null,
+      ci_safety: inspection.ci_safety ?? null,
+      ci_final: ciValue,
+      degree: inspection.degree ?? null,
+      extent: inspection.extent ?? null,
+      relevancy: inspection.relevancy ?? null,
+      worst_urgency: inspection.calculated_urgency ?? null,
       component_count: inspection.component_scores?.length || 0,
     };
-
-    // Determine CI band
-    const ciValue = inspection.ci || inspection.ci_final || inspection.conditional_index;
     const ciBand = ciValue
       ? ciValue >= 75
         ? "Excellent"
