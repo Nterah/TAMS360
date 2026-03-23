@@ -168,7 +168,9 @@ export default function NewInspectionPage() {
         inspector_name: formData.inspector_name,
         weather_conditions: formData.weather_conditions,
         // Overall fields from aggregates
-        conditional_index: formData.aggregates.ci_health,
+        // IMPORTANT: conditional_index must store the final CI shown to users/reports
+        conditional_index: formData.aggregates.ci_final,
+        ci_health: formData.aggregates.ci_health,
         ci_safety: formData.aggregates.ci_safety,
         ci_final: formData.aggregates.ci_final,
         calculated_urgency: formData.aggregates.worst_urgency,
