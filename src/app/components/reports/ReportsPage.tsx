@@ -46,6 +46,70 @@ export default function ReportsPage() {
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
+  const authHeaders = {
+    Authorization: `Bearer ${accessToken || publicAnonKey}`,
+  };
+
+  const fetchAllAssets = async () => {
+    const pageSize = 5000;
+    let page = 1;
+    let allAssets: any[] = [];
+    let totalPages = 1;
+
+    do {
+      const res = await fetch(`${API_URL}/assets?page=${page}&pageSize=${pageSize}`, {
+        headers: authHeaders,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to fetch assets page ${page}`);
+      }
+
+      const json = await res.json();
+      allAssets = allAssets.concat(json.assets || []);
+      totalPages = json.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages);
+
+    return allAssets;
+  };
+
+  const fetchAllInspections = async () => {
+    const pageSize = 5000;
+    let page = 1;
+    let allInspections: any[] = [];
+    let totalPages = 1;
+
+    do {
+      const res = await fetch(`${API_URL}/inspections?page=${page}&pageSize=${pageSize}`, {
+        headers: authHeaders,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to fetch inspections page ${page}`);
+      }
+
+      const json = await res.json();
+      allInspections = allInspections.concat(json.inspections || []);
+      totalPages = json.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages);
+
+    return allInspections;
+  };
+
+  const getInspectionCI = (insp: any) =>
+    insp.calculation_metadata?.ci_final ??
+    insp.ci_final ??
+    insp.conditional_index ??
+    '-';
+
+  const getInspectionUrgency = (insp: any) =>
+    insp.calculation_metadata?.worst_urgency ??
+    insp.calculated_urgency ??
+    insp.urgency ??
+    '-';  
+
   // TAMS360 Brand Colors
   const COLORS = {
     primary: '#010D13', // Deep Navy
@@ -65,11 +129,7 @@ export default function ReportsPage() {
 
   const fetchUniqueFilterValues = async () => {
     try {
-      const assetsRes = await fetch(`${API_URL}/assets`, {
-        headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-      });
-      const assetsData = await assetsRes.json();
-      const assets = assetsData.assets || [];
+      const assets = await fetchAllAssets();
 
       // Extract unique values
       const types = [...new Set(assets.map((a: any) => a.asset_type_name).filter(Boolean))].sort();
@@ -92,25 +152,17 @@ export default function ReportsPage() {
 
   const fetchAnalyticsData = async () => {
     try {
-      const [assetsRes, inspectionsRes, maintenanceRes] = await Promise.all([
-        fetch(`${API_URL}/assets`, {
-          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-        }),
-        fetch(`${API_URL}/inspections`, {
-          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-        }),
+
+      const [assets, inspections, maintenanceRes] = await Promise.all([
+        fetchAllAssets(),
+        fetchAllInspections(),
         fetch(`${API_URL}/maintenance`, {
-          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+          headers: authHeaders,
         }),
       ]);
 
-      const assetsData = assetsRes.ok ? await assetsRes.json() : { assets: [] };
-      const inspectionsData = inspectionsRes.ok ? await inspectionsRes.json() : { inspections: [] };
-      const maintenanceData = maintenanceRes.ok ? await maintenanceRes.json() : { records: [] };
-
-      const assets = assetsData.assets || [];
-      const inspections = inspectionsData.inspections || [];
-      const maintenance = maintenanceData.records || [];
+const maintenanceData = maintenanceRes.ok ? await maintenanceRes.json() : { records: [] };
+const maintenance = maintenanceData.records || [];      
 
       // Asset Type Distribution
       const assetTypeCounts: Record<string, number> = {};
@@ -123,7 +175,12 @@ export default function ReportsPage() {
       // CI Distribution (Condition Index ranges)
       const ciRanges = { 'Excellent (80-100)': 0, 'Good (60-79)': 0, 'Fair (40-59)': 0, 'Poor (20-39)': 0, 'Critical (0-19)': 0 };
       inspections.forEach((insp: any) => {
-        const ci = insp.conditional_index || insp.ci_final;
+
+        const ci =
+          insp.calculation_metadata?.ci_final ??
+          insp.ci_final ??
+          insp.conditional_index;
+        
         if (ci >= 80) ciRanges['Excellent (80-100)']++;
         else if (ci >= 60) ciRanges['Good (60-79)']++;
         else if (ci >= 40) ciRanges['Fair (40-59)']++;
