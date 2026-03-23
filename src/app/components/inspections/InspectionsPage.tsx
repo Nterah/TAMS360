@@ -536,11 +536,22 @@ export default function InspectionsPage() {
               </TableHeader>
               <TableBody>
                 {filteredInspections.slice(0, 50).map((inspection) => {
-                  const normalizedCI = inspection.conditional_index !== null && inspection.conditional_index !== undefined
-                    ? inspection.conditional_index
-                    : null;
+
+                  const normalizedCI =
+                    inspection.calculation_metadata?.ci_final ??
+                    inspection.ci_final ??
+                    inspection.conditional_index ??
+                    null;
+                  
+                  const displayUrgency =
+                    inspection.calculation_metadata?.worst_urgency ??
+                    inspection.calculated_urgency ??
+                    inspection.urgency ??
+                    null;
+                  
                   const ciBadge = getCIBadge(normalizedCI);
-                  const urgencyBadge = getUrgencyBadge(inspection.calculated_urgency);
+                  const urgencyBadge = getUrgencyBadge(displayUrgency);
+              
                   
                   return (
                     <TableRow key={inspection.inspection_id}>
@@ -616,13 +627,16 @@ export default function InspectionsPage() {
                       )}
                       {columns.find(c => c.id === "calculated_urgency")?.visible && (
                         <TableCell>
-                          {inspection.calculated_urgency ? (
+
+                          {displayUrgency ? (
                             <Badge className={urgencyBadge.color}>
                               {urgencyBadge.label}
                             </Badge>
                           ) : (
                             "—"
                           )}
+                          
+                          
                         </TableCell>
                       )}
                       {columns.find(c => c.id === "total_remedial_cost")?.visible && (
@@ -647,9 +661,20 @@ export default function InspectionsPage() {
             <div className="space-y-4">
               {filteredInspections.slice(0, 20).map((inspection) => {
                 // Use ci_final from new view (already normalized 0-100)
-                const normalizedCI = inspection.conditional_index !== null && inspection.conditional_index !== undefined
-                  ? inspection.conditional_index
-                  : null;
+
+                const normalizedCI =
+                  inspection.calculation_metadata?.ci_final ??
+                  inspection.ci_final ??
+                  inspection.conditional_index ??
+                  null;
+                
+                const displayUrgency =
+                  inspection.calculation_metadata?.worst_urgency ??
+                  inspection.calculated_urgency ??
+                  inspection.urgency ??
+                  null;              
+
+              
                 return (
                   <div key={inspection.inspection_id} className="flex items-start gap-4 p-4 border rounded-lg hover:bg-accent/50 transition-colors">
                     <ClipboardCheck className="w-10 h-10 text-primary flex-shrink-0" />
@@ -670,12 +695,14 @@ export default function InspectionsPage() {
                               CI: {normalizedCI.toFixed(0)}
                             </Badge>
                           )}
-                          {inspection.calculated_urgency && (
-                            <Badge className={getUrgencyBadge(inspection.calculated_urgency).color}>
+
+                          {displayUrgency && (
+                            <Badge className={getUrgencyBadge(displayUrgency).color}>
                               <AlertTriangle className="w-3 h-3 mr-1" />
-                              {getUrgencyBadge(inspection.calculated_urgency).label}
+                              {getUrgencyBadge(displayUrgency).label}
                             </Badge>
-                          )}
+                          )}                                                
+                          
                         </div>
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm text-muted-foreground">
