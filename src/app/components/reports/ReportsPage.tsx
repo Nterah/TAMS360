@@ -3,7 +3,17 @@ import { AuthContext } from "../../App";
 import { useTenant } from "../../contexts/TenantContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { Download, FileText, BarChart3, TrendingUp, Loader2, PieChartIcon, Filter, Search } from "lucide-react";
+import {
+  Download,
+  FileText,
+  BarChart3,
+  TrendingUp,
+  Loader2,
+  PieChartIcon,
+  Filter,
+  Search,
+  LineChart as LineChartIcon,
+} from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
@@ -12,29 +22,44 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { downloadReport } from "../../utils/reportGenerators";
 import { generatePhotoPDFReport, generatePhotoExcelReport } from "../../utils/reportGenerators";
-import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import {
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 export default function ReportsPage() {
   const { accessToken } = useContext(AuthContext);
   const { settings: tenant } = useTenant();
+
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<any>(null);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
-  const [customReportType, setCustomReportType] = useState('assets');
-  const [customAssetType, setCustomAssetType] = useState('all');
-  const [customRegion, setCustomRegion] = useState('all');
+  const [customReportType, setCustomReportType] = useState("assets");
+  const [customAssetType, setCustomAssetType] = useState("all");
+  const [customRegion, setCustomRegion] = useState("all");
 
-  // Global report filters (applies to all standard reports)
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterAssetType, setFilterAssetType] = useState('all');
-  const [filterRegion, setFilterRegion] = useState('all');
-  const [filterWard, setFilterWard] = useState('all');
-  const [filterDepot, setFilterDepot] = useState('all');
-  const [filterOwner, setFilterOwner] = useState('all');
-  const [filterRoadName, setFilterRoadName] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [filterCondition, setFilterCondition] = useState('all');
-  const [filterUrgency, setFilterUrgency] = useState('all');
+  // Global report filters (applies mainly to asset/photo reports)
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterAssetType, setFilterAssetType] = useState("all");
+  const [filterRegion, setFilterRegion] = useState("all");
+  const [filterWard, setFilterWard] = useState("all");
+  const [filterDepot, setFilterDepot] = useState("all");
+  const [filterOwner, setFilterOwner] = useState("all");
+  const [filterRoadName, setFilterRoadName] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterCondition, setFilterCondition] = useState("all");
+  const [filterUrgency, setFilterUrgency] = useState("all");
 
   // Unique filter values
   const [uniqueAssetTypes, setUniqueAssetTypes] = useState<string[]>([]);
@@ -50,11 +75,58 @@ export default function ReportsPage() {
     Authorization: `Bearer ${accessToken || publicAnonKey}`,
   };
 
+  const photoReportTypes = [
+    "Inventory with Images",
+    "Inspection Photos Summary",
+    "Asset Condition Photos",
+    "Photo Gallery Report",
+  ];
+
+  // -----------------------------
+  // Safe helpers
+  // -----------------------------
+  const getAssetCI = (asset: any) =>
+    asset?.latest_ci ?? asset?.condition_index ?? asset?.ci_final ?? "-";
+
+  const getAssetUrgency = (asset: any) =>
+    asset?.latest_urgency ?? asset?.urgency ?? "-";
+
+  const getInspectionCI = (insp: any) =>
+    insp?.calculation_metadata?.ci_final ??
+    insp?.ci_final ??
+    insp?.conditional_index ??
+    "-";
+
+  const getInspectionUrgency = (insp: any) =>
+    insp?.calculation_metadata?.worst_urgency ??
+    insp?.calculated_urgency ??
+    insp?.urgency ??
+    "-";
+
+  const parseNumericCI = (value: any) => {
+    if (value === null || value === undefined || value === "-" || value === "") return NaN;
+    const parsed = parseFloat(value);
+    return Number.isNaN(parsed) ? NaN : parsed;
+  };
+
+  const getTenantBranding = () => ({
+    organizationName: tenant.organization_name || tenant.organizationName,
+    logoUrl: tenant.logo_url || tenant.logoUrl,
+    primaryColor: tenant.primary_color || tenant.primaryColor || "#010D13",
+    regionName: tenant.region_name || tenant.regionName,
+    currency: "ZAR",
+    tagline: tenant.tagline,
+    address: tenant.address,
+    phone: tenant.phone,
+    email: tenant.email,
+    website: tenant.website,
+  });
+
   const fetchAllAssets = async () => {
     const pageSize = 5000;
     let page = 1;
-    let allAssets: any[] = [];
     let totalPages = 1;
+    let allAssets: any[] = [];
 
     do {
       const res = await fetch(`${API_URL}/assets?page=${page}&pageSize=${pageSize}`, {
@@ -77,8 +149,8 @@ export default function ReportsPage() {
   const fetchAllInspections = async () => {
     const pageSize = 5000;
     let page = 1;
-    let allInspections: any[] = [];
     let totalPages = 1;
+    let allInspections: any[] = [];
 
     do {
       const res = await fetch(`${API_URL}/inspections?page=${page}&pageSize=${pageSize}`, {
@@ -98,25 +170,13 @@ export default function ReportsPage() {
     return allInspections;
   };
 
-  const getInspectionCI = (insp: any) =>
-    insp.calculation_metadata?.ci_final ??
-    insp.ci_final ??
-    insp.conditional_index ??
-    '-';
-
-  const getInspectionUrgency = (insp: any) =>
-    insp.calculation_metadata?.worst_urgency ??
-    insp.calculated_urgency ??
-    insp.urgency ??
-    '-';  
-
   // TAMS360 Brand Colors
   const COLORS = {
-    primary: '#010D13', // Deep Navy
-    skyBlue: '#39AEDF',
-    green: '#5DB32A',
-    yellow: '#F8D227',
-    grey: '#455B5E',
+    primary: "#010D13",
+    skyBlue: "#39AEDF",
+    green: "#5DB32A",
+    yellow: "#F8D227",
+    grey: "#455B5E",
   };
 
   const CHART_COLORS = [COLORS.skyBlue, COLORS.green, COLORS.yellow, COLORS.grey, COLORS.primary];
@@ -131,7 +191,6 @@ export default function ReportsPage() {
     try {
       const assets = await fetchAllAssets();
 
-      // Extract unique values
       const types = [...new Set(assets.map((a: any) => a.asset_type_name).filter(Boolean))].sort();
       const regions = [...new Set(assets.map((a: any) => a.region).filter(Boolean))].sort();
       const wards = [...new Set(assets.map((a: any) => a.ward).filter(Boolean))].sort();
@@ -146,13 +205,12 @@ export default function ReportsPage() {
       setUniqueOwners(owners as string[]);
       setUniqueRoadNames(roads as string[]);
     } catch (error) {
-      console.error('Error fetching unique filter values:', error);
+      console.error("Error fetching unique filter values:", error);
     }
   };
 
   const fetchAnalyticsData = async () => {
     try {
-
       const [assets, inspections, maintenanceRes] = await Promise.all([
         fetchAllAssets(),
         fetchAllInspections(),
@@ -161,70 +219,84 @@ export default function ReportsPage() {
         }),
       ]);
 
-const maintenanceData = maintenanceRes.ok ? await maintenanceRes.json() : { records: [] };
-const maintenance = maintenanceData.records || [];      
+      const maintenanceData = maintenanceRes.ok ? await maintenanceRes.json() : { records: [] };
+      const maintenance = maintenanceData.records || [];
 
       // Asset Type Distribution
       const assetTypeCounts: Record<string, number> = {};
       assets.forEach((asset: any) => {
-        const type = asset.asset_type_name || 'Unknown';
+        const type = asset.asset_type_name || "Unknown";
         assetTypeCounts[type] = (assetTypeCounts[type] || 0) + 1;
       });
       const assetTypeData = Object.entries(assetTypeCounts).map(([name, value]) => ({ name, value }));
 
-      // CI Distribution (Condition Index ranges)
-      const ciRanges = { 'Excellent (80-100)': 0, 'Good (60-79)': 0, 'Fair (40-59)': 0, 'Poor (20-39)': 0, 'Critical (0-19)': 0 };
-      inspections.forEach((insp: any) => {
+      // CI Distribution
+      const ciRanges = {
+        "Excellent (80-100)": 0,
+        "Good (60-79)": 0,
+        "Fair (40-59)": 0,
+        "Poor (20-39)": 0,
+        "Critical (0-19)": 0,
+      };
 
-        const ci =
-          insp.calculation_metadata?.ci_final ??
-          insp.ci_final ??
-          insp.conditional_index;
-        
-        if (ci >= 80) ciRanges['Excellent (80-100)']++;
-        else if (ci >= 60) ciRanges['Good (60-79)']++;
-        else if (ci >= 40) ciRanges['Fair (40-59)']++;
-        else if (ci >= 20) ciRanges['Poor (20-39)']++;
-        else if (ci >= 0) ciRanges['Critical (0-19)']++;
+      inspections.forEach((insp: any) => {
+        const ci = parseNumericCI(getInspectionCI(insp));
+        if (Number.isNaN(ci)) return;
+
+        if (ci >= 80) ciRanges["Excellent (80-100)"]++;
+        else if (ci >= 60) ciRanges["Good (60-79)"]++;
+        else if (ci >= 40) ciRanges["Fair (40-59)"]++;
+        else if (ci >= 20) ciRanges["Poor (20-39)"]++;
+        else if (ci >= 0) ciRanges["Critical (0-19)"]++;
       });
+
       const ciDistributionData = Object.entries(ciRanges).map(([name, value]) => ({ name, value }));
 
       // Maintenance Status Distribution
       const statusCounts: Record<string, number> = {};
       maintenance.forEach((maint: any) => {
-        const status = maint.status || 'Unknown';
+        const status = maint.status || "Unknown";
         statusCounts[status] = (statusCounts[status] || 0) + 1;
       });
       const maintenanceStatusData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
 
-      // Monthly Inspections Trend (last 6 months)
+      // Monthly Inspections Trend
       const monthlyInspections: Record<string, number> = {};
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-      
+
       inspections.forEach((insp: any) => {
+        if (!insp.inspection_date) return;
         const date = new Date(insp.inspection_date);
         if (date >= sixMonthsAgo) {
-          const monthKey = date.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short' });
+          const monthKey = date.toLocaleDateString("en-ZA", { year: "numeric", month: "short" });
           monthlyInspections[monthKey] = (monthlyInspections[monthKey] || 0) + 1;
         }
       });
-      const monthlyInspectionsData = Object.entries(monthlyInspections).map(([month, count]) => ({ month, count }));
 
-      // Maintenance Cost Trends (last 6 months)
+      const monthlyInspectionsData = Object.entries(monthlyInspections).map(([month, count]) => ({
+        month,
+        count,
+      }));
+
+      // Maintenance Cost Trends
       const monthlyCosts: Record<string, number> = {};
       maintenance.forEach((maint: any) => {
         const dateToUse = maint.completed_date || maint.scheduled_date;
-        if (dateToUse) {
-          const date = new Date(dateToUse);
-          if (date >= sixMonthsAgo) {
-            const monthKey = date.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short' });
-            const cost = parseFloat(maint.actual_cost || maint.estimated_cost || 0);
-            monthlyCosts[monthKey] = (monthlyCosts[monthKey] || 0) + cost;
-          }
+        if (!dateToUse) return;
+
+        const date = new Date(dateToUse);
+        if (date >= sixMonthsAgo) {
+          const monthKey = date.toLocaleDateString("en-ZA", { year: "numeric", month: "short" });
+          const cost = parseFloat(maint.actual_cost || maint.estimated_cost || 0);
+          monthlyCosts[monthKey] = (monthlyCosts[monthKey] || 0) + cost;
         }
       });
-      const monthlyCostsData = Object.entries(monthlyCosts).map(([month, cost]) => ({ month, cost: Math.round(cost) }));
+
+      const monthlyCostsData = Object.entries(monthlyCosts).map(([month, cost]) => ({
+        month,
+        cost: Math.round(cost),
+      }));
 
       setAnalyticsData({
         assetTypeData,
@@ -241,17 +313,11 @@ const maintenance = maintenanceData.records || [];
   const fetchReportSummary = async () => {
     try {
       setLoading(true);
-      
+
       const [assetsRes, inspectionsRes, maintenanceRes] = await Promise.all([
-        fetch(`${API_URL}/assets/count`, {
-          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-        }),
-        fetch(`${API_URL}/inspections/count`, {
-          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-        }),
-        fetch(`${API_URL}/maintenance/count`, {
-          headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-        }),
+        fetch(`${API_URL}/assets/count`, { headers: authHeaders }),
+        fetch(`${API_URL}/inspections/count`, { headers: authHeaders }),
+        fetch(`${API_URL}/maintenance/count`, { headers: authHeaders }),
       ]);
 
       const assetsCount = assetsRes.ok ? (await assetsRes.json()).count : 0;
@@ -267,462 +333,442 @@ const maintenance = maintenanceData.records || [];
     }
   };
 
+  const applyAssetFilters = (assets: any[]) => {
+    let filtered = [...assets];
+
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = filtered.filter((asset: any) =>
+        asset.asset_ref?.toLowerCase().includes(searchLower) ||
+        asset.asset_type_name?.toLowerCase().includes(searchLower) ||
+        asset.description?.toLowerCase().includes(searchLower) ||
+        asset.road_name?.toLowerCase().includes(searchLower) ||
+        asset.region?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    if (filterAssetType !== "all") {
+      filtered = filtered.filter((asset: any) => asset.asset_type_name === filterAssetType);
+    }
+
+    if (filterRegion !== "all") {
+      filtered = filtered.filter((asset: any) => asset.region === filterRegion);
+    }
+
+    if (filterWard !== "all") {
+      filtered = filtered.filter((asset: any) => asset.ward === filterWard);
+    }
+
+    if (filterDepot !== "all") {
+      filtered = filtered.filter((asset: any) => asset.depot === filterDepot);
+    }
+
+    if (filterOwner !== "all") {
+      filtered = filtered.filter((asset: any) => asset.owner === filterOwner);
+    }
+
+    if (filterRoadName !== "all") {
+      filtered = filtered.filter((asset: any) => asset.road_name === filterRoadName);
+    }
+
+    if (filterStatus !== "all") {
+      filtered = filtered.filter((asset: any) =>
+        asset.status?.toLowerCase() === filterStatus.toLowerCase()
+      );
+    }
+
+    if (filterCondition !== "all") {
+      filtered = filtered.filter((asset: any) => {
+        const ci = parseNumericCI(getAssetCI(asset));
+        if (Number.isNaN(ci)) return false;
+
+        switch (filterCondition) {
+          case "excellent":
+            return ci >= 80 && ci <= 100;
+          case "good":
+            return ci >= 60 && ci < 80;
+          case "fair":
+            return ci >= 40 && ci < 60;
+          case "poor":
+            return ci >= 20 && ci < 40;
+          case "critical":
+            return ci >= 0 && ci < 20;
+          default:
+            return true;
+        }
+      });
+    }
+
+    if (filterUrgency !== "all") {
+      filtered = filtered.filter((asset: any) =>
+        String(getAssetUrgency(asset)) === String(filterUrgency)
+      );
+    }
+
+    return filtered;
+  };
+
   const handleExportReport = async (reportType: string, format: string) => {
     try {
       setLoading(true);
-      
-      // Debug: Log tenant data to check branding info
-      console.log('Tenant settings for report:', tenant);
-      console.log('Organization Name:', tenant.organization_name || tenant.organizationName);
-      console.log('Logo URL:', tenant.logo_url || tenant.logoUrl);
-      console.log('Primary Color:', tenant.primary_color || tenant.primaryColor);
 
-      // Helper function to apply filters to asset data
-      const applyFilters = (assets: any[]) => {
-        let filtered = [...assets];
-        
-        // Search term filter
-        if (searchTerm) {
-          const searchLower = searchTerm.toLowerCase();
-          filtered = filtered.filter((asset: any) => 
-            asset.asset_ref?.toLowerCase().includes(searchLower) ||
-            asset.asset_type_name?.toLowerCase().includes(searchLower) ||
-            asset.description?.toLowerCase().includes(searchLower) ||
-            asset.road_name?.toLowerCase().includes(searchLower) ||
-            asset.region?.toLowerCase().includes(searchLower)
-          );
-        }
-        
-        if (filterAssetType !== 'all') {
-          filtered = filtered.filter((asset: any) => 
-            asset.asset_type_name === filterAssetType
-          );
-        }
-        
-        if (filterRegion !== 'all') {
-          filtered = filtered.filter((asset: any) => 
-            asset.region === filterRegion
-          );
-        }
-        
-        if (filterWard !== 'all') {
-          filtered = filtered.filter((asset: any) => 
-            asset.ward === filterWard
-          );
-        }
-        
-        if (filterDepot !== 'all') {
-          filtered = filtered.filter((asset: any) => 
-            asset.depot === filterDepot
-          );
-        }
-        
-        if (filterOwner !== 'all') {
-          filtered = filtered.filter((asset: any) => 
-            asset.owner === filterOwner
-          );
-        }
-        
-        if (filterRoadName !== 'all') {
-          filtered = filtered.filter((asset: any) => 
-            asset.road_name === filterRoadName
-          );
-        }
-        
-        if (filterStatus !== 'all') {
-          filtered = filtered.filter((asset: any) => 
-            asset.status?.toLowerCase() === filterStatus.toLowerCase()
-          );
-        }
-        
-        if (filterCondition !== 'all') {
-          filtered = filtered.filter((asset: any) => {
-            const ci = parseFloat(asset.latest_ci || asset.condition_index);
-            if (isNaN(ci)) return false;
-            
-            switch(filterCondition) {
-              case 'excellent': return ci >= 80 && ci <= 100;
-              case 'good': return ci >= 60 && ci < 80;
-              case 'fair': return ci >= 40 && ci < 60;
-              case 'poor': return ci >= 20 && ci < 40;
-              case 'critical': return ci >= 0 && ci < 20;
-              default: return true;
-            }
-          });
-        }
-        
-        if (filterUrgency !== 'all') {
-          filtered = filtered.filter((asset: any) => 
-            asset.latest_urgency?.toString() === filterUrgency
-          );
-        }
-        
-        return filtered;
-      };
+      console.log("Tenant settings for report:", tenant);
+      console.log("Organization Name:", tenant.organization_name || tenant.organizationName);
+      console.log("Logo URL:", tenant.logo_url || tenant.logoUrl);
+      console.log("Primary Color:", tenant.primary_color || tenant.primaryColor);
 
       let data: any[] = [];
       let columns: any[] = [];
-      let title = reportType;
-      let fileName = reportType.toLowerCase().replace(/ /g, '-');
+      const title = reportType;
+      const fileName = reportType.toLowerCase().replace(/ /g, "-");
 
       switch (reportType) {
-        case 'Asset Inventory':
-          const assetsRes = await fetch(`${API_URL}/assets`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const assetsData = await assetsRes.json();
-          let assetsInventory = (assetsData.assets || []).map((asset: any) => ({
+        case "Asset Inventory": {
+          const assets = await fetchAllAssets();
+          const assetsInventory = assets.map((asset: any) => ({
             ...asset,
-            route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
-            chainage_km: asset.km_marker || '-',
-            condition_index: asset.latest_ci || '-',
+            route_road: asset.road_number || asset.road_name
+              ? `${asset.road_number || ""} ${asset.road_name || ""}`.trim()
+              : "-",
+            chainage_km: asset.km_marker || "-",
+            condition_index: getAssetCI(asset),
           }));
-          
-          // Apply filters
-          data = applyFilters(assetsInventory);
-          
+
+          data = applyAssetFilters(assetsInventory);
+
           columns = [
-            { header: 'Asset Number', key: 'asset_ref' },
-            { header: 'Asset Type', key: 'asset_type_name' },
-            { header: 'Description', key: 'description' },
-            { header: 'Route/Road', key: 'route_road' },
-            { header: 'Chainage', key: 'chainage_km' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Status', key: 'status' },
-            { header: 'Region', key: 'region' },
+            { header: "Asset Number", key: "asset_ref" },
+            { header: "Asset Type", key: "asset_type_name" },
+            { header: "Description", key: "description" },
+            { header: "Route/Road", key: "route_road" },
+            { header: "Chainage", key: "chainage_km" },
+            { header: "Condition Index", key: "condition_index" },
+            { header: "Status", key: "status" },
+            { header: "Region", key: "region" },
           ];
           break;
+        }
 
-        case 'Condition Summary':
-          const ciRes = await fetch(`${API_URL}/assets`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const ciData = await ciRes.json();
-          let conditionAssets = (ciData.assets || []).map((asset: any) => ({
+        case "Condition Summary": {
+          const assets = await fetchAllAssets();
+          const conditionAssets = assets.map((asset: any) => ({
             ...asset,
-            condition_index: asset.latest_ci || '-',
-            urgency_category: asset.latest_urgency || '-',
-            last_inspection_date: asset.last_inspection_date || '-',
-            route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
+            condition_index: getAssetCI(asset),
+            urgency_category: getAssetUrgency(asset),
+            last_inspection_date: asset.last_inspection_date || "-",
+            route_road: asset.road_number || asset.road_name
+              ? `${asset.road_number || ""} ${asset.road_name || ""}`.trim()
+              : "-",
           }));
-          
-          // Apply filters
-          data = applyFilters(conditionAssets);
-          
+
+          data = applyAssetFilters(conditionAssets);
+
           columns = [
-            { header: 'Asset Number', key: 'asset_ref' },
-            { header: 'Asset Type', key: 'asset_type_name' },
-            { header: 'Description', key: 'description' },
-            { header: 'Condition Index (CI)', key: 'condition_index' },
-            { header: 'Urgency Category', key: 'urgency_category' },
-            { header: 'Last Inspection', key: 'last_inspection_date' },
-            { header: 'Route/Road', key: 'route_road' },
+            { header: "Asset Number", key: "asset_ref" },
+            { header: "Asset Type", key: "asset_type_name" },
+            { header: "Description", key: "description" },
+            { header: "Condition Index (CI)", key: "condition_index" },
+            { header: "Urgency Category", key: "urgency_category" },
+            { header: "Last Inspection", key: "last_inspection_date" },
+            { header: "Route/Road", key: "route_road" },
           ];
           break;
+        }
 
-        case 'Asset Valuation':
-          const valRes = await fetch(`${API_URL}/assets`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const valData = await valRes.json();
-          let valuationAssets = (valData.assets || []).map((asset: any) => {
+        case "Asset Valuation": {
+          const assets = await fetchAllAssets();
+          const valuationAssets = assets.map((asset: any) => {
             const installDate = asset.install_date ? new Date(asset.install_date) : null;
-            const ageYears = installDate ? (Date.now() - installDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25) : 0;
+            const ageYears = installDate
+              ? (Date.now() - installDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25)
+              : 0;
             const usefulLife = asset.useful_life_years || asset.expected_life_years || 20;
-            const depreciationRate = usefulLife > 0 ? (100 / usefulLife) : 0;
+            const depreciationRate = usefulLife > 0 ? 100 / usefulLife : 0;
+
             return {
               ...asset,
               age_years: ageYears.toFixed(1),
               depreciation_rate: depreciationRate.toFixed(2),
             };
           });
-          
-          // Apply filters
-          data = applyFilters(valuationAssets);
-          
+
+          data = applyAssetFilters(valuationAssets);
+
           columns = [
-            { header: 'Asset Number', key: 'asset_ref' },
-            { header: 'Asset Type', key: 'asset_type_name' },
-            { header: 'Description', key: 'description' },
-            { header: 'Replacement Value (ZAR)', key: 'replacement_value' },
-            { header: 'Current Value (ZAR)', key: 'current_value' },
-            { header: 'Depreciation Rate (%)', key: 'depreciation_rate' },
-            { header: 'Age (years)', key: 'age_years' },
+            { header: "Asset Number", key: "asset_ref" },
+            { header: "Asset Type", key: "asset_type_name" },
+            { header: "Description", key: "description" },
+            { header: "Replacement Value (ZAR)", key: "replacement_value" },
+            { header: "Current Value (ZAR)", key: "current_value" },
+            { header: "Depreciation Rate (%)", key: "depreciation_rate" },
+            { header: "Age (years)", key: "age_years" },
           ];
           break;
+        }
 
-        case 'Assets by Location':
-          const locRes = await fetch(`${API_URL}/assets`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const locData = await locRes.json();
-          let locationAssets = (locData.assets || []).map((asset: any) => ({
+        case "Assets by Location": {
+          const assets = await fetchAllAssets();
+          const locationAssets = assets.map((asset: any) => ({
             ...asset,
-            route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
-            section: asset.section || '-',
-            chainage_km: asset.km_marker || '-',
-            side_of_road: asset.side_of_road || '-',
+            route_road: asset.road_number || asset.road_name
+              ? `${asset.road_number || ""} ${asset.road_name || ""}`.trim()
+              : "-",
+            section: asset.section || "-",
+            chainage_km: asset.km_marker || "-",
+            side_of_road: asset.side_of_road || "-",
           }));
-          
-          // Apply filters
-          data = applyFilters(locationAssets);
-          
+
+          data = applyAssetFilters(locationAssets);
+
           columns = [
-            { header: 'Route/Road', key: 'route_road' },
-            { header: 'Section', key: 'section' },
-            { header: 'Chainage (km)', key: 'chainage_km' },
-            { header: 'Asset Number', key: 'asset_ref' },
-            { header: 'Asset Type', key: 'asset_type_name' },
-            { header: 'Description', key: 'description' },
-            { header: 'Side of Road', key: 'side_of_road' },
-            { header: 'Region', key: 'region' },
-            { header: 'Latitude', key: 'latitude' },
-            { header: 'Longitude', key: 'longitude' },
+            { header: "Route/Road", key: "route_road" },
+            { header: "Section", key: "section" },
+            { header: "Chainage (km)", key: "chainage_km" },
+            { header: "Asset Number", key: "asset_ref" },
+            { header: "Asset Type", key: "asset_type_name" },
+            { header: "Description", key: "description" },
+            { header: "Side of Road", key: "side_of_road" },
+            { header: "Region", key: "region" },
+            { header: "Latitude", key: "latitude" },
+            { header: "Longitude", key: "longitude" },
           ];
           break;
+        }
 
-        case 'Inspection Summary':
-          const inspRes = await fetch(`${API_URL}/inspections`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const inspData = await inspRes.json();
-          data = (inspData.inspections || []).map((insp: any) => ({
+        case "Inspection Summary": {
+          const inspections = await fetchAllInspections();
+          data = inspections.map((insp: any) => ({
             ...insp,
-            asset_number: insp.asset_ref || insp.asset_number || '-',
-            asset_type: insp.asset_type_name || insp.asset_type || '-',
-            condition_index: insp.ci_final || insp.conditional_index || '-',
-            urgency_category: insp.calculated_urgency || insp.urgency || '-',
+            asset_number: insp.asset_ref || insp.asset_number || "-",
+            asset_type: insp.asset_type_name || insp.asset_type || "-",
+            condition_index: getInspectionCI(insp),
+            urgency_category: getInspectionUrgency(insp),
           }));
+
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Inspection Date', key: 'inspection_date' },
-            { header: 'Inspector', key: 'inspector_name' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Urgency Category', key: 'urgency_category' },
-            { header: 'Status', key: 'status' },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Inspection Date", key: "inspection_date" },
+            { header: "Inspector", key: "inspector_name" },
+            { header: "Condition Index", key: "condition_index" },
+            { header: "Urgency Category", key: "urgency_category" },
+            { header: "Status", key: "status" },
           ];
           break;
+        }
 
-        case 'CI Trends':
-          const ciTrendsRes = await fetch(`${API_URL}/inspections`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const ciTrendsData = await ciTrendsRes.json();
-          data = (ciTrendsData.inspections || []).map((insp: any) => ({
+        case "CI Trends": {
+          const inspections = await fetchAllInspections();
+          data = inspections.map((insp: any) => ({
             ...insp,
-            asset_number: insp.asset_ref || insp.asset_number || '-',
-            asset_type: insp.asset_type_name || insp.asset_type || '-',
-            condition_index: insp.ci_final || insp.conditional_index || '-',
-            urgency_category: insp.calculated_urgency || insp.urgency || '-',
+            asset_number: insp.asset_ref || insp.asset_number || "-",
+            asset_type: insp.asset_type_name || insp.asset_type || "-",
+            condition_index: getInspectionCI(insp),
+            urgency_category: getInspectionUrgency(insp),
           }));
+
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Inspection Date', key: 'inspection_date' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Urgency Category', key: 'urgency_category' },
-            { header: 'Inspector', key: 'inspector_name' },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Inspection Date", key: "inspection_date" },
+            { header: "Condition Index", key: "condition_index" },
+            { header: "Urgency Category", key: "urgency_category" },
+            { header: "Inspector", key: "inspector_name" },
           ];
           break;
+        }
 
-        case 'Defect Analysis':
-          const defectRes = await fetch(`${API_URL}/inspections`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const defectData = await defectRes.json();
-          data = (defectData.inspections || []).map((insp: any) => ({
+        case "Defect Analysis": {
+          const inspections = await fetchAllInspections();
+          data = inspections.map((insp: any) => ({
             ...insp,
-            asset_number: insp.asset_ref || insp.asset_number || '-',
-            asset_type: insp.asset_type_name || insp.asset_type || '-',
-            condition_index: insp.ci_final || insp.conditional_index || '-',
-            urgency: insp.calculated_urgency || insp.urgency || '-',
+            asset_number: insp.asset_ref || insp.asset_number || "-",
+            asset_type: insp.asset_type_name || insp.asset_type || "-",
+            condition_index: getInspectionCI(insp),
+            urgency: getInspectionUrgency(insp),
           }));
+
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Inspection Date', key: 'inspection_date' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Defect Notes', key: 'notes' },
-            { header: 'Urgency', key: 'urgency' },
-            { header: 'Inspector', key: 'inspector_name' },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Inspection Date", key: "inspection_date" },
+            { header: "Condition Index", key: "condition_index" },
+            { header: "Defect Notes", key: "notes" },
+            { header: "Urgency", key: "urgency" },
+            { header: "Inspector", key: "inspector_name" },
           ];
           break;
+        }
 
-        case 'Inspector Performance':
-          const inspPerfRes = await fetch(`${API_URL}/inspections`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const inspPerfData = await inspPerfRes.json();
-          data = (inspPerfData.inspections || []).map((insp: any) => ({
+        case "Inspector Performance": {
+          const inspections = await fetchAllInspections();
+          data = inspections.map((insp: any) => ({
             ...insp,
-            asset_number: insp.asset_ref || insp.asset_number || '-',
-            asset_type: insp.asset_type_name || insp.asset_type || '-',
-            condition_index: insp.ci_final || insp.conditional_index || '-',
+            asset_number: insp.asset_ref || insp.asset_number || "-",
+            asset_type: insp.asset_type_name || insp.asset_type || "-",
+            condition_index: getInspectionCI(insp),
           }));
+
           columns = [
-            { header: 'Inspector', key: 'inspector_name' },
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Inspection Date', key: 'inspection_date' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Status', key: 'status' },
+            { header: "Inspector", key: "inspector_name" },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Inspection Date", key: "inspection_date" },
+            { header: "Condition Index", key: "condition_index" },
+            { header: "Status", key: "status" },
           ];
           break;
+        }
 
-        case 'Maintenance Summary':
-        case 'Maintenance History':
-          const maintRes = await fetch(`${API_URL}/maintenance`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
+        case "Maintenance Summary":
+        case "Maintenance History": {
+          const maintRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
           const maintData = await maintRes.json();
+
           data = (maintData.records || []).map((maint: any) => ({
             ...maint,
-            asset_number: maint.asset_ref || maint.asset_number || '-',
-            asset_type: maint.asset_type_name || maint.asset_type || '-',
+            asset_number: maint.asset_ref || maint.asset_number || "-",
+            asset_type: maint.asset_type_name || maint.asset_type || "-",
           }));
+
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Maintenance Type', key: 'maintenance_type' },
-            { header: 'Description', key: 'description' },
-            { header: 'Scheduled Date', key: 'scheduled_date' },
-            { header: 'Completed Date', key: 'completed_date' },
-            { header: 'Status', key: 'status' },
-            { header: 'Estimated Cost (ZAR)', key: 'estimated_cost' },
-            { header: 'Actual Cost (ZAR)', key: 'actual_cost' },
-            { header: 'Contractor', key: 'contractor' },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Maintenance Type", key: "maintenance_type" },
+            { header: "Description", key: "description" },
+            { header: "Scheduled Date", key: "scheduled_date" },
+            { header: "Completed Date", key: "completed_date" },
+            { header: "Status", key: "status" },
+            { header: "Estimated Cost (ZAR)", key: "estimated_cost" },
+            { header: "Actual Cost (ZAR)", key: "actual_cost" },
+            { header: "Contractor", key: "contractor" },
           ];
           break;
+        }
 
-        case 'Cost Analysis':
-          const costRes = await fetch(`${API_URL}/maintenance`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
+        case "Cost Analysis": {
+          const costRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
           const costData = await costRes.json();
+
           data = (costData.records || []).map((maint: any) => ({
             ...maint,
-            asset_number: maint.asset_ref || maint.asset_number || '-',
-            asset_type: maint.asset_type_name || maint.asset_type || '-',
-            cost_variance: ((maint.actual_cost || 0) - (maint.estimated_cost || 0)),
+            asset_number: maint.asset_ref || maint.asset_number || "-",
+            asset_type: maint.asset_type_name || maint.asset_type || "-",
+            cost_variance: (Number(maint.actual_cost || 0) - Number(maint.estimated_cost || 0)),
           }));
+
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Maintenance Type', key: 'maintenance_type' },
-            { header: 'Scheduled Date', key: 'scheduled_date' },
-            { header: 'Completed Date', key: 'completed_date' },
-            { header: 'Estimated Cost (ZAR)', key: 'estimated_cost' },
-            { header: 'Actual Cost (ZAR)', key: 'actual_cost' },
-            { header: 'Cost Variance (ZAR)', key: 'cost_variance' },
-            { header: 'Status', key: 'status' },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Maintenance Type", key: "maintenance_type" },
+            { header: "Scheduled Date", key: "scheduled_date" },
+            { header: "Completed Date", key: "completed_date" },
+            { header: "Estimated Cost (ZAR)", key: "estimated_cost" },
+            { header: "Actual Cost (ZAR)", key: "actual_cost" },
+            { header: "Cost Variance (ZAR)", key: "cost_variance" },
+            { header: "Status", key: "status" },
           ];
           break;
+        }
 
-        case 'Work Order Status':
-          const workOrderRes = await fetch(`${API_URL}/maintenance`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
+        case "Work Order Status": {
+          const workOrderRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
           const workOrderData = await workOrderRes.json();
+
           data = (workOrderData.records || []).map((maint: any) => ({
             ...maint,
-            id: maint.maintenance_id || maint.id || '-',
-            asset_number: maint.asset_ref || maint.asset_number || '-',
-            asset_type: maint.asset_type_name || maint.asset_type || '-',
+            id: maint.maintenance_id || maint.id || "-",
+            asset_number: maint.asset_ref || maint.asset_number || "-",
+            asset_type: maint.asset_type_name || maint.asset_type || "-",
           }));
+
           columns = [
-            { header: 'Work Order ID', key: 'id' },
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Maintenance Type', key: 'maintenance_type' },
-            { header: 'Description', key: 'description' },
-            { header: 'Scheduled Date', key: 'scheduled_date' },
-            { header: 'Status', key: 'status' },
-            { header: 'Priority', key: 'priority' },
-            { header: 'Contractor', key: 'contractor' },
+            { header: "Work Order ID", key: "id" },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Maintenance Type", key: "maintenance_type" },
+            { header: "Description", key: "description" },
+            { header: "Scheduled Date", key: "scheduled_date" },
+            { header: "Status", key: "status" },
+            { header: "Priority", key: "priority" },
+            { header: "Contractor", key: "contractor" },
           ];
           break;
+        }
 
-        case 'Maintenance Strategy':
-          const strategyRes = await fetch(`${API_URL}/maintenance`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
+        case "Maintenance Strategy": {
+          const strategyRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
           const strategyData = await strategyRes.json();
+
           data = (strategyData.records || []).map((maint: any) => ({
             ...maint,
-            asset_number: maint.asset_ref || maint.asset_number || '-',
-            asset_type: maint.asset_type_name || maint.asset_type || '-',
-            maintenance_strategy: maint.maintenance_strategy || maint.maintenance_type || '-',
+            asset_number: maint.asset_ref || maint.asset_number || "-",
+            asset_type: maint.asset_type_name || maint.asset_type || "-",
+            maintenance_strategy: maint.maintenance_strategy || maint.maintenance_type || "-",
           }));
+
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Maintenance Type', key: 'maintenance_type' },
-            { header: 'Strategy', key: 'maintenance_strategy' },
-            { header: 'Scheduled Date', key: 'scheduled_date' },
-            { header: 'Completed Date', key: 'completed_date' },
-            { header: 'Status', key: 'status' },
-            { header: 'Cost (ZAR)', key: 'actual_cost' },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Maintenance Type", key: "maintenance_type" },
+            { header: "Strategy", key: "maintenance_strategy" },
+            { header: "Scheduled Date", key: "scheduled_date" },
+            { header: "Completed Date", key: "completed_date" },
+            { header: "Status", key: "status" },
+            { header: "Cost (ZAR)", key: "actual_cost" },
           ];
           break;
+        }
 
-        case 'Inventory with Images':
-        case 'Inspection Photos Summary':
-        case 'Asset Condition Photos':
-        case 'Photo Gallery Report':
-          // Fetch assets with their photos
-          const photoAssetsRes = await fetch(`${API_URL}/assets`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const photoAssetsData = await photoAssetsRes.json();
-          const assets = photoAssetsData.assets || [];
-          
-          // Fetch photos for each asset
+        case "Inventory with Images":
+        case "Inspection Photos Summary":
+        case "Asset Condition Photos":
+        case "Photo Gallery Report": {
+          const assets = await fetchAllAssets();
+
           const assetsWithPhotos = await Promise.all(
             assets.map(async (asset: any) => {
-              // Validate asset_id before fetching photos
               const assetId = asset.asset_id;
-              if (!assetId || assetId === 'undefined') {
-                console.log('[Photos] Skipping asset with invalid ID:', asset.asset_ref);
+              if (!assetId || assetId === "undefined") {
+                console.log("[Photos] Skipping asset with invalid ID:", asset.asset_ref);
                 return { ...asset, photos: [] };
               }
 
-              // Validate assetId is a UUID
               const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
               if (!uuidRegex.test(assetId)) {
-                console.log('[Photos] Skipping asset with invalid UUID format:', asset.asset_ref);
+                console.log("[Photos] Skipping asset with invalid UUID format:", asset.asset_ref);
                 return { ...asset, photos: [] };
               }
 
               try {
                 const photosRes = await fetch(`${API_URL}/assets/${assetId}/photos`, {
-                  headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+                  headers: authHeaders,
                 });
-                
+
                 if (photosRes.ok) {
                   const photosData = await photosRes.json();
                   const photos = photosData.photos || [];
-                  
-                  // Filter photos based on report type
+
                   let filteredPhotos = photos;
-                  if (reportType === 'Inventory with Images') {
-                    // Include main photo (0.jpg) and all inspection photos
-                    filteredPhotos = photos.filter((p: any) => 
-                      p.name === '0.jpg' || p.name === '0.jpeg' || p.name === '0.png' || /^[1-6](_\d+)?\./.test(p.name)
+
+                  if (reportType === "Inventory with Images") {
+                    filteredPhotos = photos.filter(
+                      (p: any) =>
+                        p.name === "0.jpg" ||
+                        p.name === "0.jpeg" ||
+                        p.name === "0.png" ||
+                        /^[1-6](_\d+)?\./.test(p.name)
                     );
-                  } else if (reportType === 'Inspection Photos Summary') {
-                    // Only inspection photos (1.jpg, 1_1.jpg, etc.)
+                  } else if (reportType === "Inspection Photos Summary") {
                     filteredPhotos = photos.filter((p: any) => /^[1-6](_\d+)?\./.test(p.name));
-                  } else if (reportType === 'Asset Condition Photos') {
-                    // Main asset photo only
-                    filteredPhotos = photos.filter((p: any) => 
-                      p.name === '0.jpg' || p.name === '0.jpeg' || p.name === '0.png'
+                  } else if (reportType === "Asset Condition Photos") {
+                    filteredPhotos = photos.filter(
+                      (p: any) => p.name === "0.jpg" || p.name === "0.jpeg" || p.name === "0.png"
                     );
-                  } else if (reportType === 'Photo Gallery Report') {
-                    // All photos
+                  } else if (reportType === "Photo Gallery Report") {
                     filteredPhotos = photos;
                   }
-                  
+
                   return {
                     ...asset,
                     photos: filteredPhotos,
@@ -733,7 +779,7 @@ const maintenance = maintenanceData.records || [];
               } catch (error) {
                 console.error(`Error fetching photos for asset ${asset.asset_id}:`, error);
               }
-              
+
               return {
                 ...asset,
                 photos: [],
@@ -742,136 +788,89 @@ const maintenance = maintenanceData.records || [];
               };
             })
           );
-          
-          // Filter out assets without photos for photo-only reports
-          let filteredAssets = reportType === 'Photo Gallery Report' 
-            ? assetsWithPhotos.filter(a => a.photo_count > 0)
-            : assetsWithPhotos;
-          
-          // Apply user-selected filters for photo reports
-          if (filterAssetType !== 'all') {
-            filteredAssets = filteredAssets.filter((asset: any) => 
-              asset.asset_type_name?.toLowerCase().includes(filterAssetType)
-            );
-          }
-          
-          if (filterRegion !== 'all') {
-            filteredAssets = filteredAssets.filter((asset: any) => 
-              asset.region?.toLowerCase().includes(filterRegion)
-            );
-          }
-          
-          if (filterCondition !== 'all') {
-            filteredAssets = filteredAssets.filter((asset: any) => {
-              const ci = parseFloat(asset.latest_ci);
-              if (isNaN(ci)) return false;
-              
-              switch(filterCondition) {
-                case 'excellent': return ci >= 80 && ci <= 100;
-                case 'good': return ci >= 60 && ci < 80;
-                case 'fair': return ci >= 40 && ci < 60;
-                case 'poor': return ci >= 20 && ci < 40;
-                case 'critical': return ci >= 0 && ci < 20;
-                default: return true;
-              }
-            });
-          }
-          
-          if (filterUrgency !== 'all') {
-            filteredAssets = filteredAssets.filter((asset: any) => 
-              asset.latest_urgency?.toString() === filterUrgency
-            );
-          }
-          
+
+          let filteredAssets =
+            reportType === "Photo Gallery Report"
+              ? assetsWithPhotos.filter((a) => a.photo_count > 0)
+              : assetsWithPhotos;
+
+          filteredAssets = applyAssetFilters(filteredAssets);
+
           data = filteredAssets.map((asset: any) => ({
             ...asset,
-            route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
-            chainage_km: asset.km_marker || '-',
-            condition_index: asset.latest_ci || '-',
-            urgency_category: asset.latest_urgency || '-',
-            coordinates: asset.gps_lat && asset.gps_lng ? `${Number(asset.gps_lat).toFixed(6)}, ${Number(asset.gps_lng).toFixed(6)}` : '-',
-            description: asset.description || asset.asset_type_name || '-',
+            route_road: asset.road_number || asset.road_name
+              ? `${asset.road_number || ""} ${asset.road_name || ""}`.trim()
+              : "-",
+            chainage_km: asset.km_marker || "-",
+            condition_index: getAssetCI(asset),
+            urgency_category: getAssetUrgency(asset),
+            coordinates:
+              asset.gps_lat && asset.gps_lng
+                ? `${Number(asset.gps_lat).toFixed(6)}, ${Number(asset.gps_lng).toFixed(6)}`
+                : "-",
+            description: asset.description || asset.asset_type_name || "-",
           }));
-          
+
           columns = [
-            { header: 'Reference Number', key: 'asset_ref' },
-            { header: 'Coordinates', key: 'coordinates' },
-            { header: 'Road Name', key: 'route_road' },
-            { header: 'Description', key: 'description' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Urgency', key: 'urgency_category' },
-            { header: 'Status', key: 'status' },
-            { header: 'Photos', key: 'photo_count' },
+            { header: "Reference Number", key: "asset_ref" },
+            { header: "Coordinates", key: "coordinates" },
+            { header: "Road Name", key: "route_road" },
+            { header: "Description", key: "description" },
+            { header: "Condition Index", key: "condition_index" },
+            { header: "Urgency", key: "urgency_category" },
+            { header: "Status", key: "status" },
+            { header: "Photos", key: "photo_count" },
           ];
           break;
+        }
 
         default:
-          toast.error('Unknown report type');
+          toast.error("Unknown report type");
           return;
       }
 
-      if (reportType.includes('Photo')) {
-        if (format === 'PDF') {
+      console.log(`[Reports] Exporting ${data.length} rows for ${reportType}`);
+      toast.success(`Preparing ${data.length} rows for ${reportType}`);
+
+      if (photoReportTypes.includes(reportType)) {
+        if (format === "PDF") {
           await generatePhotoPDFReport({
             title,
             data,
             columns,
-            tenant: {
-              organizationName: tenant.organization_name || tenant.organizationName,
-              logoUrl: tenant.logo_url || tenant.logoUrl,
-              primaryColor: tenant.primary_color || tenant.primaryColor || '#010D13',
-              regionName: tenant.region_name || tenant.regionName,
-              currency: 'ZAR',
-              tagline: tenant.tagline,
-              address: tenant.address,
-              phone: tenant.phone,
-              email: tenant.email,
-              website: tenant.website,
-            },
-            fileName: `${fileName}-${new Date().toISOString().split('T')[0]}`,
+            tenant: getTenantBranding(),
+            fileName: `${fileName}-${new Date().toISOString().split("T")[0]}`,
             includeDate: true,
             includeFooter: true,
           });
-        } else if (format === 'Excel') {
+        } else if (format === "Excel") {
           await generatePhotoExcelReport({
             title,
             data,
             columns,
-            tenant: {
-              organizationName: tenant.organization_name || tenant.organizationName,
-              logoUrl: tenant.logo_url || tenant.logoUrl,
-              primaryColor: tenant.primary_color || tenant.primaryColor || '#010D13',
-              regionName: tenant.region_name || tenant.regionName,
-              currency: 'ZAR',
-              tagline: tenant.tagline,
-              address: tenant.address,
-              phone: tenant.phone,
-              email: tenant.email,
-              website: tenant.website,
-            },
-            fileName: `${fileName}-${new Date().toISOString().split('T')[0]}`,
+            tenant: getTenantBranding(),
+            fileName: `${fileName}-${new Date().toISOString().split("T")[0]}`,
+            includeDate: true,
+            includeFooter: true,
+          });
+        } else {
+          await downloadReport("csv", {
+            title,
+            data,
+            columns,
+            tenant: getTenantBranding(),
+            fileName: `${fileName}-${new Date().toISOString().split("T")[0]}`,
             includeDate: true,
             includeFooter: true,
           });
         }
       } else {
-        await downloadReport(format.toLowerCase() as 'pdf' | 'excel' | 'csv', {
+        await downloadReport(format.toLowerCase() as "pdf" | "excel" | "csv", {
           title,
           data,
           columns,
-          tenant: {
-            organizationName: tenant.organization_name || tenant.organizationName,
-            logoUrl: tenant.logo_url || tenant.logoUrl,
-            primaryColor: tenant.primary_color || tenant.primaryColor || '#010D13',
-            regionName: tenant.region_name || tenant.regionName,
-            currency: 'ZAR',
-            tagline: tenant.tagline,
-            address: tenant.address,
-            phone: tenant.phone,
-            email: tenant.email,
-            website: tenant.website,
-          },
-          fileName: `${fileName}-${new Date().toISOString().split('T')[0]}`,
+          tenant: getTenantBranding(),
+          fileName: `${fileName}-${new Date().toISOString().split("T")[0]}`,
           includeDate: true,
           includeFooter: true,
         });
@@ -879,8 +878,8 @@ const maintenance = maintenanceData.records || [];
 
       toast.success(`${reportType} exported as ${format} successfully!`);
     } catch (error) {
-      console.error('Error exporting report:', error);
-      toast.error(`Failed to export report: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error("Error exporting report:", error);
+      toast.error(`Failed to export report: ${error instanceof Error ? error.message : "Unknown error"}`);
     } finally {
       setLoading(false);
     }
@@ -888,120 +887,117 @@ const maintenance = maintenanceData.records || [];
 
   const handleGenerateCustomReport = async () => {
     try {
-      toast.info('Generating custom report...');
-      
+      toast.info("Generating custom report...");
+
       let data: any[] = [];
       let columns: any[] = [];
-      let title = `Custom ${customReportType.charAt(0).toUpperCase() + customReportType.slice(1)} Report`;
-      
+      const title = `Custom ${customReportType.charAt(0).toUpperCase() + customReportType.slice(1)} Report`;
+
       switch (customReportType) {
-        case 'assets':
-          const assetsRes = await fetch(`${API_URL}/assets`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const assetsData = await assetsRes.json();
-          data = (assetsData.assets || []).map((asset: any) => ({
+        case "assets": {
+          const assets = await fetchAllAssets();
+
+          data = assets.map((asset: any) => ({
             ...asset,
-            route_road: asset.road_number || asset.road_name ? `${asset.road_number || ''} ${asset.road_name || ''}`.trim() : '-',
-            chainage_km: asset.km_marker || '-',
-            condition_index: asset.latest_ci || '-',
+            route_road: asset.road_number || asset.road_name
+              ? `${asset.road_number || ""} ${asset.road_name || ""}`.trim()
+              : "-",
+            chainage_km: asset.km_marker || "-",
+            condition_index: getAssetCI(asset),
           }));
-          
-          if (customAssetType !== 'all') {
-            data = data.filter((asset: any) => 
-              asset.asset_type_name?.toLowerCase().includes(customAssetType)
+
+          if (customAssetType !== "all") {
+            data = data.filter((asset: any) =>
+              asset.asset_type_name?.toLowerCase().includes(customAssetType.toLowerCase())
             );
           }
-          if (customRegion !== 'all') {
-            data = data.filter((asset: any) => 
-              asset.region?.toLowerCase().includes(customRegion)
+
+          if (customRegion !== "all") {
+            data = data.filter((asset: any) =>
+              asset.region?.toLowerCase().includes(customRegion.toLowerCase())
             );
           }
-          
+
           columns = [
-            { header: 'Asset Number', key: 'asset_ref' },
-            { header: 'Asset Type', key: 'asset_type_name' },
-            { header: 'Description', key: 'description' },
-            { header: 'Route/Road', key: 'route_road' },
-            { header: 'Chainage', key: 'chainage_km' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Status', key: 'status' },
-            { header: 'Region', key: 'region' },
+            { header: "Asset Number", key: "asset_ref" },
+            { header: "Asset Type", key: "asset_type_name" },
+            { header: "Description", key: "description" },
+            { header: "Route/Road", key: "route_road" },
+            { header: "Chainage", key: "chainage_km" },
+            { header: "Condition Index", key: "condition_index" },
+            { header: "Status", key: "status" },
+            { header: "Region", key: "region" },
           ];
           break;
-          
-        case 'inspections':
-          const inspRes = await fetch(`${API_URL}/inspections`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
-          const inspData = await inspRes.json();
-          data = (inspData.inspections || []).map((insp: any) => ({
+        }
+
+        case "inspections": {
+          const inspections = await fetchAllInspections();
+
+          data = inspections.map((insp: any) => ({
             ...insp,
-            asset_number: insp.asset_ref || insp.asset_number || '-',
-            asset_type: insp.asset_type_name || insp.asset_type || '-',
-            condition_index: insp.ci_final || insp.conditional_index || '-',
-            urgency_category: insp.calculated_urgency || insp.urgency || '-',
+            asset_number: insp.asset_ref || insp.asset_number || "-",
+            asset_type: insp.asset_type_name || insp.asset_type || "-",
+            condition_index: getInspectionCI(insp),
+            urgency_category: getInspectionUrgency(insp),
           }));
-          
+
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Inspection Date', key: 'inspection_date' },
-            { header: 'Inspector', key: 'inspector_name' },
-            { header: 'Condition Index', key: 'condition_index' },
-            { header: 'Urgency', key: 'urgency_category' },
-            { header: 'Status', key: 'status' },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Inspection Date", key: "inspection_date" },
+            { header: "Inspector", key: "inspector_name" },
+            { header: "Condition Index", key: "condition_index" },
+            { header: "Urgency", key: "urgency_category" },
+            { header: "Status", key: "status" },
           ];
           break;
-          
-        case 'maintenance':
-          const maintRes = await fetch(`${API_URL}/maintenance`, {
-            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-          });
+        }
+
+        case "maintenance": {
+          const maintRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
           const maintData = await maintRes.json();
+
           data = (maintData.records || []).map((maint: any) => ({
             ...maint,
-            asset_number: maint.asset_ref || maint.asset_number || '-',
-            asset_type: maint.asset_type_name || maint.asset_type || '-',
+            asset_number: maint.asset_ref || maint.asset_number || "-",
+            asset_type: maint.asset_type_name || maint.asset_type || "-",
           }));
-          
+
           columns = [
-            { header: 'Asset Number', key: 'asset_number' },
-            { header: 'Asset Type', key: 'asset_type' },
-            { header: 'Maintenance Type', key: 'maintenance_type' },
-            { header: 'Scheduled Date', key: 'scheduled_date' },
-            { header: 'Completed Date', key: 'completed_date' },
-            { header: 'Status', key: 'status' },
-            { header: 'Cost (ZAR)', key: 'actual_cost' },
+            { header: "Asset Number", key: "asset_number" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Maintenance Type", key: "maintenance_type" },
+            { header: "Scheduled Date", key: "scheduled_date" },
+            { header: "Completed Date", key: "completed_date" },
+            { header: "Status", key: "status" },
+            { header: "Cost (ZAR)", key: "actual_cost" },
           ];
           break;
+        }
+
+        default:
+          toast.error("Unknown custom report type");
+          return;
       }
 
-      await downloadReport('pdf', {
+      console.log(`[Reports] Generating custom report with ${data.length} rows`);
+      toast.success(`Preparing ${data.length} rows for custom report`);
+
+      await downloadReport("pdf", {
         title,
         data,
         columns,
-        tenant: {
-          organizationName: tenant.organization_name,
-          logoUrl: tenant.logo_url,
-          primaryColor: tenant.primary_color,
-          regionName: tenant.region_name,
-          currency: 'ZAR',
-          tagline: tenant.tagline,
-          address: tenant.address,
-          phone: tenant.phone,
-          email: tenant.email,
-          website: tenant.website,
-        },
-        fileName: `custom-report-${customReportType}-${new Date().toISOString().split('T')[0]}`,
+        tenant: getTenantBranding(),
+        fileName: `custom-report-${customReportType}-${new Date().toISOString().split("T")[0]}`,
         includeDate: true,
         includeFooter: true,
       });
 
-      toast.success('Custom report generated successfully!');
+      toast.success("Custom report generated successfully!");
     } catch (error) {
-      console.error('Error generating custom report:', error);
-      toast.error('Failed to generate custom report');
+      console.error("Error generating custom report:", error);
+      toast.error("Failed to generate custom report");
     }
   };
 
@@ -1081,14 +1077,12 @@ const maintenance = maintenanceData.records || [];
             </TabsList>
 
             <TabsContent value="standard" className="space-y-4 mt-4">
-              {/* Global Filter Section for All Standard Reports */}
               <div className="p-3 border rounded-lg bg-accent/20 space-y-3">
                 <h4 className="text-xs font-semibold flex items-center gap-2">
                   <Filter className="w-3 h-3" />
                   Filter Assets
                 </h4>
-                
-                {/* Search Input */}
+
                 <div>
                   <Label className="text-xs mb-1 block">Search Assets</Label>
                   <div className="relative">
@@ -1101,7 +1095,7 @@ const maintenance = maintenanceData.records || [];
                     />
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-4 gap-2">
                   <div>
                     <Label className="text-xs mb-1 block">Asset Type</Label>
@@ -1117,7 +1111,7 @@ const maintenance = maintenanceData.records || [];
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div>
                     <Label className="text-xs mb-1 block">Region</Label>
                     <Select value={filterRegion} onValueChange={setFilterRegion}>
@@ -1132,7 +1126,7 @@ const maintenance = maintenanceData.records || [];
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div>
                     <Label className="text-xs mb-1 block">Ward</Label>
                     <Select value={filterWard} onValueChange={setFilterWard}>
@@ -1147,7 +1141,7 @@ const maintenance = maintenanceData.records || [];
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div>
                     <Label className="text-xs mb-1 block">Depot</Label>
                     <Select value={filterDepot} onValueChange={setFilterDepot}>
@@ -1162,7 +1156,7 @@ const maintenance = maintenanceData.records || [];
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div>
                     <Label className="text-xs mb-1 block">Owner</Label>
                     <Select value={filterOwner} onValueChange={setFilterOwner}>
@@ -1177,7 +1171,7 @@ const maintenance = maintenanceData.records || [];
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div>
                     <Label className="text-xs mb-1 block">Road Name</Label>
                     <Select value={filterRoadName} onValueChange={setFilterRoadName}>
@@ -1192,7 +1186,7 @@ const maintenance = maintenanceData.records || [];
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div>
                     <Label className="text-xs mb-1 block">Status</Label>
                     <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -1208,7 +1202,7 @@ const maintenance = maintenanceData.records || [];
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div>
                     <Label className="text-xs mb-1 block">Condition (CI)</Label>
                     <Select value={filterCondition} onValueChange={setFilterCondition}>
@@ -1225,7 +1219,7 @@ const maintenance = maintenanceData.records || [];
                       </SelectContent>
                     </Select>
                   </div>
-                  
+
                   <div>
                     <Label className="text-xs mb-1 block">Urgency</Label>
                     <Select value={filterUrgency} onValueChange={setFilterUrgency}>
@@ -1243,7 +1237,7 @@ const maintenance = maintenanceData.records || [];
                   </div>
                 </div>
               </div>
-              
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-3">
                   <h3 className="font-semibold text-sm flex items-center gap-2">
@@ -1251,19 +1245,19 @@ const maintenance = maintenanceData.records || [];
                     Asset Reports
                   </h3>
                   <div className="space-y-2">
-                    {['Asset Inventory', 'Asset Valuation', 'Assets by Location', 'Condition Summary'].map((report) => (
+                    {["Asset Inventory", "Asset Valuation", "Assets by Location", "Condition Summary"].map((report) => (
                       <div key={report} className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors">
                         <span className="text-sm font-medium">{report}</span>
                         <div className="flex gap-2">
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'PDF')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "PDF")}>
                             <Download className="w-3 h-3 mr-1" />
                             PDF
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'Excel')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "Excel")}>
                             <Download className="w-3 h-3 mr-1" />
                             Excel
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'CSV')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "CSV")}>
                             <Download className="w-3 h-3 mr-1" />
                             CSV
                           </Button>
@@ -1279,19 +1273,19 @@ const maintenance = maintenanceData.records || [];
                     Inspection Reports
                   </h3>
                   <div className="space-y-2">
-                    {['Inspection Summary', 'CI Trends', 'Defect Analysis', 'Inspector Performance'].map((report) => (
+                    {["Inspection Summary", "CI Trends", "Defect Analysis", "Inspector Performance"].map((report) => (
                       <div key={report} className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors">
                         <span className="text-sm font-medium">{report}</span>
                         <div className="flex gap-2">
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'PDF')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "PDF")}>
                             <Download className="w-3 h-3 mr-1" />
                             PDF
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'Excel')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "Excel")}>
                             <Download className="w-3 h-3 mr-1" />
                             Excel
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'CSV')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "CSV")}>
                             <Download className="w-3 h-3 mr-1" />
                             CSV
                           </Button>
@@ -1307,19 +1301,19 @@ const maintenance = maintenanceData.records || [];
                     Maintenance Reports
                   </h3>
                   <div className="space-y-2">
-                    {['Maintenance Summary', 'Cost Analysis', 'Work Order Status', 'Maintenance Strategy'].map((report) => (
+                    {["Maintenance Summary", "Cost Analysis", "Work Order Status", "Maintenance Strategy"].map((report) => (
                       <div key={report} className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors">
                         <span className="text-sm font-medium">{report}</span>
                         <div className="flex gap-2">
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'PDF')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "PDF")}>
                             <Download className="w-3 h-3 mr-1" />
                             PDF
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'Excel')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "Excel")}>
                             <Download className="w-3 h-3 mr-1" />
                             Excel
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'CSV')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "CSV")}>
                             <Download className="w-3 h-3 mr-1" />
                             CSV
                           </Button>
@@ -1334,17 +1328,17 @@ const maintenance = maintenanceData.records || [];
                     <PieChartIcon className="w-4 h-4" />
                     Photo Reports
                   </h3>
-                  
+
                   <div className="space-y-2">
-                    {['Inventory with Images', 'Inspection Photos Summary', 'Asset Condition Photos', 'Photo Gallery Report'].map((report) => (
+                    {["Inventory with Images", "Inspection Photos Summary", "Asset Condition Photos", "Photo Gallery Report"].map((report) => (
                       <div key={report} className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors">
                         <span className="text-sm font-medium">{report}</span>
                         <div className="flex gap-2">
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'PDF')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "PDF")}>
                             <Download className="w-3 h-3 mr-1" />
                             PDF
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, 'Excel')}>
+                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "Excel")}>
                             <Download className="w-3 h-3 mr-1" />
                             Excel
                           </Button>
@@ -1372,7 +1366,7 @@ const maintenance = maintenanceData.records || [];
                   </Select>
                 </div>
 
-                {customReportType === 'assets' && (
+                {customReportType === "assets" && (
                   <>
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Asset Type</label>
@@ -1511,9 +1505,7 @@ const maintenance = maintenanceData.records || [];
                 Monthly Inspections Trend
               </h3>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart
-                  data={analyticsData?.monthlyInspectionsData || []}
-                >
+                <BarChart data={analyticsData?.monthlyInspectionsData || []}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="month" />
                   <YAxis />
@@ -1526,13 +1518,11 @@ const maintenance = maintenanceData.records || [];
 
             <div className="space-y-3">
               <h3 className="font-semibold text-sm flex items-center gap-2">
-                <LineChart className="w-4 h-4" />
+                <LineChartIcon className="w-4 h-4" />
                 Maintenance Cost Trends
               </h3>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart
-                  data={analyticsData?.monthlyCostsData || []}
-                >
+                <LineChart data={analyticsData?.monthlyCostsData || []}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="month" />
                   <YAxis />
