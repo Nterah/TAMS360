@@ -38,6 +38,13 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+import {
+  getCIDisplay,
+  getUrgencyDisplay,
+  resolveCIHealth,
+  resolveCISafety,
+} from "../../utils/assetDisplay";
+
 export default function ReportsPage() {
   const { accessToken } = useContext(AuthContext);
   const { settings: tenant } = useTenant();
@@ -71,8 +78,25 @@ export default function ReportsPage() {
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
-  const authHeaders = {
-    Authorization: `Bearer ${accessToken || publicAnonKey}`,
+  const getStoredAccessToken = () => {
+    try {
+      const raw = window.localStorage.getItem(`sb-${projectId}-auth-token`);
+      if (!raw) return null;
+
+      const parsed = JSON.parse(raw);
+      return parsed?.access_token || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getAuthHeaders = () => {
+    const token = accessToken || getStoredAccessToken();
+
+    return {
+      Authorization: `Bearer ${token || publicAnonKey}`,
+      "Content-Type": "application/json",
+    };
   };
 
   const photoReportTypes = [
@@ -102,7 +126,114 @@ export default function ReportsPage() {
     insp?.calculated_urgency ??
     insp?.urgency ??
     "-";
+  const firstDefined = (...values: any[]) => {
+    for (const value of values) {
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return "-";
+  };
 
+  const asDash = (value: any) =>
+    value === undefined || value === null || value === "" ? "-" : value;
+
+  const buildLatestInspectionByAssetId = (inspections: any[]) => {
+    const map = new Map<string, any>();
+
+    [...inspections]
+      .sort((a: any, b: any) => {
+        const dateA = new Date(a.inspection_date || a.created_at || 0).getTime();
+        const dateB = new Date(b.inspection_date || b.created_at || 0).getTime();
+        return dateB - dateA;
+      })
+      .forEach((inspection: any) => {
+        if (inspection.asset_id && !map.has(inspection.asset_id)) {
+          map.set(inspection.asset_id, inspection);
+        }
+      });
+
+    return map;
+  };
+
+  const makeAssetInspectionDisplaySource = (asset: any, latestInspection: any) => ({
+    ...asset,
+    latest_inspection: latestInspection || asset.latest_inspection || null,
+    inspection: latestInspection || asset.inspection || null,
+  });
+
+  const buildAssetRegisterRows = (assets: any[], inspections: any[]) => {
+    const latestInspectionByAssetId = buildLatestInspectionByAssetId(inspections);
+
+    return assets.map((asset: any) => {
+      const latestInspection = latestInspectionByAssetId.get(asset.asset_id) || asset.latest_inspection || null;
+      const source = makeAssetInspectionDisplaySource(asset, latestInspection);
+
+      const ciDisplay = getCIDisplay(source);
+      const urgencyDisplay = getUrgencyDisplay(source);
+
+      const metadata = latestInspection?.calculation_metadata || asset.calculation_metadata || {};
+
+      const ciHealth = resolveCIHealth(source);
+      const ciSafety = resolveCISafety(source);
+
+      const routeRoad =
+        asset.road_number || asset.road_name
+          ? `${asset.road_number || ""} ${asset.road_name || ""}`.trim()
+          : firstDefined(asset.location_road_name, asset.location, asset.road_name);
+
+      return {
+        unique_id: firstDefined(asset.unique_id, asset.uniqueId, asset.asset_unique_id, asset.asset_id),
+        asset_ref: firstDefined(asset.asset_ref, asset.reference_number, asset.referenceNumber),
+        asset_type_name: firstDefined(asset.asset_type_name, asset.type, asset.asset_type),
+        location_road_name: routeRoad,
+        region: asDash(asset.region),
+        ward: firstDefined(asset.ward, asset.wards, asset.ward_no),
+
+        start_km: firstDefined(asset.start_km, asset.start_chainage, asset.km_start, asset.km_marker),
+        end_km: firstDefined(asset.end_km, asset.end_chainage, asset.km_end),
+
+        start_latitude: firstDefined(asset.start_latitude, asset.start_lat, asset.gps_lat, asset.latitude),
+        start_longitude: firstDefined(asset.start_longitude, asset.start_lng, asset.gps_lng, asset.longitude),
+        end_latitude: firstDefined(asset.end_latitude, asset.end_lat),
+        end_longitude: firstDefined(asset.end_longitude, asset.end_lng),
+
+        name_code: firstDefined(asset.name_code, asset.name, asset.code, asset.sign_code, asset.description),
+        mounting_type: firstDefined(asset.mounting_type, asset.mountng_type, asset.mount_type),
+        posts_supports: firstDefined(asset.posts_supports, asset.number_of_posts, asset.num_posts, asset.supports),
+        beams: firstDefined(asset.beams, asset.number_of_beams, asset.num_beams),
+        width_m: firstDefined(asset.width_m, asset.width),
+        length_m: firstDefined(asset.length_m, asset.length),
+        height_m: firstDefined(asset.height_m, asset.height),
+        orientation_position: firstDefined(asset.orientation_position, asset.orientation, asset.position, asset.side_of_road),
+
+        date_of_purchase: firstDefined(asset.date_of_purchase, asset.purchase_date, asset.install_date),
+        purchase_cost: firstDefined(asset.purchase_cost, asset.installation_cost),
+        last_revaluation: firstDefined(asset.last_revaluation, asset.last_valuation_date),
+        residual_value: firstDefined(asset.residual_value),
+        useful_life: firstDefined(asset.useful_life, asset.useful_life_years, asset.expected_life_years),
+        depreciation_rate: firstDefined(asset.depreciation_rate),
+        accumulated_depreciation: firstDefined(asset.accumulated_depreciation, asset.accum_depreciation),
+
+        asset_condition: firstDefined(asset.asset_condition, asset.condition, ciDisplay.label),
+        deru_degree: firstDefined(metadata.overall_degree, latestInspection?.overall_degree, latestInspection?.deru_degree, asset.deru_degree),
+        deru_extent: firstDefined(metadata.overall_extent, latestInspection?.overall_extent, latestInspection?.deru_extent, asset.deru_extent),
+        deru_relevance: firstDefined(metadata.overall_relevancy, latestInspection?.overall_relevancy, latestInspection?.deru_relevance, asset.deru_relevance),
+        deru_urgency: urgencyDisplay.label,
+        ci_health: ciHealth ?? "-",
+        ci_safety: ciSafety ?? "-",
+        ci: ciDisplay.label,
+
+        image: firstDefined(
+          asset.image,
+          asset.image_url,
+          asset.photo_url,
+          asset.main_photo_url,
+          latestInspection?.photo_url,
+          latestInspection?.image_url
+        ),
+      };
+    });
+  };
+    
   const parseNumericCI = (value: any) => {
     if (value === null || value === undefined || value === "-" || value === "") return NaN;
     const parsed = parseFloat(value);
@@ -130,11 +261,12 @@ export default function ReportsPage() {
 
     do {
       const res = await fetch(`${API_URL}/assets?page=${page}&pageSize=${pageSize}`, {
-        headers: authHeaders,
+        headers: getAuthHeaders(),
       });
 
       if (!res.ok) {
-        throw new Error(`Failed to fetch assets page ${page}`);
+        const errorText = await res.text().catch(() => "");
+        throw new Error(`Failed to fetch assets page ${page}: ${res.status} ${errorText}`);
       }
 
       const json = await res.json();
@@ -154,11 +286,12 @@ export default function ReportsPage() {
 
     do {
       const res = await fetch(`${API_URL}/inspections?page=${page}&pageSize=${pageSize}`, {
-        headers: authHeaders,
+        headers: getAuthHeaders(),
       });
 
       if (!res.ok) {
-        throw new Error(`Failed to fetch inspections page ${page}`);
+        const errorText = await res.text().catch(() => "");
+        throw new Error(`Failed to fetch inspections page ${page}: ${res.status} ${errorText}`);
       }
 
       const json = await res.json();
@@ -182,10 +315,18 @@ export default function ReportsPage() {
   const CHART_COLORS = [COLORS.skyBlue, COLORS.green, COLORS.yellow, COLORS.grey, COLORS.primary];
 
   useEffect(() => {
+    const token = accessToken || getStoredAccessToken();
+
+    if (!token) {
+      console.warn("[ReportsPage] Waiting for authenticated session before loading report data.");
+      setLoading(false);
+      return;
+    }
+
     fetchReportSummary();
     fetchAnalyticsData();
     fetchUniqueFilterValues();
-  }, []);
+  }, [accessToken]);
 
   const fetchUniqueFilterValues = async () => {
     try {
@@ -215,7 +356,7 @@ export default function ReportsPage() {
         fetchAllAssets(),
         fetchAllInspections(),
         fetch(`${API_URL}/maintenance`, {
-          headers: authHeaders,
+          headers: getAuthHeaders(),
         }),
       ]);
 
@@ -315,9 +456,9 @@ export default function ReportsPage() {
       setLoading(true);
 
       const [assetsRes, inspectionsRes, maintenanceRes] = await Promise.all([
-        fetch(`${API_URL}/assets/count`, { headers: authHeaders }),
-        fetch(`${API_URL}/inspections/count`, { headers: authHeaders }),
-        fetch(`${API_URL}/maintenance/count`, { headers: authHeaders }),
+        fetch(`${API_URL}/assets/count`, { headers: getAuthHeaders() }),
+        fetch(`${API_URL}/inspections/count`, { headers: getAuthHeaders() }),
+        fetch(`${API_URL}/maintenance/count`, { headers: getAuthHeaders() }),
       ]);
 
       const assetsCount = assetsRes.ok ? (await assetsRes.json()).count : 0;
@@ -424,27 +565,52 @@ export default function ReportsPage() {
 
       switch (reportType) {
         case "Asset Inventory": {
-          const assets = await fetchAllAssets();
-          const assetsInventory = assets.map((asset: any) => ({
-            ...asset,
-            route_road: asset.road_number || asset.road_name
-              ? `${asset.road_number || ""} ${asset.road_name || ""}`.trim()
-              : "-",
-            chainage_km: asset.km_marker || "-",
-            condition_index: getAssetCI(asset),
-          }));
+          const [assets, inspections] = await Promise.all([
+            fetchAllAssets(),
+            fetchAllInspections(),
+          ]);
 
-          data = applyAssetFilters(assetsInventory);
+          const assetRegisterRows = buildAssetRegisterRows(assets, inspections);
+
+          data = applyAssetFilters(assetRegisterRows);
 
           columns = [
-            { header: "Asset Number", key: "asset_ref" },
-            { header: "Asset Type", key: "asset_type_name" },
-            { header: "Description", key: "description" },
-            { header: "Route/Road", key: "route_road" },
-            { header: "Chainage", key: "chainage_km" },
-            { header: "Condition Index", key: "condition_index" },
-            { header: "Status", key: "status" },
-            { header: "Region", key: "region" },
+            { header: "UNIQUE ID", key: "unique_id" },
+            { header: "REFERENCE NUMBER", key: "asset_ref" },
+            { header: "TYPE", key: "asset_type_name" },
+            { header: "LOCATION/ROAD NAME", key: "location_road_name" },
+            { header: "REGION", key: "region" },
+            { header: "WARD/S", key: "ward" },
+            { header: "START KM", key: "start_km" },
+            { header: "END KM", key: "end_km" },
+            { header: "START LATITUDE", key: "start_latitude" },
+            { header: "START LONGITUDE", key: "start_longitude" },
+            { header: "END LATITUDE", key: "end_latitude" },
+            { header: "END LONGITUDE", key: "end_longitude" },
+            { header: "NAME/CODE", key: "name_code" },
+            { header: "MOUNTING TYPE", key: "mounting_type" },
+            { header: "# POSTS/SUPPORTS", key: "posts_supports" },
+            { header: "# BEAMS", key: "beams" },
+            { header: "WIDTH (m)", key: "width_m" },
+            { header: "LENGTH (m)", key: "length_m" },
+            { header: "HEIGHT (m)", key: "height_m" },
+            { header: "ORIENTATION/POSITION", key: "orientation_position" },
+            { header: "DATE OF PURCHASE", key: "date_of_purchase" },
+            { header: "PURCHASE COST", key: "purchase_cost" },
+            { header: "LAST REVALUATION", key: "last_revaluation" },
+            { header: "RESIDUAL VALUE", key: "residual_value" },
+            { header: "USEFUL LIFE", key: "useful_life" },
+            { header: "DEPRECIATION RATE", key: "depreciation_rate" },
+            { header: "ACCUM. DEPRECIATION", key: "accumulated_depreciation" },
+            { header: "ASSET CONDITION", key: "asset_condition" },
+            { header: "DERU_DEGREE", key: "deru_degree" },
+            { header: "DERU_EXTENT", key: "deru_extent" },
+            { header: "DERU_RELEVANCE", key: "deru_relevance" },
+            { header: "DERU_URGENCY", key: "deru_urgency" },
+            { header: "CI_HEALTH", key: "ci_health" },
+            { header: "CI_SAFETY", key: "ci_safety" },
+            { header: "CI", key: "ci" },
+            { header: "IMAGE", key: "image" },
           ];
           break;
         }
@@ -622,7 +788,7 @@ export default function ReportsPage() {
 
         case "Maintenance Summary":
         case "Maintenance History": {
-          const maintRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
+          const maintRes = await fetch(`${API_URL}/maintenance`, { headers: getAuthHeaders() });
           const maintData = await maintRes.json();
 
           data = (maintData.records || []).map((maint: any) => ({
@@ -647,7 +813,7 @@ export default function ReportsPage() {
         }
 
         case "Cost Analysis": {
-          const costRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
+          const costRes = await fetch(`${API_URL}/maintenance`, { headers: getAuthHeaders() });
           const costData = await costRes.json();
 
           data = (costData.records || []).map((maint: any) => ({
@@ -672,7 +838,7 @@ export default function ReportsPage() {
         }
 
         case "Work Order Status": {
-          const workOrderRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
+          const workOrderRes = await fetch(`${API_URL}/maintenance`, { headers: getAuthHeaders() });
           const workOrderData = await workOrderRes.json();
 
           data = (workOrderData.records || []).map((maint: any) => ({
@@ -697,7 +863,7 @@ export default function ReportsPage() {
         }
 
         case "Maintenance Strategy": {
-          const strategyRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
+          const strategyRes = await fetch(`${API_URL}/maintenance`, { headers: getAuthHeaders() });
           const strategyData = await strategyRes.json();
 
           data = (strategyData.records || []).map((maint: any) => ({
@@ -742,7 +908,7 @@ export default function ReportsPage() {
 
               try {
                 const photosRes = await fetch(`${API_URL}/assets/${assetId}/photos`, {
-                  headers: authHeaders,
+                  headers: getAuthHeaders(),
                 });
 
                 if (photosRes.ok) {
@@ -955,7 +1121,7 @@ export default function ReportsPage() {
         }
 
         case "maintenance": {
-          const maintRes = await fetch(`${API_URL}/maintenance`, { headers: authHeaders });
+          const maintRes = await fetch(`${API_URL}/maintenance`, { headers: getAuthHeaders() });
           const maintData = await maintRes.json();
 
           data = (maintData.records || []).map((maint: any) => ({

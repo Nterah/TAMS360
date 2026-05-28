@@ -32,6 +32,90 @@ export interface ReportOptions {
   includePhotos?: boolean; // New flag for photo reports
 }
 
+type PdfPageSizeName = "a4" | "a3" | "a2" | "a1" | "a0";
+
+const PDF_PAGE_WIDTH_MM: Record<PdfPageSizeName, number> = {
+  a4: 297,   // A4 landscape width
+  a3: 420,   // A3 landscape width
+  a2: 594,   // A2 landscape width
+  a1: 841,   // A1 landscape width
+  a0: 1189,  // A0 landscape width
+};
+
+const REPORT_MIN_PDF_SIZE: Record<string, PdfPageSizeName> = {
+  "Asset Inventory": "a3",
+  "Asset Valuation": "a3",
+};
+
+function estimatePdfColumnWidth(header: string): number {
+  const cleanHeader = String(header || "").trim();
+
+  if (cleanHeader.length <= 3) return 12;
+  if (cleanHeader.length <= 8) return 18;
+  if (cleanHeader.length <= 14) return 26;
+  if (cleanHeader.length <= 22) return 36;
+
+  return 48;
+}
+
+function getPdfPageSizeForColumns(
+  reportTitle: string,
+  columns: { header: string; key: string }[]
+): PdfPageSizeName {
+  const minSize = REPORT_MIN_PDF_SIZE[reportTitle] || "a4";
+
+  const pageOrder: PdfPageSizeName[] = ["a4", "a3", "a2", "a1", "a0"];
+  const startIndex = pageOrder.indexOf(minSize);
+
+  const estimatedTableWidth =
+    columns.reduce((total, col) => total + estimatePdfColumnWidth(col.header), 0) + 30;
+
+  const allowedSizes = pageOrder.slice(startIndex);
+
+  for (const size of allowedSizes) {
+    if (estimatedTableWidth <= PDF_PAGE_WIDTH_MM[size] - 20) {
+      return size;
+    }
+  }
+
+  return "a0";
+}
+
+function getPdfFontSizeForPageSize(pageSize: PdfPageSizeName): number {
+  switch (pageSize) {
+    case "a4":
+      return 7;
+    case "a3":
+      return 7;
+    case "a2":
+      return 8;
+    case "a1":
+      return 9;
+    case "a0":
+      return 10;
+    default:
+      return 7;
+  }
+}
+
+function getPdfCellPaddingForPageSize(pageSize: PdfPageSizeName): number {
+  switch (pageSize) {
+    case "a4":
+      return 1.2;
+    case "a3":
+      return 1.5;
+    case "a2":
+      return 1.8;
+    case "a1":
+      return 2;
+    case "a0":
+      return 2.2;
+    default:
+      return 1.5;
+  }
+}
+
+
 /**
  * Load image as base64 data URL
  */
@@ -72,8 +156,18 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
   console.log('[PDF Generator] Organization Name:', tenant.organizationName);
   console.log('[PDF Generator] Logo URL:', tenant.logoUrl);
   console.log('[PDF Generator] Primary Color:', tenant.primaryColor);
-  
-  const doc = new jsPDF();
+
+  const pdfPageSize = getPdfPageSizeForColumns(title, columns);
+  const pdfFontSize = getPdfFontSizeForPageSize(pdfPageSize);
+  const pdfCellPadding = getPdfCellPaddingForPageSize(pdfPageSize);
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: pdfPageSize,
+    compress: true,
+  });
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const primaryColor = tenant.primaryColor || '#010D13';
   
@@ -222,26 +316,70 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
     head: [columns.map(col => col.header)],
     body: tableData,
     startY: yPosition,
-    theme: 'striped',
+    theme: 'grid',
+
+    margin: {
+      top: 10,
+      right: 8,
+      bottom: 20,
+      left: 8,
+    },
+
+    styles: {
+      fontSize: pdfFontSize,
+      cellPadding: pdfCellPadding,
+      overflow: 'linebreak',
+      valign: 'middle',
+      minCellHeight: 6,
+    },
+
     headStyles: {
       fillColor: [color.r, color.g, color.b],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 10,
+      fontSize: pdfFontSize,
+      halign: 'center',
+      valign: 'middle',
     },
+
     bodyStyles: {
-      fontSize: 9,
+      fontSize: pdfFontSize,
+      valign: 'top',
     },
+
     alternateRowStyles: {
       fillColor: [245, 245, 245],
     },
+
     columnStyles: columns.reduce((acc, col, index) => {
+      const header = String(col.header || '').toUpperCase();
+
       if (col.width) {
         acc[index] = { cellWidth: col.width };
+      } else if (header.includes('UNIQUE ID')) {
+        acc[index] = { cellWidth: 34 };
+      } else if (header.includes('REFERENCE')) {
+        acc[index] = { cellWidth: 34 };
+      } else if (header === 'TYPE') {
+        acc[index] = { cellWidth: 28 };
+      } else if (header.includes('LOCATION') || header.includes('ROAD')) {
+        acc[index] = { cellWidth: 44 };
+      } else if (header.includes('LATITUDE') || header.includes('LONGITUDE')) {
+        acc[index] = { cellWidth: 30 };
+      } else if (header.includes('NAME') || header.includes('CODE')) {
+        acc[index] = { cellWidth: 48 };
+      } else if (header.includes('CONDITION')) {
+        acc[index] = { cellWidth: 30 };
+      } else if (header.includes('DERU')) {
+        acc[index] = { cellWidth: 28 };
+      } else if (header.includes('CI')) {
+        acc[index] = { cellWidth: 26 };
+      } else if (header.includes('IMAGE')) {
+        acc[index] = { cellWidth: 30 };
       }
+
       return acc;
     }, {} as any),
-    margin: { top: 10, right: 15, bottom: 20, left: 15 },
   });
   
   // Add footer

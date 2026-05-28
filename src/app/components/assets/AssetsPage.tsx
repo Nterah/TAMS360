@@ -22,6 +22,14 @@ import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import EnhancedAssetForm from "./EnhancedAssetForm";
 import { requiresMigration, handleMigrationRequired } from "../../utils/migrationHelper";
 
+import {
+  getCIDisplay,
+  getUrgencyDisplay,
+  resolveCI,
+  resolveUrgency,
+  normaliseAssetForDisplay,
+} from "../../utils/assetDisplay";
+
 const ASSET_TYPES = [
   "Signage",
   "Guardrail",
@@ -40,6 +48,7 @@ const STATUSES = ["Active", "Inactive", "Needs Maintenance", "Scheduled for Repl
 export default function AssetsPage() {
   const { accessToken, user } = useContext(AuthContext);
   const [assets, setAssets] = useState<any[]>([]);
+  const [latestInspectionByAssetId, setLatestInspectionByAssetId] = useState<Record<string, any>>({});
   const [totalAssetCount, setTotalAssetCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -149,12 +158,14 @@ export default function AssetsPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setAssets(data.assets || []);
+        const firstPageAssets = (data.assets || []).map(normaliseAssetForDisplay);
+
+        setAssets(firstPageAssets);
         setTotalAssetCount(data.total || 0);
         
         // Load more pages if needed (up to 2000 assets for table display)
         if (data.totalPages > 1) {
-          const allAssets = [...(data.assets || [])];
+          const allAssets = [...firstPageAssets];
           for (let page = 2; page <= Math.min(data.totalPages, 4); page++) {
             const pageResponse = await fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
               headers: {
@@ -163,7 +174,7 @@ export default function AssetsPage() {
             });
             if (pageResponse.ok) {
               const pageData = await pageResponse.json();
-              allAssets.push(...(pageData.assets || []));
+              allAssets.push(...(pageData.assets || []).map(normaliseAssetForDisplay));
             }
           }
           setAssets(allAssets);
@@ -176,6 +187,64 @@ export default function AssetsPage() {
     }
   };
 
+  const getAssetDisplaySource = (asset: any) => {
+    const latestInspection =
+      latestInspectionByAssetId[asset.asset_id] ??
+      asset.latest_inspection ??
+      asset.inspection ??
+      null;
+
+    return {
+      ...asset,
+      latest_inspection: latestInspection,
+      inspection: latestInspection,
+    };
+  };
+
+  const fetchLatestInspectionsForAssets = async (assetList: any[]) => {
+    const targets = assetList.filter((asset) => {
+      if (!asset?.asset_id) return false;
+      return !Object.prototype.hasOwnProperty.call(latestInspectionByAssetId, asset.asset_id);
+    });
+
+    if (targets.length === 0) return;
+
+    try {
+      const results = await Promise.all(
+        targets.map(async (asset) => {
+          try {
+            const response = await fetch(`${API_URL}/assets/${asset.asset_id}/inspections`, {
+              headers: {
+                Authorization: `Bearer ${accessToken || publicAnonKey}`,
+              },
+            });
+
+            if (!response.ok) {
+              return [asset.asset_id, null] as const;
+            }
+
+            const data = await response.json();
+            return [asset.asset_id, data.inspections?.[0] || null] as const;
+          } catch {
+            return [asset.asset_id, null] as const;
+          }
+        })
+      );
+
+      setLatestInspectionByAssetId((previous) => {
+        const next = { ...previous };
+
+        results.forEach(([assetId, latestInspection]) => {
+          next[assetId] = latestInspection;
+        });
+
+        return next;
+      });
+    } catch (error) {
+      console.error("Error fetching latest inspections for assets:", error);
+    }
+  };
+  
   const handleCreateAsset = async () => {
     try {
       const response = await fetch(`${API_URL}/assets`, {
@@ -250,7 +319,7 @@ export default function AssetsPage() {
     // CI Range filter
     const matchesCIRange = (() => {
       if (filterCIRange === "all") return true;
-      const ci = asset.latest_ci;
+      const ci = resolveCI(asset);
       if (ci === null || ci === undefined) return filterCIRange === "not-inspected";
       const normalizedCI = Math.min(Math.max(ci, 0), 100);
       if (filterCIRange === "excellent") return normalizedCI >= 80;
@@ -263,7 +332,7 @@ export default function AssetsPage() {
     // Urgency filter
     const matchesUrgency = (() => {
       if (filterUrgency === "all") return true;
-      const urgency = asset.latest_urgency;
+      const urgency = resolveUrgency(asset);
       if (!urgency) return filterUrgency === "none";
       if (filterUrgency === "immediate") return urgency === "4" || urgency === "Immediate";
       if (filterUrgency === "high") return urgency === "3" || urgency === "High";
@@ -300,6 +369,23 @@ export default function AssetsPage() {
     );
   });
 
+  useEffect(() => {
+    if (loading) return;
+    if (filteredAssets.length === 0) return;
+
+    // Only enrich the currently relevant/visible subset.
+    // This prevents 1718 inspection API calls on initial load.
+    const visibleAssets = filteredAssets.slice(0, 50);
+    fetchLatestInspectionsForAssets(visibleAssets);
+  }, [
+    loading,
+    accessToken,
+    filteredAssets
+      .slice(0, 50)
+      .map((asset) => asset.asset_id)
+      .join("|"),
+  ]);
+  
   // Log filtering results when filters change
   useEffect(() => {
     if (filterCIRange !== "all" || filterUrgency !== "all") {
@@ -377,18 +463,24 @@ export default function AssetsPage() {
   };
 
   // Calculate statistics
-  const totalValuation = assets.reduce((sum, asset) => sum + (asset.replacement_value || 0), 0);
+  const totalValuation = assets.reduce((sum, asset) => {
+    const value = Number(asset.replacement_value || asset.current_value || 0);
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);  
+
   const poorConditionAssets = assets.filter(asset => {
-    const ci = asset.latest_ci;
+    const ci = resolveCI(asset);
     return ci !== null && ci < 40;
   }).length;
+
   const excellentConditionAssets = assets.filter(asset => {
-    const ci = asset.latest_ci;
+    const ci = resolveCI(asset);
     return ci !== null && ci !== undefined && ci >= 80;
   }).length;
+
   const needsAttention = assets.filter(asset => {
-    const urgency = asset.latest_urgency;
-    return urgency === "Immediate" || urgency === "Critical" || urgency === "High";
+    const urgency = resolveUrgency(asset);
+    return urgency === "4" || urgency === "3" || urgency === "Immediate" || urgency === "Critical" || urgency === "High";
   }).length;
 
   return (
@@ -759,7 +851,14 @@ export default function AssetsPage() {
               </TableHeader>
               <TableBody>
                 {filteredAssets.map((asset, index) => {
-                  const ciBadge = getCIBadge(asset.latest_ci);
+
+                  const displayAsset = getAssetDisplaySource(asset);
+                  const resolvedCI = resolveCI(displayAsset);
+                  const resolvedUrgency = resolveUrgency(displayAsset);
+                  const ciDisplay = getCIDisplay(displayAsset);
+                  const urgencyDisplay = getUrgencyDisplay(displayAsset);
+                  const ciBadge = getCIBadge(resolvedCI);
+
                   return (
                     <TableRow key={`${asset.asset_id}-${index}`}>
                       <TableCell>
@@ -823,58 +922,26 @@ export default function AssetsPage() {
                       {columns.find(c => c.id === "install_date")?.visible && (
                         <TableCell>{asset.install_date ? new Date(asset.install_date).toLocaleDateString() : "N/A"}</TableCell>
                       )}
+
                       {columns.find(c => c.id === "ci_score")?.visible && (
                         <TableCell>
-                          <Badge variant={ciBadge.variant}>
-                            {asset.latest_ci !== null ? Math.min(Math.max(asset.latest_ci, 0), 100).toFixed(0) : ciBadge.label}
+                          <Badge className={ciDisplay.className} title="CI Final = minimum of CI Health and CI Safety">
+                            {ciDisplay.label}
                           </Badge>
                         </TableCell>
                       )}
+
                       {columns.find(c => c.id === "urgency")?.visible && (
                         <TableCell>
-                          {asset.latest_urgency ? (
-                            <Badge
-                              variant={
-                                asset.latest_urgency === "4"
-                                  ? "destructive"
-                                  : asset.latest_urgency === "3"
-                                  ? "default"
-                                  : asset.latest_urgency === "2"
-                                  ? "secondary"
-                                  : asset.latest_urgency === "1" || asset.latest_urgency === "0"
-                                  ? "outline"
-                                  : asset.latest_urgency === "R"
-                                  ? "outline"
-                                  : "outline"
-                              }
-                              style={{
-                                backgroundColor: 
-                                  asset.latest_urgency === "4" ? "#d4183d" :
-                                  asset.latest_urgency === "3" ? "#F8D227" :
-                                  asset.latest_urgency === "2" ? "#F8D227" :
-                                  asset.latest_urgency === "1" ? "#39AEDF" :
-                                  asset.latest_urgency === "0" ? "#5DB32A" :
-                                  asset.latest_urgency === "R" ? "#94A3B8" :
-                                  undefined,
-                                color: "white"
-                              }}
-                              title={
-                                asset.latest_urgency === "4" ? "Immediate action" :
-                                asset.latest_urgency === "3" ? "Repair (short term)" :
-                                asset.latest_urgency === "2" ? "Repair (long term)" :
-                                asset.latest_urgency === "1" ? "Routine maintenance" :
-                                asset.latest_urgency === "0" ? "Monitor only" :
-                                asset.latest_urgency === "R" ? "Record only" :
-                                "Not assessed"
-                              }
-                            >
-                              {asset.latest_urgency}
-                            </Badge>
-                          ) : (
-                            "N/A"
-                          )}
+                          <Badge
+                            className={urgencyDisplay.className}
+                            title={urgencyDisplay.description}
+                          >
+                            {urgencyDisplay.label}
+                          </Badge>
                         </TableCell>
                       )}
+
                       {columns.find(c => c.id === "remaining_life")?.visible && (
                         <TableCell>
                           {asset.remaining_life_years !== undefined && asset.remaining_life_years !== null ? (
@@ -937,7 +1004,9 @@ export default function AssetsPage() {
             // CARD VIEW
             <div className="space-y-4">
               {filteredAssets.slice(0, 50).map((asset, index) => {
-                const ciBadge = getCIBadge(asset.latest_ci);
+                const displayAsset = getAssetDisplaySource(asset);
+                const ciDisplay = getCIDisplay(displayAsset);
+                const urgencyDisplay = getUrgencyDisplay(displayAsset);
                 return (
                   <div key={`${asset.asset_id}-${index}`} className="flex items-start gap-4 p-4 border rounded-lg hover:bg-accent/50 transition-colors">
                     <Database className="w-10 h-10 text-primary flex-shrink-0" />
@@ -946,8 +1015,11 @@ export default function AssetsPage() {
                         <h4 className="font-semibold">{asset.asset_ref || "N/A"}</h4>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">{asset.asset_type_name || "Unknown"}</Badge>
-                          <Badge variant={ciBadge.variant}>
-                            CI: {asset.latest_ci !== null ? Math.min(Math.max(asset.latest_ci, 0), 100).toFixed(0) : "N/A"}
+                          <Badge className={ciDisplay.className} title={ciDisplay.label}>
+                            CI: {ciDisplay.label}
+                          </Badge>
+                          <Badge className={urgencyDisplay.className} title={urgencyDisplay.description}>
+                            U: {urgencyDisplay.label}
                           </Badge>
                         </div>
                       </div>

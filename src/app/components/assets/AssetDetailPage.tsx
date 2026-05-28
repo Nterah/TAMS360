@@ -28,6 +28,13 @@ import {
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 
+import {
+  getCIDisplay,
+  getUrgencyDisplay,
+  resolveCI,
+  resolveUrgency,
+} from "../../utils/assetDisplay";
+
 export default function AssetDetailPage() {
   const { assetId } = useParams<{ assetId: string }>();
   const { accessToken } = useContext(AuthContext);
@@ -233,22 +240,23 @@ export default function AssetDetailPage() {
     return <Badge variant="outline">{urgency}</Badge>;
   };
 
-  // Get the latest CI from the most recent inspection
-  const getLatestCI = () => {
-    if (!inspections || inspections.length === 0) return null;
-    // Inspections are already sorted by date (descending) from the API
-    const latestInspection = inspections[0];
-    // Prioritize calculation_metadata (authoritative stored values)
-    return latestInspection.calculation_metadata?.ci_final ?? latestInspection.ci_final ?? latestInspection.conditional_index ?? null;
+  // Shared display object so Asset Detail uses the same CI/U logic as map/list/report.
+  const getAssetDisplaySource = () => {
+    const latestInspection = inspections?.[0] || null;
+
+    return {
+      ...asset,
+      latest_inspection: latestInspection,
+      inspection: latestInspection,
+    };
   };
 
-  // Get the latest urgency from the most recent inspection
+  const getLatestCI = () => {
+    return resolveCI(getAssetDisplaySource());
+  };
+
   const getLatestUrgency = () => {
-    if (!inspections || inspections.length === 0) return null;
-    // Inspections are already sorted by date (descending) from the API
-    const latestInspection = inspections[0];
-    // Prioritize calculation_metadata (authoritative stored values)
-    return latestInspection.calculation_metadata?.worst_urgency ?? latestInspection.calculated_urgency ?? latestInspection.urgency ?? null;
+    return resolveUrgency(getAssetDisplaySource());
   };
 
   if (loading) {
@@ -281,6 +289,10 @@ export default function AssetDetailPage() {
       </div>
     );
   }
+
+  const assetDisplaySource = getAssetDisplaySource();
+  const ciDisplay = getCIDisplay(assetDisplaySource);
+  const urgencyDisplay = getUrgencyDisplay(assetDisplaySource);
 
   return (
     <div className="space-y-6 pb-8">
@@ -317,7 +329,9 @@ export default function AssetDetailPage() {
             <CardTitle className="text-sm font-medium">Condition Index</CardTitle>
           </CardHeader>
           <CardContent>
-            {getCIBadge(getLatestCI() || asset.conditional_index)}
+            <Badge className={ciDisplay.className}>
+              {ciDisplay.label}
+            </Badge>
           </CardContent>
         </Card>
         <Card>
@@ -325,7 +339,9 @@ export default function AssetDetailPage() {
             <CardTitle className="text-sm font-medium">Urgency Level</CardTitle>
           </CardHeader>
           <CardContent>
-            {getUrgencyBadge(getLatestUrgency() || asset.urgency)}
+            <Badge className={urgencyDisplay.className}>
+              {urgencyDisplay.label}
+            </Badge>
           </CardContent>
         </Card>
         <Card>

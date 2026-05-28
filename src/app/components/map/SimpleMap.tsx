@@ -8,6 +8,15 @@ import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 
+
+
+import {
+  getCIDisplay,
+  getUrgencyDisplay,
+  resolveCI,
+  resolveUrgency,
+} from "../../utils/assetDisplay";
+
 interface SimpleMapProps {
   center: [number, number];
   zoom: number;
@@ -38,7 +47,8 @@ const ASSET_ICON_SHAPES = {
 const getMarkerColor = (asset: any, colorMode: string = "condition") => {
   switch (colorMode) {
     case "ci": {
-      const ci = asset.latest_ci || 0;
+      const resolvedCI = resolveCI(asset);
+      const ci = resolvedCI ?? 0;
       
       // DEBUG: Log CI value for specific problematic assets
       const assetRef = asset.asset_ref || asset.referenceNumber || asset.id;
@@ -56,7 +66,10 @@ const getMarkerColor = (asset: any, colorMode: string = "condition") => {
       return "#FF4444"; // Poor (red)
     }
     case "urgency": {
-      const urgency = asset.latest_urgency || 0;
+
+      const resolvedUrgency = resolveUrgency(asset);
+      const urgency = resolvedUrgency ? Number(resolvedUrgency) : 0;      
+
       if (urgency >= 80) return "#FF4444"; // High urgency (red)
       if (urgency >= 50) return "#F8D227"; // Medium (yellow)
       if (urgency >= 20) return "#39AEDF"; // Low (blue)
@@ -284,17 +297,24 @@ export function SimpleMap({
     const createPopupHtml = (photos: any[] = [], inspection: any = null, photosVisible: boolean = false, maintenance: any = null) => {
       // Get CI and Urgency - prioritize asset record values (used for marker color) for consistency
       // Only fall back to inspection data if asset values are not available
-      const ciDisplay = asset.latest_ci ?? 
-                       inspection?.calculation_metadata?.ci_final ?? 
-                       inspection?.ci_final ?? 
-                       inspection?.conditional_index ?? 
-                       "N/A";
-      
-      const worstUrgency = asset.latest_urgency ??
-                           inspection?.calculation_metadata?.worst_urgency ?? 
-                           inspection?.calculated_urgency ?? 
-                           inspection?.urgency ?? 
-                           "N/A";
+      const displaySource = {
+        ...asset,
+        latest_inspection: inspection,
+        inspection,
+      };
+
+      const resolvedCI = resolveCI(displaySource);
+      const resolvedUrgency = resolveUrgency(displaySource);
+
+      const ciDisplayInfo = getCIDisplay(displaySource);
+      const urgencyDisplayInfo = getUrgencyDisplay(displaySource);
+
+      const ciDisplay =
+        ciDisplayInfo.value !== null
+          ? `${ciDisplayInfo.value} - ${ciDisplayInfo.label}`
+          : ciDisplayInfo.label;
+
+      const worstUrgency = urgencyDisplayInfo.label;
       
       // Calculate repair cost estimate from latest inspection
       let estimatedRepairCost = "N/A";

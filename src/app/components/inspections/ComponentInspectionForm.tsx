@@ -9,6 +9,12 @@ import { Button } from "../ui/button";
 import { AlertTriangle, Camera, TrendingDown, AlertCircle, Banknote, CheckCircle, XCircle, X, Upload } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  calculateComponentCI,
+  calculateUrgency,
+  calculateAggregateScores,
+} from "../../../lib/deruCalculations";
+
 interface ComponentScore {
   component_name: string;
   degree: string; // 0, 1, 2, 3, U, X
@@ -178,7 +184,7 @@ export default function ComponentInspectionForm({
     if (field === "degree" || field === "extent" || field === "relevancy") {
       const { degree, extent, relevancy } = updated[index];
       updated[index].ci = calculateComponentCI(degree, extent, relevancy);
-      updated[index].urgency = calculateUrgency(degree, extent, relevancy);
+      updated[index].urgency = calculateUrgency(degree, extent, relevancy) || "";
 
       // Recalculate cost based on CI and repair threshold
       const ci = updated[index].ci;
@@ -235,57 +241,44 @@ export default function ComponentInspectionForm({
     toast.success("Photo removed");
   };
 
-  // Calculate CI_health, CI_safety, CI_final
+  // Calculate CI_health, CI_safety, CI_final using the shared DERU engine
   const calculateAggregates = (scores: ComponentScore[]) => {
-    // CI_health: average of non-blank CIs
-    const validCIs = scores.map((s) => s.ci).filter((ci) => ci !== null) as number[];
-    const ci_health = validCIs.length > 0 ? Math.round(validCIs.reduce((a, b) => a + b, 0) / validCIs.length) : null;
-
-    // CI_safety: map worst urgency → 0-100
-    const urgencies = scores.map((s) => s.urgency).filter((u) => u && u !== "R" && u !== "U");
-    let worstUrgency = "R";
-    if (urgencies.includes("4")) worstUrgency = "4";
-    else if (urgencies.includes("3")) worstUrgency = "3";
-    else if (urgencies.includes("2")) worstUrgency = "2";
-    else if (urgencies.includes("1")) worstUrgency = "1";
-    else if (urgencies.includes("0")) worstUrgency = "0";
-
-    const urgencyToCI: Record<string, number> = {
-      R: 100,
-      "0": 90,
-      "1": 75,
-      "2": 50,
-      "3": 25,
-      "4": 0,
-    };
-    const ci_safety = urgencyToCI[worstUrgency] ?? null;
-
-    // CI_final: MIN(CI_health, CI_safety)
-    const ci_final =
-      ci_health !== null && ci_safety !== null ? Math.min(ci_health, ci_safety) : null;
+    const aggregateScores = calculateAggregateScores(scores);
 
     // Total remedial cost
     const total_cost = scores.reduce((sum, s) => sum + (s.cost || 0), 0);
 
-    // Overall remedial work (concatenate non-empty)
+    // Overall remedial work
     const overall_remedial = scores
       .map((s) => s.remedial_work)
       .filter((r) => r)
       .join("; ");
 
-    // Overall D/E/R (worst component)
-    const worstComponent = scores.reduce((worst, curr) => {
-      if (!worst.urgency) return curr;
-      if (!curr.urgency) return worst;
-      const urgencyRank: Record<string, number> = { "4": 4, "3": 3, "2": 2, "1": 1, "0": 0, R: -1, U: -2 };
-      return (urgencyRank[curr.urgency] ?? -3) > (urgencyRank[worst.urgency] ?? -3) ? curr : worst;
-    }, scores[0]);
+    // Overall D/E/R from worst valid urgency component
+    const urgencyRank: Record<string, number> = {
+      "4": 4,
+      "3": 3,
+      "2": 2,
+      "1": 1,
+      "0": 0,
+      R: -1,
+    };
+
+    const worstComponent = scores.reduce<ComponentScore | null>((worst, curr) => {
+      if (!curr.urgency || curr.urgency === "U") return worst;
+
+      if (!worst) return curr;
+
+      return (urgencyRank[curr.urgency] ?? -99) > (urgencyRank[worst.urgency] ?? -99)
+        ? curr
+        : worst;
+    }, null);
 
     return {
-      ci_health,
-      ci_safety,
-      ci_final,
-      worst_urgency: worstUrgency,
+      ci_health: aggregateScores.ci_health,
+      ci_safety: aggregateScores.ci_safety,
+      ci_final: aggregateScores.ci_final,
+      worst_urgency: aggregateScores.worst_urgency,
       total_cost,
       overall_remedial,
       overall_degree: worstComponent?.degree || "",

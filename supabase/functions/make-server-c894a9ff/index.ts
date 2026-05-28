@@ -2851,54 +2851,77 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
       const latestInspection = latestInspectionByAsset.get(asset.asset_id) || null;
       const metadata = latestInspection?.calculation_metadata || {};
 
-    const latestUrgency =
-      metadata.worst_urgency ??
-      latestInspection?.calculated_urgency ??
-      asset.latest_urgency ??
-      asset.urgency ??
-      null;
-
-    const urgencyCode = String(latestUrgency ?? "").trim().toLowerCase();
-
-    const derivedSafetyCI =
-      urgencyCode === "4" || urgencyCode.includes("immediate") || urgencyCode.includes("critical")
-        ? 0
-        : urgencyCode === "3" || urgencyCode.includes("high")
-        ? 25
-        : urgencyCode === "2" || urgencyCode.includes("medium")
-        ? 50
-        : urgencyCode === "1" || urgencyCode.includes("low")
-        ? 75
-        : urgencyCode === "0" || urgencyCode.includes("routine")
-        ? 90
-        : urgencyCode === "r" || urgencyCode.includes("record")
-        ? 100
-        : null;
-
-    const latestHealthCI =
-      metadata.ci_health ??
-      latestInspection?.conditional_index ??
-      asset.ci_health ??
-      asset.latest_ci ??
-      null;
-
-    const latestSafetyCI =
-      metadata.ci_safety ??
-      asset.ci_safety ??
-      derivedSafetyCI ??
-      null;
-
-    const latestFinalCI =
-      metadata.ci_final ??
-      asset.ci_final ??
-      asset.latest_ci_final ??
-      asset.latest_final_ci ??
-      (
-        latestHealthCI !== null && latestHealthCI !== undefined &&
-        latestSafetyCI !== null && latestSafetyCI !== undefined
-          ? Math.min(Number(latestHealthCI), Number(latestSafetyCI))
-          : latestInspection?.conditional_index ?? asset.latest_ci ?? null
+      const healthForFinal = Number(
+        metadata.ci_health ??
+        asset.ci_health ??
+        latestInspection?.ci_health
       );
+
+      const safetyForFinal = Number(
+        metadata.ci_safety ??
+        asset.ci_safety ??
+        latestInspection?.ci_safety
+      );
+
+      const derivedFinalCI =
+        Number.isFinite(healthForFinal) && Number.isFinite(safetyForFinal)
+          ? Math.min(healthForFinal, safetyForFinal)
+          : null;
+
+      const latestFinalCI =
+        derivedFinalCI ??
+        metadata.ci_final ??
+        asset.ci_final ??
+        asset.latest_ci_final ??
+        asset.latest_final_ci ??
+        asset.latest_ci ??
+        latestInspection?.conditional_index ??
+        null;
+
+      const derivedSafetyCI =
+        urgencyCode === "4" || urgencyCode.includes("immediate") || urgencyCode.includes("critical")
+          ? 0
+          : urgencyCode === "3" || urgencyCode.includes("high")
+          ? 25
+          : urgencyCode === "2" || urgencyCode.includes("medium")
+          ? 50
+          : urgencyCode === "1" || urgencyCode.includes("low")
+          ? 75
+          : urgencyCode === "0" || urgencyCode.includes("routine") || urgencyCode.includes("monitor")
+          ? 90
+          : urgencyCode === "r" || urgencyCode.includes("record")
+          ? 100
+          : null;
+
+      const latestHealthCI =
+        metadata.ci_health ??
+        latestInspection?.conditional_index ??
+        asset.ci_health ??
+        asset.latest_ci ??
+        null;
+
+      const latestSafetyCI =
+        metadata.ci_safety ??
+        asset.ci_safety ??
+        derivedSafetyCI ??
+        null;
+
+      const latestFinalCI =
+        metadata.ci_final ??
+        asset.ci_final ??
+        asset.latest_ci_final ??
+        asset.latest_final_ci ??
+        (
+          latestHealthCI !== null &&
+          latestHealthCI !== undefined &&
+          latestSafetyCI !== null &&
+          latestSafetyCI !== undefined
+            ? Math.min(Number(latestHealthCI), Number(latestSafetyCI))
+            : null
+        ) ??
+        latestInspection?.conditional_index ??
+        asset.latest_ci ??
+        null;
 
       // Calculate remaining life
       const installDate = asset.install_date ? new Date(asset.install_date) : null;
@@ -3287,7 +3310,68 @@ app.get("/make-server-c894a9ff/assets/:id", async (c) => {
       return c.json({ error: "Asset not found" }, 404);
     }
 
-    return c.json({ asset });
+    const { data: latestInspection, error: latestInspectionError } = await supabase
+      .from("tams360_inspections_v")
+      .select(`
+        inspection_id,
+        asset_id,
+        inspection_date,
+        conditional_index,
+        calculated_urgency,
+        ci_band,
+        calculation_metadata
+      `)
+      .eq("asset_id", assetId)
+      .eq("tenant_id", userProfile.tenant_id)
+      .order("inspection_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestInspectionError) {
+      console.error("[Asset Detail] Warning: failed to fetch latest inspection summary:", latestInspectionError);
+    }
+
+    const metadata = latestInspection?.calculation_metadata || {};
+
+    const latestFinalCI =
+      metadata.ci_final ??
+      latestInspection?.conditional_index ??
+      asset.ci_final ??
+      asset.latest_ci_final ??
+      asset.latest_final_ci ??
+      asset.latest_ci ??
+      null;
+
+    const latestHealthCI =
+      metadata.ci_health ??
+      asset.ci_health ??
+      null;
+
+    const latestSafetyCI =
+      metadata.ci_safety ??
+      asset.ci_safety ??
+      null;
+
+    const latestUrgency =
+      metadata.worst_urgency ??
+      latestInspection?.calculated_urgency ??
+      asset.latest_urgency ??
+      asset.urgency ??
+      null;
+
+    const enrichedAsset = {
+      ...asset,
+      latest_inspection: latestInspection || null,
+      latest_ci: latestFinalCI,
+      latest_ci_final: latestFinalCI,
+      latest_final_ci: latestFinalCI,
+      ci_final: latestFinalCI,
+      ci_health: latestHealthCI,
+      ci_safety: latestSafetyCI,
+      latest_urgency: latestUrgency,
+    };
+
+    return c.json({ asset: enrichedAsset });
   } catch (error) {
     console.error("Error fetching asset:", error);
     return c.json({ error: "Failed to fetch asset" }, 500);

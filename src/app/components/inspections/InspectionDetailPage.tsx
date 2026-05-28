@@ -347,15 +347,23 @@ export default function InspectionDetailPage() {
     );
   }
 
-  const urgencyInfo = getUrgencyInfo(inspection.calculated_urgency);
-  const ciBadge = getCIBadge(inspection.ci_final || inspection.conditional_index);
+const metadata = inspection.calculation_metadata || {};
 
-  // Extract CI values - PRIORITIZE calculation_metadata (authoritative stored values)
-  const metadata = inspection.calculation_metadata || {};
-  const ciHealth = metadata.ci_health ?? inspection.ci_health ?? null;
-  const ciSafety = metadata.ci_safety ?? inspection.ci_safety ?? null;
-  const ciFinal = metadata.ci_final ?? inspection.ci_final ?? inspection.conditional_index ?? null;
-  const worstUrgency = metadata.worst_urgency ?? inspection.calculated_urgency ?? "R";
+const displaySource = {
+  ...inspection,
+  calculation_metadata: metadata,
+  inspection,
+};
+
+  const ciHealth = resolveCIHealth(displaySource);
+  const ciSafety = resolveCISafety(displaySource);
+  const ciFinal = resolveCI(displaySource);
+  const worstUrgency = resolveUrgency(displaySource);
+
+  const ciHealthDisplay = getCIDisplay(ciHealth);
+  const ciSafetyDisplay = getCIDisplay(ciSafety);
+  const ciFinalDisplay = getCIDisplay(ciFinal);
+  const urgencyDisplay = getUrgencyDisplay(worstUrgency);
 
   // Merge stored components with latest template metadata
   const components = inspection.components || [];
