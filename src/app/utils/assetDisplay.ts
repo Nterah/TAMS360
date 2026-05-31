@@ -472,6 +472,16 @@ function geoJsonFromCoordinates(
     };
   }
 
+  // A valid polygon needs at least 3 distinct points.
+  // The closing point is added after this check.
+  const uniquePoints = new Set(
+    coordinates.map(([lat, lng]) => `${lat},${lng}`)
+  );
+
+  if (uniquePoints.size < 3) {
+    return null;
+  }
+
   const polygonCoords = coordinates.map(([lat, lng]) => [lng, lat]);
 
   const first = polygonCoords[0];
@@ -586,10 +596,14 @@ export function resolveAssetGeometry(asset: any): NormalisedGeometry {
   if (startPoint && endPoint) {
     const lineCoordinates: [number, number][] = [startPoint, endPoint];
 
+    // Important:
+    // Start/end coordinates are valid for linear assets only.
+    // They must not be converted into a Polygon because a polygon needs
+    // a closed coordinate ring with at least 3 distinct points.
     return {
-      type: declaredType === "Polygon" ? "Polygon" : "Line",
+      type: "Line",
       coordinates: lineCoordinates,
-      geojson: geoJsonFromCoordinates(declaredType === "Polygon" ? "Polygon" : "Line", lineCoordinates),
+      geojson: geoJsonFromCoordinates("Line", lineCoordinates),
       center: calculateCenter(lineCoordinates),
     };
   }

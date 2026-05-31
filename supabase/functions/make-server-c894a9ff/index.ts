@@ -2851,76 +2851,30 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
       const latestInspection = latestInspectionByAsset.get(asset.asset_id) || null;
       const metadata = latestInspection?.calculation_metadata || {};
 
-      const healthForFinal = Number(
-        metadata.ci_health ??
-        asset.ci_health ??
-        latestInspection?.ci_health
-      );
-
-      const safetyForFinal = Number(
-        metadata.ci_safety ??
-        asset.ci_safety ??
-        latestInspection?.ci_safety
-      );
-
-      const derivedFinalCI =
-        Number.isFinite(healthForFinal) && Number.isFinite(safetyForFinal)
-          ? Math.min(healthForFinal, safetyForFinal)
-          : null;
-
       const latestFinalCI =
-        derivedFinalCI ??
         metadata.ci_final ??
+        latestInspection?.conditional_index ??
         asset.ci_final ??
         asset.latest_ci_final ??
         asset.latest_final_ci ??
         asset.latest_ci ??
-        latestInspection?.conditional_index ??
         null;
-
-      const derivedSafetyCI =
-        urgencyCode === "4" || urgencyCode.includes("immediate") || urgencyCode.includes("critical")
-          ? 0
-          : urgencyCode === "3" || urgencyCode.includes("high")
-          ? 25
-          : urgencyCode === "2" || urgencyCode.includes("medium")
-          ? 50
-          : urgencyCode === "1" || urgencyCode.includes("low")
-          ? 75
-          : urgencyCode === "0" || urgencyCode.includes("routine") || urgencyCode.includes("monitor")
-          ? 90
-          : urgencyCode === "r" || urgencyCode.includes("record")
-          ? 100
-          : null;
 
       const latestHealthCI =
         metadata.ci_health ??
-        latestInspection?.conditional_index ??
         asset.ci_health ??
-        asset.latest_ci ??
         null;
 
       const latestSafetyCI =
         metadata.ci_safety ??
         asset.ci_safety ??
-        derivedSafetyCI ??
         null;
 
-      const latestFinalCI =
-        metadata.ci_final ??
-        asset.ci_final ??
-        asset.latest_ci_final ??
-        asset.latest_final_ci ??
-        (
-          latestHealthCI !== null &&
-          latestHealthCI !== undefined &&
-          latestSafetyCI !== null &&
-          latestSafetyCI !== undefined
-            ? Math.min(Number(latestHealthCI), Number(latestSafetyCI))
-            : null
-        ) ??
-        latestInspection?.conditional_index ??
-        asset.latest_ci ??
+      const latestUrgency =
+        metadata.worst_urgency ??
+        latestInspection?.calculated_urgency ??
+        asset.latest_urgency ??
+        asset.urgency ??
         null;
 
       // Calculate remaining life
@@ -2986,6 +2940,84 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     }
     console.error("Error fetching assets:", error);
     return c.json({ error: "Failed to fetch assets" }, 500);
+  }
+});
+
+// Get full asset register report rows
+// Used by Reports -> Asset Inventory.
+// This intentionally uses the spreadsheet-backed report view, not the lean map/list asset view.
+app.get("/make-server-c894a9ff/reports/asset-register", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    const { data: userProfile, error: profileError } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, tenant_id, role")
+      .eq("id", userData.user.id)
+      .single();
+
+    if (profileError || !userProfile || !userProfile.tenant_id) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
+    const page = parseInt(c.req.query("page") || "1");
+    const requestedPageSize = parseInt(c.req.query("pageSize") || "5000");
+    const pageSize = Math.min(requestedPageSize, 5000);
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const includeCount = page === 1;
+
+    console.log(
+      `GET /reports/asset-register - user:${userData.user.id}, tenant:${userProfile.tenant_id}, page:${page}, pageSize:${pageSize}`
+    );
+
+    const { data: assets, error, count } = await supabase
+      .from("tams360_asset_register_report_v")
+      .select("*", { count: includeCount ? "exact" : undefined })
+      .eq("tenant_id", userProfile.tenant_id)
+      .order("asset_ref", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      console.error("Error fetching asset register report view:", error);
+      return c.json(
+        {
+          error: "Failed to fetch asset register report",
+          details: error.message,
+          code: error.code,
+        },
+        500
+      );
+    }
+
+    return c.json({
+      assets: assets || [],
+      total: count ?? assets?.length ?? 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count ?? assets?.length ?? 0) / pageSize),
+      source: "tams360_asset_register_report_v",
+    });
+  } catch (error: any) {
+    console.error("Error in asset register report endpoint:", error);
+    return c.json(
+      {
+        error: "Failed to fetch asset register report",
+        details: error?.message,
+      },
+      500
+    );
   }
 });
 

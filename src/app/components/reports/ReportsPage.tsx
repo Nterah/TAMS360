@@ -45,6 +45,7 @@ import {
   resolveCISafety,
 } from "../../utils/assetDisplay";
 
+
 export default function ReportsPage() {
   const { accessToken } = useContext(AuthContext);
   const { settings: tenant } = useTenant();
@@ -80,18 +81,38 @@ export default function ReportsPage() {
 
   const getStoredAccessToken = () => {
     try {
-      const raw = window.localStorage.getItem(`sb-${projectId}-auth-token`);
+      const exactKey = `sb-${projectId}-auth-token`;
+
+      const raw =
+        window.localStorage.getItem(exactKey) ||
+        Object.keys(window.localStorage)
+          .filter((key) => key.includes(projectId) && key.includes("auth-token"))
+          .map((key) => window.localStorage.getItem(key))
+          .find(Boolean);
+
       if (!raw) return null;
 
       const parsed = JSON.parse(raw);
-      return parsed?.access_token || null;
-    } catch {
+
+      return (
+        parsed?.access_token ||
+        parsed?.currentSession?.access_token ||
+        parsed?.session?.access_token ||
+        parsed?.user?.access_token ||
+        null
+      );
+    } catch (error) {
+      console.error("[ReportsPage] Failed to read stored access token:", error);
       return null;
     }
   };
 
   const getAuthHeaders = () => {
     const token = accessToken || getStoredAccessToken();
+
+    if (!token) {
+      console.warn("[ReportsPage] No user access token found. Report export may fail.");
+    }
 
     return {
       Authorization: `Bearer ${token || publicAnonKey}`,
@@ -128,13 +149,97 @@ export default function ReportsPage() {
     "-";
   const firstDefined = (...values: any[]) => {
     for (const value of values) {
-      if (value !== undefined && value !== null && value !== "") return value;
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== "" &&
+        value !== "-" &&
+        value !== "Invalid Date"
+      ) {
+        return value;
+      }
     }
     return "-";
   };
 
   const asDash = (value: any) =>
-    value === undefined || value === null || value === "" ? "-" : value;
+    value === undefined || value === null || value === "" || value === "Invalid Date" ? "-" : value;
+
+  const normaliseFieldName = (value: string) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+  const getFromObjectByAlias = (source: any, aliases: string[]) => {
+    if (!source || typeof source !== "object") return undefined;
+
+    for (const alias of aliases) {
+      const value = source[alias];
+      if (value !== undefined && value !== null && value !== "" && value !== "-") {
+        return value;
+      }
+    }
+
+    const normalisedAliases = aliases.map(normaliseFieldName);
+
+    for (const key of Object.keys(source)) {
+      if (normalisedAliases.includes(normaliseFieldName(key))) {
+        const value = source[key];
+        if (value !== undefined && value !== null && value !== "" && value !== "-") {
+          return value;
+        }
+      }
+    }
+
+    return undefined;
+  };
+
+  const getAssetValue = (asset: any, aliases: string[]) => {
+    const possibleSources = [
+      asset,
+      asset?.properties,
+      asset?.attributes,
+      asset?.metadata,
+      asset?.raw,
+      asset?.raw_data,
+      asset?.register_data,
+      asset?.asset_data,
+      asset?.custom_fields,
+      asset?.additional_fields,
+      asset?.extra_fields,
+      asset?.import_data,
+    ];
+
+    for (const source of possibleSources) {
+      const value = getFromObjectByAlias(source, aliases);
+      if (value !== undefined && value !== null && value !== "" && value !== "-") {
+        return value;
+      }
+    }
+
+    return undefined;
+  };
+
+  const getInspectionValue = (inspection: any, aliases: string[]) => {
+    const possibleSources = [
+      inspection,
+      inspection?.calculation_metadata,
+      inspection?.metadata,
+      inspection?.inspection_data,
+      inspection?.raw_data,
+      inspection?.properties,
+      inspection?.attributes,
+    ];
+
+    for (const source of possibleSources) {
+      const value = getFromObjectByAlias(source, aliases);
+      if (value !== undefined && value !== null && value !== "" && value !== "-") {
+        return value;
+      }
+    }
+
+    return undefined;
+  };
 
   const buildLatestInspectionByAssetId = (inspections: any[]) => {
     const map = new Map<string, any>();
@@ -175,61 +280,166 @@ export default function ReportsPage() {
       const ciHealth = resolveCIHealth(source);
       const ciSafety = resolveCISafety(source);
 
-      const routeRoad =
+      const routeRoad = firstDefined(
+        getAssetValue(asset, ["LOCATION/ROAD NAME", "LOCATION ROAD NAME", "ROUTE/ROAD", "ROUTE ROAD"]),
+        asset.location_road_name,
+        asset.location,
+        asset.road_name,
         asset.road_number || asset.road_name
           ? `${asset.road_number || ""} ${asset.road_name || ""}`.trim()
-          : firstDefined(asset.location_road_name, asset.location, asset.road_name);
+          : "-"
+      );
+
+      const startLatitude = firstDefined(
+        getAssetValue(asset, ["START LATITUDE", "START_LATITUDE", "START LAT", "LATITUDE", "GPS_LAT"]),
+        asset.start_latitude,
+        asset.start_lat,
+        asset.gps_lat,
+        asset.latitude
+      );
+
+      const startLongitude = firstDefined(
+        getAssetValue(asset, ["START LONGITUDE", "START_LONGITUDE", "START LNG", "START LON", "LONGITUDE", "GPS_LNG"]),
+        asset.start_longitude,
+        asset.start_lng,
+        asset.start_lon,
+        asset.gps_lng,
+        asset.longitude
+      );
+
+      const endLatitude = firstDefined(
+        getAssetValue(asset, ["END LATITUDE", "END_LATITUDE", "END LAT", "FINISH LATITUDE", "FINISH LAT"]),
+        asset.end_latitude,
+        asset.end_lat,
+        asset.finish_latitude,
+        asset.finish_lat
+      );
+
+      const endLongitude = firstDefined(
+        getAssetValue(asset, ["END LONGITUDE", "END_LONGITUDE", "END LNG", "END LON", "FINISH LONGITUDE", "FINISH LNG"]),
+        asset.end_longitude,
+        asset.end_lng,
+        asset.end_lon,
+        asset.finish_longitude,
+        asset.finish_lng
+      );
+
+      const geometryStatus =
+        startLatitude !== "-" &&
+        startLongitude !== "-" &&
+        endLatitude !== "-" &&
+        endLongitude !== "-"
+          ? "LineString-ready"
+          : startLatitude !== "-" && startLongitude !== "-"
+          ? "Point-only"
+          : "Missing geometry";
 
       return {
         unique_id: firstDefined(asset.unique_id, asset.uniqueId, asset.asset_unique_id, asset.asset_id),
         asset_ref: firstDefined(asset.asset_ref, asset.reference_number, asset.referenceNumber),
         asset_type_name: firstDefined(asset.asset_type_name, asset.type, asset.asset_type),
+
+        description: firstDefined(
+          asset.description,
+          asset.asset_description,
+          asset.name,
+          asset.name_code
+        ),
+
         location_road_name: routeRoad,
-        region: asDash(asset.region),
-        ward: firstDefined(asset.ward, asset.wards, asset.ward_no),
+        region: firstDefined(asset.region, asset.region_name),
+        ward: firstDefined(getAssetValue(asset, ["WARD/S", "WARDS", "WARD", "WARD NO", "WARD_NO"]), asset.ward, asset.wards, asset.ward_no),
+        depot: firstDefined(getAssetValue(asset, ["DEPOT", "DEPOT NAME", "DEPOT_NAME"]), asset.depot, asset.depot_name),
+        owner: firstDefined(getAssetValue(asset, ["OWNER", "OWNED BY", "OWNED_BY", "OWNER NAME"]), asset.owner, asset.owner_name, asset.owned_by),
+        status: firstDefined(getAssetValue(asset, ["STATUS", "ASSET STATUS"]), asset.status, asset.status_name),
 
-        start_km: firstDefined(asset.start_km, asset.start_chainage, asset.km_start, asset.km_marker),
-        end_km: firstDefined(asset.end_km, asset.end_chainage, asset.km_end),
+        start_km: firstDefined(asset.start_km, asset.start_chainage, asset.km_start, asset.km_marker, asset.chainage_km),
+        end_km: firstDefined(getAssetValue(asset, ["END KM", "END_KM", "END CHAINAGE", "CHAINAGE END"]), asset.end_km, asset.end_chainage, asset.km_end, asset.chainage_end),
 
-        start_latitude: firstDefined(asset.start_latitude, asset.start_lat, asset.gps_lat, asset.latitude),
-        start_longitude: firstDefined(asset.start_longitude, asset.start_lng, asset.gps_lng, asset.longitude),
-        end_latitude: firstDefined(asset.end_latitude, asset.end_lat),
-        end_longitude: firstDefined(asset.end_longitude, asset.end_lng),
+        start_latitude: startLatitude,
+        start_longitude: startLongitude,
+        end_latitude: endLatitude,
+        end_longitude: endLongitude,
 
-        name_code: firstDefined(asset.name_code, asset.name, asset.code, asset.sign_code, asset.description),
-        mounting_type: firstDefined(asset.mounting_type, asset.mountng_type, asset.mount_type),
-        posts_supports: firstDefined(asset.posts_supports, asset.number_of_posts, asset.num_posts, asset.supports),
-        beams: firstDefined(asset.beams, asset.number_of_beams, asset.num_beams),
-        width_m: firstDefined(asset.width_m, asset.width),
-        length_m: firstDefined(asset.length_m, asset.length),
-        height_m: firstDefined(asset.height_m, asset.height),
-        orientation_position: firstDefined(asset.orientation_position, asset.orientation, asset.position, asset.side_of_road),
-
+        name_code: firstDefined(asset.name_code, asset.name, asset.code, asset.sign_code, asset.asset_ref),
+        mounting_type: firstDefined(getAssetValue(asset, ["MOUNTNG TYPE", "MOUNTING TYPE", "MOUNT TYPE", "MOUNT_TYPE"]), asset.mounting_type, asset.mountng_type, asset.mount_type),
+        posts_supports: firstDefined(getAssetValue(asset, ["# POSTS/SUPPORTS", "# POSTS / SUPPORTS", "POSTS/SUPPORTS", "NUMBER OF POSTS", "NUM POSTS", "SUPPORTS"]), asset.posts_supports, asset.number_of_posts, asset.num_posts, asset.supports),
+        beams: firstDefined(getAssetValue(asset, ["# BEAMS", "BEAMS", "NUMBER OF BEAMS", "NUM BEAMS"]), asset.beams, asset.number_of_beams, asset.num_beams),
+        width_m: firstDefined(getAssetValue(asset, ["WIDTH (m)", "WIDTH M", "WIDTH"]), asset.width_m, asset.width),
+        length_m: firstDefined(getAssetValue(asset, ["LENGTH (m)", "LENGTH M", "LENGTH"]), asset.length_m, asset.length),
+        height_m: firstDefined(getAssetValue(asset, ["HEIGHT (m)", "HEIGHT M", "HEIGHT"]), asset.height_m, asset.height),
+        orientation_position: firstDefined(getAssetValue(asset, ["ORIENTATION/POSITION", "ORIENTATION / POSITION", "ORIENTATION", "POSITION", "SIDE OF ROAD"]), asset.orientation_position, asset.orientation, asset.position, asset.side_of_road),
+        
         date_of_purchase: firstDefined(asset.date_of_purchase, asset.purchase_date, asset.install_date),
         purchase_cost: firstDefined(asset.purchase_cost, asset.installation_cost),
         last_revaluation: firstDefined(asset.last_revaluation, asset.last_valuation_date),
         residual_value: firstDefined(asset.residual_value),
-        useful_life: firstDefined(asset.useful_life, asset.useful_life_years, asset.expected_life_years),
-        depreciation_rate: firstDefined(asset.depreciation_rate),
+        useful_life: firstDefined(getAssetValue(asset, ["USEFUL LIFE", "USEFUL_LIFE", "USEFUL LIFE YEARS", "EXPECTED LIFE"]), asset.useful_life, asset.useful_life_years, asset.expected_life_years),
+        depreciation_rate: firstDefined(getAssetValue(asset, ["DEPRECIATION RATE", "DEPRICIATION RATE", "DEPRECIATION_RATE"]), asset.depreciation_rate),
         accumulated_depreciation: firstDefined(asset.accumulated_depreciation, asset.accum_depreciation),
 
-        asset_condition: firstDefined(asset.asset_condition, asset.condition, ciDisplay.label),
-        deru_degree: firstDefined(metadata.overall_degree, latestInspection?.overall_degree, latestInspection?.deru_degree, asset.deru_degree),
-        deru_extent: firstDefined(metadata.overall_extent, latestInspection?.overall_extent, latestInspection?.deru_extent, asset.deru_extent),
-        deru_relevance: firstDefined(metadata.overall_relevancy, latestInspection?.overall_relevancy, latestInspection?.deru_relevance, asset.deru_relevance),
+        asset_condition: ciDisplay.label,
+        deru_degree: firstDefined(
+          getAssetValue(asset, ["DERU_DEGREE", "DERU DEGREE"]),
+          getInspectionValue(latestInspection, ["OVERALL DEGREE", "OVERALL_DEGREE", "DERU_DEGREE", "DEGREE"]),
+          metadata.overall_degree,
+          latestInspection?.overall_degree,
+          latestInspection?.deru_degree,
+          asset.deru_degree
+        ),
+        deru_extent: firstDefined(
+          getAssetValue(asset, ["DERU_EXTENT", "DERU EXTENT"]),
+          getInspectionValue(latestInspection, ["OVERALL EXTENT", "OVERALL_EXTENT", "DERU_EXTENT", "EXTENT"]),
+          metadata.overall_extent,
+          latestInspection?.overall_extent,
+          latestInspection?.deru_extent,
+          asset.deru_extent
+        ),
+        deru_relevance: firstDefined(
+          getAssetValue(asset, ["DERU_RELEVANCE", "DERU RELEVANCE", "DERU_RELEVANCY", "DERU RELEVANCY"]),
+          getInspectionValue(latestInspection, ["OVERALL RELEVANCY", "OVERALL_RELEVANCY", "OVERALL RELEVANCE", "DERU_RELEVANCE", "RELEVANCY"]),
+          metadata.overall_relevancy,
+          metadata.overall_relevance,
+          latestInspection?.overall_relevancy,
+          latestInspection?.deru_relevance,
+          asset.deru_relevance
+        ),
         deru_urgency: urgencyDisplay.label,
-        ci_health: ciHealth ?? "-",
-        ci_safety: ciSafety ?? "-",
+
+        ci_health: ciHealth ?? firstDefined(asset.ci_health, asset.latest_ci_health),
+        ci_safety: ciSafety ?? firstDefined(asset.ci_safety, asset.latest_ci_safety),
         ci: ciDisplay.label,
 
+        last_inspection_date: firstDefined(
+          latestInspection?.inspection_date,
+          latestInspection?.created_at,
+          asset.last_inspection_date
+        ),
+        inspector: firstDefined(
+          latestInspection?.inspector_name,
+          latestInspection?.inspector,
+          asset.inspector_name
+        ),
+        finding_summary: firstDefined(
+          latestInspection?.general_comments,
+          latestInspection?.overall_comments,
+          latestInspection?.notes,
+          asset.finding_summary,
+          asset.notes
+        ),
+
         image: firstDefined(
+          getAssetValue(asset, ["IMAGE", "PHOTO", "PHOTO_1", "PHOTO 1", "IMAGE URL", "PHOTO URL"]),
           asset.image,
           asset.image_url,
           asset.photo_url,
           asset.main_photo_url,
           latestInspection?.photo_url,
-          latestInspection?.image_url
+          latestInspection?.image_url,
+          latestInspection?.photo_1
         ),
+
+        geometry_status: geometryStatus,
       };
     });
   };
@@ -270,6 +480,37 @@ export default function ReportsPage() {
       }
 
       const json = await res.json();
+      allAssets = allAssets.concat(json.assets || []);
+      totalPages = json.totalPages || 1;
+      page += 1;
+    } while (page <= totalPages);
+
+    return allAssets;
+  };
+
+  const fetchAllAssetRegisterReportAssets = async () => {
+    const pageSize = 5000;
+    let page = 1;
+    let totalPages = 1;
+    let allAssets: any[] = [];
+
+    do {
+      const res = await fetch(`${API_URL}/reports/asset-register?page=${page}&pageSize=${pageSize}`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "");
+        throw new Error(
+          `Failed to fetch asset register report page ${page}: ${res.status} ${errorText}`
+        );
+      }
+
+      const json = await res.json();
+
+      console.log("[ReportsPage] Asset register report source:", json.source);
+      console.log("[ReportsPage] Asset register report rows received:", json.assets?.length || 0);
+
       allAssets = allAssets.concat(json.assets || []);
       totalPages = json.totalPages || 1;
       page += 1;
@@ -566,7 +807,7 @@ export default function ReportsPage() {
       switch (reportType) {
         case "Asset Inventory": {
           const [assets, inspections] = await Promise.all([
-            fetchAllAssets(),
+            fetchAllAssetRegisterReportAssets(),
             fetchAllInspections(),
           ]);
 
@@ -578,15 +819,21 @@ export default function ReportsPage() {
             { header: "UNIQUE ID", key: "unique_id" },
             { header: "REFERENCE NUMBER", key: "asset_ref" },
             { header: "TYPE", key: "asset_type_name" },
+            { header: "DESCRIPTION", key: "description" },
             { header: "LOCATION/ROAD NAME", key: "location_road_name" },
             { header: "REGION", key: "region" },
             { header: "WARD/S", key: "ward" },
+            { header: "DEPOT", key: "depot" },
+            { header: "OWNER", key: "owner" },
+            { header: "STATUS", key: "status" },
+
             { header: "START KM", key: "start_km" },
             { header: "END KM", key: "end_km" },
             { header: "START LATITUDE", key: "start_latitude" },
             { header: "START LONGITUDE", key: "start_longitude" },
             { header: "END LATITUDE", key: "end_latitude" },
             { header: "END LONGITUDE", key: "end_longitude" },
+
             { header: "NAME/CODE", key: "name_code" },
             { header: "MOUNTING TYPE", key: "mounting_type" },
             { header: "# POSTS/SUPPORTS", key: "posts_supports" },
@@ -595,6 +842,7 @@ export default function ReportsPage() {
             { header: "LENGTH (m)", key: "length_m" },
             { header: "HEIGHT (m)", key: "height_m" },
             { header: "ORIENTATION/POSITION", key: "orientation_position" },
+
             { header: "DATE OF PURCHASE", key: "date_of_purchase" },
             { header: "PURCHASE COST", key: "purchase_cost" },
             { header: "LAST REVALUATION", key: "last_revaluation" },
@@ -602,6 +850,7 @@ export default function ReportsPage() {
             { header: "USEFUL LIFE", key: "useful_life" },
             { header: "DEPRECIATION RATE", key: "depreciation_rate" },
             { header: "ACCUM. DEPRECIATION", key: "accumulated_depreciation" },
+
             { header: "ASSET CONDITION", key: "asset_condition" },
             { header: "DERU_DEGREE", key: "deru_degree" },
             { header: "DERU_EXTENT", key: "deru_extent" },
@@ -610,7 +859,12 @@ export default function ReportsPage() {
             { header: "CI_HEALTH", key: "ci_health" },
             { header: "CI_SAFETY", key: "ci_safety" },
             { header: "CI", key: "ci" },
+
+            { header: "LAST INSPECTION DATE", key: "last_inspection_date" },
+            { header: "INSPECTOR", key: "inspector" },
+            { header: "FINDING SUMMARY", key: "finding_summary" },
             { header: "IMAGE", key: "image" },
+            { header: "GEOMETRY STATUS", key: "geometry_status" },
           ];
           break;
         }

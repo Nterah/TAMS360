@@ -2943,6 +2943,84 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
   }
 });
 
+// Get full asset register report rows
+// Used by Reports -> Asset Inventory.
+// This intentionally uses the spreadsheet-backed report view, not the lean map/list asset view.
+app.get("/make-server-c894a9ff/reports/asset-register", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+
+    if (!authHeader) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (authError || !userData.user) {
+      return c.json({ error: "Invalid session" }, 401);
+    }
+
+    const { data: userProfile, error: profileError } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, tenant_id, role")
+      .eq("id", userData.user.id)
+      .single();
+
+    if (profileError || !userProfile || !userProfile.tenant_id) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
+    const page = parseInt(c.req.query("page") || "1");
+    const requestedPageSize = parseInt(c.req.query("pageSize") || "5000");
+    const pageSize = Math.min(requestedPageSize, 5000);
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    const includeCount = page === 1;
+
+    console.log(
+      `GET /reports/asset-register - user:${userData.user.id}, tenant:${userProfile.tenant_id}, page:${page}, pageSize:${pageSize}`
+    );
+
+    const { data: assets, error, count } = await supabase
+      .from("tams360_asset_register_report_v")
+      .select("*", { count: includeCount ? "exact" : undefined })
+      .eq("tenant_id", userProfile.tenant_id)
+      .order("asset_ref", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      console.error("Error fetching asset register report view:", error);
+      return c.json(
+        {
+          error: "Failed to fetch asset register report",
+          details: error.message,
+          code: error.code,
+        },
+        500
+      );
+    }
+
+    return c.json({
+      assets: assets || [],
+      total: count ?? assets?.length ?? 0,
+      page,
+      pageSize,
+      totalPages: Math.ceil((count ?? assets?.length ?? 0) / pageSize),
+      source: "tams360_asset_register_report_v",
+    });
+  } catch (error: any) {
+    console.error("Error in asset register report endpoint:", error);
+    return c.json(
+      {
+        error: "Failed to fetch asset register report",
+        details: error?.message,
+      },
+      500
+    );
+  }
+});
+
 // Get assets count only (lightweight)
 app.get("/make-server-c894a9ff/assets/count", async (c) => {
   try {

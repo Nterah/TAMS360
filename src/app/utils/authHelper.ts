@@ -30,7 +30,7 @@ export async function getValidSession(): Promise<string | null> {
   if (token) {
     try {
       const response = await fetch(
-        "https://fuvzhbuvwpnysluojqni.supabase.co/functions/v1/make-server-c894a9ff/auth/session",
+        `${API_URL}/auth/session`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       if (response.ok) {
