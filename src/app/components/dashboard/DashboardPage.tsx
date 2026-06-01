@@ -303,70 +303,114 @@ export default function DashboardPage() {
 
       const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
-      // Load ALL assets - request all with high page size
-      const assetsRes = await fetch(`${API_URL}/assets?pageSize=5000`, {
+  // Load ALL assets from the same trusted /assets endpoint used by Assets and Map.
+  // Do not rely on one huge pageSize request because Supabase/PostgREST can still cap rows at 1000.
+  const loadAllAssetsFromAssetsEndpoint = async () => {
+    const pageSize = 1000;
+    let page = 1;
+    let totalPages = 1;
+    let totalExpected = 0;
+    let allAssets: any[] = [];
+
+    do {
+      const assetsRes = await fetch(`${API_URL}/assets?page=${page}&pageSize=${pageSize}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
+
       if (assetsRes.status === 401) {
         console.error("❌ Unauthorized - token may be expired");
         toast.error("Your session has expired. Please log in again.");
         auth.logout();
         navigate("/login");
         setLoading(false);
-        return;
+        return null;
       }
-      
-      if (assetsRes.ok) {
-        const assetsData = await assetsRes.json();
-        const assets = assetsData.assets || assetsData || [];
-        
-        if (!Array.isArray(assets)) {
-          console.error("❌ Assets data is not an array:", assets);
-          setAssets([]);
-        } else {
-          console.log(`✅ Loaded ${assets.length} assets`);
-          // DEBUG: Log sample asset to see all available fields including urgency
-          if (assets.length > 0) {
-            console.log('📋 Sample asset data (all fields):', assets[0]);
-            console.log('📋 Urgency-related fields:', {
-              asset_ref: assets[0].asset_ref,
-              urgency: assets[0].urgency,
-              latest_urgency: assets[0].latest_urgency,
-              calculated_urgency: assets[0].calculated_urgency,
-              latest_deru: assets[0].latest_deru,
-              asset_urgency: assets[0].asset_urgency,
-              urgency_score: assets[0].urgency_score
-            });
-            // Log what getAssetUrgency returns
-            console.log('📋 getAssetUrgency result:', getAssetUrgency(assets[0]));
-            
-            // Count urgency distribution in raw data
-            const urgencyCounts: any = {};
-            assets.forEach((a: any) => {
-              const u = getAssetUrgency(a) || 'null';
-              urgencyCounts[u] = (urgencyCounts[u] || 0) + 1;
-            });
-            console.log('📋 Urgency distribution in database:', urgencyCounts);
-          }
-          setAssets(assets);
-          
-          // Extract unique values for filters
-          const uniqueRegions = [...new Set(assets.map((a: any) => a.region).filter(Boolean))];
-          const uniqueDepots = [...new Set(assets.map((a: any) => a.depot).filter(Boolean))];
-          const uniqueTypes = [...new Set(assets.map((a: any) => a.type || a.asset_type_name || a.asset_type).filter(Boolean))];
-          
-          setRegions(uniqueRegions as string[]);
-          setDepots(uniqueDepots as string[]);
-          setAssetTypes(uniqueTypes as string[]);
-          
-          console.log(`✅ Filters extracted: ${uniqueRegions.length} regions, ${uniqueDepots.length} depots, ${uniqueTypes.length} asset types`);
-        }
-      } else {
-        console.error("❌ Failed to load assets:", assetsRes.status);
+
+      if (!assetsRes.ok) {
+        console.error("❌ Failed to load assets page:", page, assetsRes.status);
         toast.error(`Failed to load assets (${assetsRes.status})`);
-        setAssets([]);
+        return [];
       }
+
+      const assetsData = await assetsRes.json();
+      const pageAssets = assetsData.assets || [];
+
+      if (!Array.isArray(pageAssets)) {
+        console.error("❌ Assets page data is not an array:", pageAssets);
+        return [];
+      }
+
+      allAssets = allAssets.concat(pageAssets);
+
+      totalExpected = Number(assetsData.total || allAssets.length);
+      totalPages = Number(assetsData.totalPages || Math.ceil(totalExpected / pageSize) || 1);
+
+      console.log(`✅ Dashboard loaded assets page ${page}/${totalPages}: ${pageAssets.length} rows`);
+
+      page += 1;
+    } while (page <= totalPages);
+
+    // Defensive de-duplication by asset_id/asset_ref in case any page overlaps.
+    const deduped = Array.from(
+      new Map(
+        allAssets.map((asset: any) => [
+          asset.asset_id || asset.id || asset.asset_ref,
+          asset
+        ])
+      ).values()
+    );
+
+    console.log(`✅ Dashboard loaded ${deduped.length} assets from /assets endpoint. Expected total: ${totalExpected}`);
+
+    return deduped;
+  };
+
+  const assets = await loadAllAssetsFromAssetsEndpoint();
+
+  if (assets === null) {
+    return;
+  }
+
+  if (!Array.isArray(assets)) {
+    console.error("❌ Assets data is not an array:", assets);
+    setAssets([]);
+  } else {
+    console.log(`✅ Loaded ${assets.length} assets`);
+
+    if (assets.length > 0) {
+      console.log('📋 Sample asset data (all fields):', assets[0]);
+      console.log('📋 Urgency-related fields:', {
+        asset_ref: assets[0].asset_ref,
+        urgency: assets[0].urgency,
+        latest_urgency: assets[0].latest_urgency,
+        calculated_urgency: assets[0].calculated_urgency,
+        latest_deru: assets[0].latest_deru,
+        asset_urgency: assets[0].asset_urgency,
+        urgency_score: assets[0].urgency_score
+      });
+
+      console.log('📋 getAssetUrgency result:', getAssetUrgency(assets[0]));
+
+      const urgencyCounts: any = {};
+      assets.forEach((a: any) => {
+        const u = getAssetUrgency(a) || 'null';
+        urgencyCounts[u] = (urgencyCounts[u] || 0) + 1;
+      });
+      console.log('📋 Urgency distribution in database:', urgencyCounts);
+    }
+
+    setAssets(assets);
+
+    const uniqueRegions = [...new Set(assets.map((a: any) => a.region).filter(Boolean))];
+    const uniqueDepots = [...new Set(assets.map((a: any) => a.depot).filter(Boolean))];
+    const uniqueTypes = [...new Set(assets.map((a: any) => a.type || a.asset_type_name || a.asset_type).filter(Boolean))];
+
+    setRegions(uniqueRegions as string[]);
+    setDepots(uniqueDepots as string[]);
+    setAssetTypes(uniqueTypes as string[]);
+
+    console.log(`✅ Filters extracted: ${uniqueRegions.length} regions, ${uniqueDepots.length} depots, ${uniqueTypes.length} asset types`);
+  }
 
       // Load inspections
       const inspectionsRes = await fetch(`${API_URL}/inspections`, {
