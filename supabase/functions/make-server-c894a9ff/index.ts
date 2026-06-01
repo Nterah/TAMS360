@@ -1351,49 +1351,237 @@ app.get("/make-server-c894a9ff/admin/tenant-info", async (c) => {
   }
 });
 
-// Get tenant settings
-app.get("/make-server-c894a9ff/admin/tenant-settings", async (c) => {
+// ============================================================================
+// ADMIN ROUTES - Tenant Configuration Tables
+// ============================================================================
+
+const TENANT_CONFIG_TABLES: Record<string, string> = {
+  lifecycle: "tams360_asset_lifecycle_config",
+  wards: "tams360_ward_region_config",
+  values: "tams360_asset_value_config",
+  maintenance: "tams360_maintenance_cost_config",
+  componentRates: "tams360_component_repair_rate_config",
+};
+
+function getTenantConfigTable(configKey: string) {
+  return TENANT_CONFIG_TABLES[configKey] || null;
+}
+
+app.get("/make-server-c894a9ff/admin/tenant-config/:configKey", requireAdmin, async (c) => {
   try {
-    const authHeader = c.req.header("Authorization");
-    if (!authHeader) {
-      return c.json({ error: "Unauthorized" }, 401);
+    const configKey = c.req.param("configKey");
+    const tableName = getTenantConfigTable(configKey);
+
+    if (!tableName) {
+      return c.json({ error: "Invalid tenant config table" }, 400);
     }
 
-    const accessToken = authHeader.split(" ")[1];
-    const { data, error } = await supabaseAuth.auth.getUser(accessToken);
+    const userProfile = c.get("userProfile");
+    const tenantId = userProfile?.tenantId;
 
-    if (error || !data.user) {
-      return c.json({ error: "Invalid session" }, 401);
+    if (!tenantId) {
+      return c.json({ error: "Tenant not found" }, 404);
     }
 
-    // Get user profile to find tenant_id
-    const { data: userProfile } = await supabase
-      .from('tams360_user_profiles_v')
-      .select('tenant_id')
-      .eq('id', data.user.id)
+    const { data, error } = await supabase
+      .from(tableName)
+      .select("*")
+      .or(`tenant_id.is.null,tenant_id.eq.${tenantId}`)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error(`Error fetching ${tableName}:`, error);
+      return c.json({ error: "Failed to fetch tenant configuration", details: error.message }, 500);
+    }
+
+    return c.json({
+      rows: (data || []).map((row: any) => ({
+        ...row,
+        is_global_default: row.tenant_id === null,
+      })),
+      table: tableName,
+    });
+  } catch (error: any) {
+    console.error("Tenant config fetch error:", error);
+    return c.json({ error: "Failed to fetch tenant configuration", details: error?.message }, 500);
+  }
+});
+
+app.post("/make-server-c894a9ff/admin/tenant-config/:configKey", requireAdmin, async (c) => {
+  try {
+    const configKey = c.req.param("configKey");
+    const tableName = getTenantConfigTable(configKey);
+
+    if (!tableName) {
+      return c.json({ error: "Invalid tenant config table" }, 400);
+    }
+
+    const userProfile = c.get("userProfile");
+    const tenantId = userProfile?.tenantId;
+
+    if (!tenantId) {
+      return c.json({ error: "Tenant not found" }, 404);
+    }
+
+    const payload = await c.req.json();
+
+    delete payload.id;
+    delete payload.created_at;
+    delete payload.updated_at;
+    delete payload.is_global_default;
+
+    const insertPayload = {
+      ...payload,
+      tenant_id: tenantId,
+      is_active: payload.is_active ?? true,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from(tableName)
+      .insert(insertPayload)
+      .select("*")
       .single();
 
-    if (!userProfile?.tenant_id) {
-      return c.json({ error: 'Tenant not found' }, 404);
+    if (error) {
+      console.error(`Error inserting ${tableName}:`, error);
+      return c.json({ error: "Failed to create configuration row", details: error.message }, 500);
     }
 
-    // Get tenant settings from database
-    const { data: tenantSettings, error: settingsError } = await supabase
-      .from('tams360_tenant_settings_v')
-      .select('settings')
-      .eq('tenant_id', userProfile.tenant_id)
+    return c.json({ row: data });
+  } catch (error: any) {
+    console.error("Tenant config create error:", error);
+    return c.json({ error: "Failed to create configuration row", details: error?.message }, 500);
+  }
+});
+
+app.put("/make-server-c894a9ff/admin/tenant-config/:configKey/:id", requireAdmin, async (c) => {
+  try {
+    const configKey = c.req.param("configKey");
+    const id = c.req.param("id");
+    const tableName = getTenantConfigTable(configKey);
+
+    if (!tableName) {
+      return c.json({ error: "Invalid tenant config table" }, 400);
+    }
+
+    const userProfile = c.get("userProfile");
+    const tenantId = userProfile?.tenantId;
+
+    if (!tenantId) {
+      return c.json({ error: "Tenant not found" }, 404);
+    }
+
+    const payload = await c.req.json();
+
+    delete payload.id;
+    delete payload.created_at;
+    delete payload.updated_at;
+    delete payload.is_global_default;
+
+    const { data: existingRow, error: existingError } = await supabase
+      .from(tableName)
+      .select("*")
+      .eq("id", id)
       .single();
 
-    if (settingsError && settingsError.code !== 'PGRST116') { // PGRST116 = not found
-      console.error('Error fetching tenant settings:', settingsError);
-      return c.json({ error: 'Failed to fetch tenant settings' }, 500);
+    if (existingError || !existingRow) {
+      return c.json({ error: "Configuration row not found" }, 404);
     }
 
-    const settings = tenantSettings?.settings || {};
-    return c.json({ settings });
-  } catch (error) {
-    console.error("Error fetching tenant settings:", error);
-    return c.json({ error: "Failed to fetch tenant settings" }, 500);
+    // If user edits a global default row, create a tenant-specific override instead.
+    if (existingRow.tenant_id === null) {
+      const clonePayload = {
+        ...existingRow,
+        ...payload,
+        id: undefined,
+        tenant_id: tenantId,
+        updated_at: new Date().toISOString(),
+      };
+
+      delete clonePayload.id;
+      delete clonePayload.created_at;
+
+      const { data, error } = await supabase
+        .from(tableName)
+        .insert(clonePayload)
+        .select("*")
+        .single();
+
+      if (error) {
+        console.error(`Error cloning ${tableName}:`, error);
+        return c.json({ error: "Failed to create tenant override", details: error.message }, 500);
+      }
+
+      return c.json({ row: data, created_override: true });
+    }
+
+    if (existingRow.tenant_id !== tenantId) {
+      return c.json({ error: "Cannot edit another tenant's configuration" }, 403);
+    }
+
+    const updatePayload = {
+      ...payload,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from(tableName)
+      .update(updatePayload)
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(`Error updating ${tableName}:`, error);
+      return c.json({ error: "Failed to update configuration row", details: error.message }, 500);
+    }
+
+    return c.json({ row: data });
+  } catch (error: any) {
+    console.error("Tenant config update error:", error);
+    return c.json({ error: "Failed to update configuration row", details: error?.message }, 500);
+  }
+});
+
+app.delete("/make-server-c894a9ff/admin/tenant-config/:configKey/:id", requireAdmin, async (c) => {
+  try {
+    const configKey = c.req.param("configKey");
+    const id = c.req.param("id");
+    const tableName = getTenantConfigTable(configKey);
+
+    if (!tableName) {
+      return c.json({ error: "Invalid tenant config table" }, 400);
+    }
+
+    const userProfile = c.get("userProfile");
+    const tenantId = userProfile?.tenantId;
+
+    if (!tenantId) {
+      return c.json({ error: "Tenant not found" }, 404);
+    }
+
+    const { data, error } = await supabase
+      .from(tableName)
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(`Error deactivating ${tableName}:`, error);
+      return c.json({ error: "Failed to deactivate configuration row", details: error.message }, 500);
+    }
+
+    return c.json({ row: data });
+  } catch (error: any) {
+    console.error("Tenant config delete error:", error);
+    return c.json({ error: "Failed to deactivate configuration row", details: error?.message }, 500);
   }
 });
 

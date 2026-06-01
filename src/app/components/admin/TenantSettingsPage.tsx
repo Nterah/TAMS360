@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Switch } from "../ui/switch";
 import { Badge } from "../ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Save, Palette, Hash, Globe, Building2, AlertCircle, Loader2, Zap, Mail, ArrowLeft, Shield } from "lucide-react";
+import { Save, Palette, Hash, Globe, Building2, AlertCircle, Loader2, Zap, Mail, ArrowLeft, Shield, Database } from "lucide-react";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import EmailNotificationsTab from "./EmailNotificationsTab";
@@ -15,6 +15,7 @@ import { useState, useEffect, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { useTenant } from "../../contexts/TenantContext";
+import TenantConfigurationTab from "./TenantConfigurationTab";
 
 export default function TenantSettingsPage() {
   const navigate = useNavigate();
@@ -229,6 +230,12 @@ export default function TenantSettingsPage() {
             <Shield className="w-4 h-4 mr-2" />
             Data Access
           </TabsTrigger>
+
+          <TabsTrigger value="tenant-config">
+            <Database className="w-4 h-4 mr-2" />
+            Tenant Configuration
+          </TabsTrigger>
+
           <TabsTrigger value="automation">
             <Zap className="w-4 h-4 mr-2" />
             Workflow Automation
@@ -752,6 +759,11 @@ export default function TenantSettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+        
+        {/* Tenant Configuration Tab */}
+        <TabsContent value="tenant-config" className="space-y-6">
+          <TenantConfigurationTab accessToken={accessToken} />
         </TabsContent>
 
         {/* Workflow Automation Tab */}

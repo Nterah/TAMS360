@@ -32,6 +32,31 @@ export interface ReportOptions {
   includePhotos?: boolean; // New flag for photo reports
 }
 
+function formatReportDate(value: any, fallback = ""): string {
+  if (value === undefined || value === null) return fallback;
+
+  const text = String(value).trim();
+
+  if (
+    text === "" ||
+    text === "-" ||
+    text.toLowerCase() === "n/a" ||
+    text.toLowerCase() === "na" ||
+    text.toLowerCase() === "null" ||
+    text.toLowerCase() === "invalid date"
+  ) {
+    return fallback;
+  }
+
+  const parsed = new Date(text);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return fallback;
+  }
+
+  return parsed.toLocaleDateString("en-ZA");
+}
+
 type PdfPageSizeName = "a4" | "a3" | "a2" | "a1" | "a0";
 
 const PDF_PAGE_WIDTH_MM: Record<PdfPageSizeName, number> = {
@@ -305,7 +330,7 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
       }
       // Format dates
       if (col.key.includes('date') || col.key.includes('Date')) {
-        return value ? new Date(value).toLocaleDateString('en-ZA') : '-';
+        return formatReportDate(value, "-");
       }
       return value || '-';
     })
@@ -442,7 +467,7 @@ export function generateExcelReport(options: ReportOptions): void {
         }
         // Format dates
         if (col.key.includes('date') || col.key.includes('Date')) {
-          return value ? new Date(value).toLocaleDateString('en-ZA') : '';
+          return formatReportDate(value, "");
         }
         return value || '';
       })
@@ -489,7 +514,7 @@ export function generateCSVReport(options: ReportOptions): void {
       }
       // Format dates
       else if (col.key.includes('date') || col.key.includes('Date')) {
-        csvRow[col.header] = value ? new Date(value).toLocaleDateString('en-ZA') : '';
+        csvRow[col.header] = formatReportDate(value, "");
       }
       else {
         csvRow[col.header] = value || '';
@@ -769,7 +794,7 @@ export async function generatePhotoExcelReport(options: ReportOptions): Promise<
         return typeof value === 'number' ? value : value || '';
       }
       if (col.key.includes('date') || col.key.includes('Date')) {
-        return value ? new Date(value).toLocaleDateString('en-ZA') : '';
+        return formatReportDate(value, "");
       }
       return value || '';
     });
