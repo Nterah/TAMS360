@@ -265,8 +265,16 @@ export default function ReportsPage() {
     inspection: latestInspection || asset.inspection || null,
   });
 
-  const buildAssetRegisterRows = (assets: any[], inspections: any[]) => {
+  const buildAssetRegisterRows = (
+    assets: any[],
+    inspections: any[],
+    lifecycleConfigRows: any[] = [],
+    assetValueConfigRows: any[] = []
+  ) => {
     const latestInspectionByAssetId = buildLatestInspectionByAssetId(inspections);
+
+    const lifecycleConfigMap = buildConfigMapByAssetType(lifecycleConfigRows);
+    const assetValueConfigMap = buildConfigMapByAssetType(assetValueConfigRows);    
 
     return assets.map((asset: any) => {
       const latestInspection = latestInspectionByAssetId.get(asset.asset_id) || asset.latest_inspection || null;
@@ -279,6 +287,43 @@ export default function ReportsPage() {
 
       const ciHealth = resolveCIHealth(source);
       const ciSafety = resolveCISafety(source);
+
+      const lifecycleConfig = getLifecycleConfigForAsset(asset, lifecycleConfigMap);
+      const configuredUsefulLife = toNumberOrNull(lifecycleConfig?.useful_life_years);
+      const configuredDepreciationRate = toNumberOrNull(lifecycleConfig?.depreciation_rate_percent);
+
+      const configuredReplacementValue = getAssetReplacementValueFromConfig(asset, assetValueConfigMap);
+
+      const directPurchaseCost = firstDefined(
+        asset.purchase_cost,
+        asset.purchase_price,
+        asset.installation_cost,
+        asset.procurement_cost,
+        asset.procurement_price
+      );
+
+      const directPurchaseCostNumber = toNumberOrNull(directPurchaseCost);
+      const directReplacementValueNumber = toNumberOrNull(asset.replacement_value);
+
+      const reportPurchaseCost =
+        directPurchaseCostNumber && directPurchaseCostNumber > 0
+          ? directPurchaseCostNumber
+          : directReplacementValueNumber && directReplacementValueNumber > 0
+            ? directReplacementValueNumber
+            : configuredReplacementValue;
+
+      const numericCI = getAssetNumericCI(asset, source, ciDisplay);
+      const ciFactor = numericCI !== null ? Math.max(0, Math.min(100, numericCI)) / 100 : null;
+
+      const calculatedResidualValue =
+        reportPurchaseCost !== null && ciFactor !== null
+          ? reportPurchaseCost * ciFactor
+          : null;
+
+      const calculatedAccumulatedDepreciation =
+        reportPurchaseCost !== null && calculatedResidualValue !== null
+          ? Math.max(0, reportPurchaseCost - calculatedResidualValue)
+          : null;
 
       const routeRoad = firstDefined(
         getAssetValue(asset, ["LOCATION/ROAD NAME", "LOCATION ROAD NAME", "ROUTE/ROAD", "ROUTE ROAD"]),
@@ -370,13 +415,46 @@ export default function ReportsPage() {
         height_m: firstDefined(getAssetValue(asset, ["HEIGHT (m)", "HEIGHT M", "HEIGHT"]), asset.height_m, asset.height),
         orientation_position: firstDefined(getAssetValue(asset, ["ORIENTATION/POSITION", "ORIENTATION / POSITION", "ORIENTATION", "POSITION", "SIDE OF ROAD"]), asset.orientation_position, asset.orientation, asset.position, asset.side_of_road),
         
-        date_of_purchase: firstDefined(asset.date_of_purchase, asset.purchase_date, asset.install_date),
-        purchase_cost: firstDefined(asset.purchase_cost, asset.installation_cost),
-        last_revaluation: firstDefined(asset.last_revaluation, asset.last_valuation_date),
-        residual_value: firstDefined(asset.residual_value),
-        useful_life: firstDefined(getAssetValue(asset, ["USEFUL LIFE", "USEFUL_LIFE", "USEFUL LIFE YEARS", "EXPECTED LIFE"]), asset.useful_life, asset.useful_life_years, asset.expected_life_years),
-        depreciation_rate: firstDefined(getAssetValue(asset, ["DEPRECIATION RATE", "DEPRICIATION RATE", "DEPRECIATION_RATE"]), asset.depreciation_rate),
-        accumulated_depreciation: firstDefined(asset.accumulated_depreciation, asset.accum_depreciation),
+        date_of_purchase: firstDefined(asset.date_of_purchase, asset.purchase_date, asset.procurement_date, asset.install_date),
+
+        purchase_cost: firstDefined(
+          reportPurchaseCost
+        ),
+
+        last_revaluation: firstDefined(
+          asset.last_revaluation,
+          asset.last_valuation_date,
+          asset.last_revaluation_date,
+          asset.latest_inspection_date,
+          latestInspection?.inspection_date
+        ),
+
+        residual_value: firstDefined(
+          toNumberOrNull(asset.residual_value) && toNumberOrNull(asset.residual_value)! > 0 ? asset.residual_value : null,
+          toNumberOrNull(asset.salvage_value) && toNumberOrNull(asset.salvage_value)! > 0 ? asset.salvage_value : null,
+          toNumberOrNull(asset.current_asset_value) && toNumberOrNull(asset.current_asset_value)! > 0 ? asset.current_asset_value : null,
+          calculatedResidualValue
+        ),
+
+        useful_life: firstDefined(
+          getAssetValue(asset, ["USEFUL LIFE", "USEFUL_LIFE", "USEFUL LIFE YEARS", "EXPECTED LIFE"]),
+          asset.useful_life,
+          asset.useful_life_years,
+          asset.expected_life_years,
+          configuredUsefulLife
+        ),
+
+        depreciation_rate: firstDefined(
+          getAssetValue(asset, ["DEPRECIATION RATE", "DEPRICIATION RATE", "DEPRECIATION_RATE"]),
+          asset.depreciation_rate,
+          configuredDepreciationRate
+        ),
+
+        accumulated_depreciation: firstDefined(
+          toNumberOrNull(asset.accumulated_depreciation) && toNumberOrNull(asset.accumulated_depreciation)! > 0 ? asset.accumulated_depreciation : null,
+          toNumberOrNull(asset.accum_depreciation) && toNumberOrNull(asset.accum_depreciation)! > 0 ? asset.accum_depreciation : null,
+          calculatedAccumulatedDepreciation
+        ),
 
         asset_condition: ciDisplay.label,
         deru_degree: firstDefined(
@@ -489,59 +567,184 @@ export default function ReportsPage() {
   };
 
   const fetchAllAssetRegisterReportAssets = async () => {
-    const pageSize = 5000;
+    const pageSize = 1000;
     let page = 1;
     let totalPages = 1;
     let allAssets: any[] = [];
 
     do {
-      const res = await fetch(`${API_URL}/reports/asset-register?page=${page}&pageSize=${pageSize}`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await fetch(
+        `${API_URL}/assets?page=${page}&pageSize=${pageSize}`,
+        {
+          headers: getAuthHeaders(),
+        }
+      );
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => "");
         throw new Error(
-          `Failed to fetch asset register report page ${page}: ${res.status} ${errorText}`
+          `Failed to fetch assets page ${page}: ${res.status} ${errorText}`
         );
       }
 
       const json = await res.json();
+      const pageRows = Array.isArray(json.assets)
+        ? json.assets
+        : Array.isArray(json)
+          ? json
+          : [];
 
-      console.log("[ReportsPage] Asset register report source:", json.source);
-      console.log("[ReportsPage] Asset register report rows received:", json.assets?.length || 0);
+      allAssets = allAssets.concat(pageRows);
 
-      allAssets = allAssets.concat(json.assets || []);
-      totalPages = json.totalPages || 1;
+      const total = Number(json.total || allAssets.length);
+      totalPages = Number(json.totalPages || Math.ceil(total / pageSize) || 1);
+
+      console.log(
+        `[Reports] Asset export loaded page ${page}/${totalPages}: ${pageRows.length}`
+      );
+
       page += 1;
     } while (page <= totalPages);
 
-    return allAssets;
+    const deduped = Array.from(
+      new Map(
+        allAssets.map((asset: any) => [
+          asset.asset_id || asset.id || asset.asset_ref,
+          asset,
+        ])
+      ).values()
+    );
+
+    console.log(`[Reports] Asset export total rows after paging: ${deduped.length}`);
+
+    return deduped;
   };
 
-  const fetchAllInspections = async () => {
-    const pageSize = 5000;
-    let page = 1;
-    let totalPages = 1;
-    let allInspections: any[] = [];
+  const fetchTenantConfigRows = async (configKey: string) => {
+    const res = await fetch(`${API_URL}/admin/tenant-config/${configKey}`, {
+      headers: getAuthHeaders(),
+    });
 
-    do {
-      const res = await fetch(`${API_URL}/inspections?page=${page}&pageSize=${pageSize}`, {
-        headers: getAuthHeaders(),
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "");
+      console.warn(`[ReportsPage] Failed to fetch tenant config ${configKey}:`, res.status, errorText);
+      return [];
+    }
+
+    const json = await res.json();
+    return Array.isArray(json.rows) ? json.rows : [];
+  };
+
+  const normaliseLookupText = (value: any) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+  const toNumberOrNull = (value: any): number | null => {
+    if (value === undefined || value === null || value === "" || value === "-") return null;
+
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+
+    const cleaned = String(value).replace(/[^0-9.-]/g, "");
+    if (!cleaned) return null;
+
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const getAssetTypeKey = (asset: any) =>
+    normaliseLookupText(
+      firstDefined(
+        asset.asset_type_name,
+        asset.asset_type,
+        asset.type,
+        getAssetValue(asset, ["ASSET TYPE", "TYPE"])
+      )
+    );
+
+  const buildConfigMapByAssetType = (rows: any[]) => {
+    const map = new Map<string, any>();
+
+    rows
+      .filter((row: any) => row?.is_active !== false)
+      .forEach((row: any) => {
+        const key = normaliseLookupText(row.asset_type);
+        if (!key) return;
+
+        // Tenant-specific rows should override global defaults.
+        const existing = map.get(key);
+        if (!existing || existing.is_global_default) {
+          map.set(key, row);
+        }
       });
 
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => "");
-        throw new Error(`Failed to fetch inspections page ${page}: ${res.status} ${errorText}`);
-      }
+    return map;
+  };
 
-      const json = await res.json();
-      allInspections = allInspections.concat(json.inspections || []);
-      totalPages = json.totalPages || 1;
-      page += 1;
-    } while (page <= totalPages);
+  const getMeasurementQuantityForValueConfig = (asset: any, valueConfig: any): number => {
+    const unit = normaliseLookupText(valueConfig?.unit_of_measure || "each");
 
-    return allInspections;
+    const lengthM =
+      toNumberOrNull(asset.length_m) ??
+      toNumberOrNull(getAssetValue(asset, ["LENGTH (m)", "LENGTH M", "LENGTH"]));
+
+    const widthM =
+      toNumberOrNull(asset.width_m) ??
+      toNumberOrNull(getAssetValue(asset, ["WIDTH (m)", "WIDTH M", "WIDTH"]));
+
+    const surfaceAreaM2 =
+      toNumberOrNull(asset.surface_area_m2) ??
+      toNumberOrNull(getAssetValue(asset, ["SURFACE AREA", "SURFACE_AREA", "AREA", "AREA M2"]));
+
+    const startKm = toNumberOrNull(asset.start_km);
+    const endKm = toNumberOrNull(asset.end_km);
+
+    if (unit === "m" || unit === "metre" || unit === "meter" || unit === "meters" || unit === "metres") {
+      if (lengthM !== null && lengthM > 0) return lengthM;
+      if (startKm !== null && endKm !== null && endKm > startKm) return (endKm - startKm) * 1000;
+      return 1;
+    }
+
+    if (unit === "m2" || unit === "sqm" || unit === "squaremetre" || unit === "squaremeter") {
+      if (surfaceAreaM2 !== null && surfaceAreaM2 > 0) return surfaceAreaM2;
+      if (lengthM !== null && widthM !== null && lengthM > 0 && widthM > 0) return lengthM * widthM;
+      return 1;
+    }
+
+    return 1;
+  };
+
+  const getAssetReplacementValueFromConfig = (asset: any, assetValueConfigMap: Map<string, any>) => {
+    const config = assetValueConfigMap.get(getAssetTypeKey(asset));
+    if (!config) return null;
+
+    const unitRate = toNumberOrNull(config.estimated_replacement_value);
+
+    // IMPORTANT:
+    // Do not use placeholder zero values from the Admin Asset Values table.
+    // A zero replacement value is not a valid costing assumption.
+    if (unitRate === null || unitRate <= 0) return null;
+
+    const quantity = getMeasurementQuantityForValueConfig(asset, config);
+    return unitRate * quantity;
+  };
+
+  const getLifecycleConfigForAsset = (asset: any, lifecycleConfigMap: Map<string, any>) => {
+    return lifecycleConfigMap.get(getAssetTypeKey(asset)) || null;
+  };
+
+  const getAssetNumericCI = (asset: any, source: any, ciDisplay: any) => {
+    return (
+      toNumberOrNull(asset.latest_ci) ??
+      toNumberOrNull(asset.ci_final) ??
+      toNumberOrNull(asset.condition_index) ??
+      toNumberOrNull(source?.latest_ci) ??
+      toNumberOrNull(ciDisplay?.value) ??
+      toNumberOrNull(ciDisplay?.label)
+    );
   };
 
   // TAMS360 Brand Colors
@@ -790,6 +993,49 @@ export default function ReportsPage() {
     return filtered;
   };
 
+  const fetchAllInspections = async () => {
+    const pageSize = 1000;
+    let page = 1;
+    let totalPages = 1;
+    let allInspections: any[] = [];
+
+    do {
+      const res = await fetch(`${API_URL}/inspections?page=${page}&pageSize=${pageSize}`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "");
+        throw new Error(
+          `Failed to fetch inspections page ${page}: ${res.status} ${errorText}`
+        );
+      }
+
+      const json = await res.json();
+      const pageRows = Array.isArray(json.inspections)
+        ? json.inspections
+        : Array.isArray(json)
+          ? json
+          : [];
+
+      allInspections = allInspections.concat(pageRows);
+
+      const total = Number(json.total || allInspections.length);
+      totalPages = Number(json.totalPages || Math.ceil(total / pageSize) || 1);
+
+      page += 1;
+    } while (page <= totalPages);
+
+    return Array.from(
+      new Map(
+        allInspections.map((inspection: any) => [
+          inspection.inspection_id || inspection.id,
+          inspection,
+        ])
+      ).values()
+    );
+  };
+
   const handleExportReport = async (reportType: string, format: string) => {
     try {
       setLoading(true);
@@ -806,12 +1052,19 @@ export default function ReportsPage() {
 
       switch (reportType) {
         case "Asset Inventory": {
-          const [assets, inspections] = await Promise.all([
+          const [assets, inspections, lifecycleConfigRows, assetValueConfigRows] = await Promise.all([
             fetchAllAssetRegisterReportAssets(),
             fetchAllInspections(),
+            fetchTenantConfigRows("lifecycle"),
+            fetchTenantConfigRows("values"),
           ]);
 
-          const assetRegisterRows = buildAssetRegisterRows(assets, inspections);
+          const assetRegisterRows = buildAssetRegisterRows(
+            assets,
+            inspections,
+            lifecycleConfigRows,
+            assetValueConfigRows
+          );
 
           data = applyAssetFilters(assetRegisterRows);
 
@@ -896,17 +1149,52 @@ export default function ReportsPage() {
         }
 
         case "Asset Valuation": {
-          const assets = await fetchAllAssets();
+          const [assets, lifecycleConfigRows, assetValueConfigRows] = await Promise.all([
+            fetchAllAssets(),
+            fetchTenantConfigRows("lifecycle"),
+            fetchTenantConfigRows("values"),
+          ]);
+
+          const lifecycleConfigMap = buildConfigMapByAssetType(lifecycleConfigRows);
+          const assetValueConfigMap = buildConfigMapByAssetType(assetValueConfigRows);
+
           const valuationAssets = assets.map((asset: any) => {
-            const installDate = asset.install_date ? new Date(asset.install_date) : null;
-            const ageYears = installDate
+            const installDate = asset.install_date || asset.purchase_date || asset.procurement_date
+              ? new Date(asset.install_date || asset.purchase_date || asset.procurement_date)
+              : null;
+
+            const ageYears = installDate && !Number.isNaN(installDate.getTime())
               ? (Date.now() - installDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25)
               : 0;
-            const usefulLife = asset.useful_life_years || asset.expected_life_years || 20;
+
+            const lifecycleConfig = getLifecycleConfigForAsset(asset, lifecycleConfigMap);
+            const configuredUsefulLife = toNumberOrNull(lifecycleConfig?.useful_life_years);
+
+            const usefulLife =
+              toNumberOrNull(asset.useful_life_years) ??
+              toNumberOrNull(asset.expected_life_years) ??
+              configuredUsefulLife ??
+              20;
+
             const depreciationRate = usefulLife > 0 ? 100 / usefulLife : 0;
+
+            const replacementValue =
+              toNumberOrNull(asset.replacement_value) ??
+              getAssetReplacementValueFromConfig(asset, assetValueConfigMap) ??
+              0;
+
+            const ci = toNumberOrNull(asset.latest_ci) ?? toNumberOrNull(asset.condition_index);
+            const ciFactor = ci !== null ? Math.max(0, Math.min(100, ci)) / 100 : null;
+
+            const currentValue =
+              toNumberOrNull(asset.current_value) ??
+              toNumberOrNull(asset.current_asset_value) ??
+              (ciFactor !== null ? replacementValue * ciFactor : null);
 
             return {
               ...asset,
+              replacement_value: replacementValue,
+              current_value: currentValue ?? "-",
               age_years: ageYears.toFixed(1),
               depreciation_rate: depreciationRate.toFixed(2),
             };
