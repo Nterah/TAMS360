@@ -27,6 +27,80 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 
+const resolveCISafety = (ci?: number | null) => {
+  const value = Number(ci ?? 0);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return {
+      label: "Unknown",
+      className: "bg-slate-100 text-slate-700 border-slate-200",
+    };
+  }
+
+  if (value >= 85) {
+    return {
+      label: "Excellent",
+      className: "bg-green-100 text-green-800 border-green-200",
+    };
+  }
+
+  if (value >= 70) {
+    return {
+      label: "Good",
+      className: "bg-blue-100 text-blue-800 border-blue-200",
+    };
+  }
+
+  if (value >= 50) {
+    return {
+      label: "Fair",
+      className: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    };
+  }
+
+  return {
+    label: "Poor",
+    className: "bg-red-100 text-red-800 border-red-200",
+  };
+};
+
+const resolveCIHealth = (ci?: number | null) => {
+  const value = Number(ci ?? 0);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return {
+      label: "Unknown",
+      className: "bg-slate-100 text-slate-700 border-slate-200",
+    };
+  }
+
+  if (value >= 85) {
+    return {
+      label: "Excellent",
+      className: "bg-green-100 text-green-800 border-green-200",
+    };
+  }
+
+  if (value >= 70) {
+    return {
+      label: "Good",
+      className: "bg-blue-100 text-blue-800 border-blue-200",
+    };
+  }
+
+  if (value >= 50) {
+    return {
+      label: "Fair",
+      className: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    };
+  }
+
+  return {
+    label: "Poor",
+    className: "bg-red-100 text-red-800 border-red-200",
+  };
+};
+
 export default function InspectionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -349,21 +423,28 @@ export default function InspectionDetailPage() {
 
 const metadata = inspection.calculation_metadata || {};
 
-const displaySource = {
-  ...inspection,
-  calculation_metadata: metadata,
-  inspection,
-};
+const ciHealth =
+  metadata.ci_health ??
+  inspection.ci_health ??
+  null;
 
-  const ciHealth = resolveCIHealth(displaySource);
-  const ciSafety = resolveCISafety(displaySource);
-  const ciFinal = resolveCI(displaySource);
-  const worstUrgency = resolveUrgency(displaySource);
+const ciSafety =
+  metadata.ci_safety ??
+  inspection.ci_safety ??
+  null;
 
-  const ciHealthDisplay = getCIDisplay(ciHealth);
-  const ciSafetyDisplay = getCIDisplay(ciSafety);
-  const ciFinalDisplay = getCIDisplay(ciFinal);
-  const urgencyDisplay = getUrgencyDisplay(worstUrgency);
+const ciFinal =
+  metadata.ci_final ??
+  inspection.conditional_index ??
+  inspection.ci_final ??
+  null;
+
+const worstUrgency = String(
+  metadata.worst_urgency ??
+  inspection.calculated_urgency ??
+  inspection.urgency ??
+  "0"
+);
 
   // Merge stored components with latest template metadata
   const components = inspection.components || [];

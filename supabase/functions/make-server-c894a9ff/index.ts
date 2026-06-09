@@ -1383,11 +1383,21 @@ app.get("/make-server-c894a9ff/admin/tenant-config/:configKey", requireAdmin, as
       return c.json({ error: "Tenant not found" }, 404);
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from(tableName)
       .select("*")
-      .or(`tenant_id.is.null,tenant_id.eq.${tenantId}`)
-      .order("created_at", { ascending: true });
+      .or(`tenant_id.is.null,tenant_id.eq.${tenantId}`);
+
+    if (configKey === "componentRates") {
+      query = query
+        .order("asset_type", { ascending: true })
+        .order("component_order", { ascending: true, nullsFirst: false })
+        .order("component_name", { ascending: true });
+    } else {
+      query = query.order("created_at", { ascending: true });
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error(`Error fetching ${tableName}:`, error);
@@ -2080,7 +2090,7 @@ app.get("/make-server-c894a9ff/admin/diagnostic/tams360-check", requireAdmin, as
       currentUser: {
         id: userProfile.id,
         email: userProfile.email,
-        tenantId: userProfile.tenantId,
+        tenantId: userProfile.tenant_id,
         role: userProfile.role,
       },
       checks: {},
@@ -2116,7 +2126,7 @@ app.get("/make-server-c894a9ff/admin/diagnostic/tams360-check", requireAdmin, as
     results.orphanedUsers = orphanedUsers;
 
     // 4. Check tenant-specific users
-    const tenantUsers = results.viewUsers.filter((u: any) => u.tenant_id === userProfile.tenantId);
+    const tenantUsers = results.viewUsers.filter((u: any) => u.tenant_id === userProfile.tenant_id);
     results.checks.usersInYourTenant = tenantUsers.length;
     results.tenantUsers = tenantUsers;
 
@@ -2783,135 +2793,204 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
     }
 
     const accessToken = authHeader.split(" ")[1];
-    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(
-      accessToken,
-    );
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
 
     if (authError || !userData.user) {
       return c.json({ error: "Invalid session" }, 401);
     }
 
-    // Get user profile to retrieve tenantId
-    const userProfile = await kv.get(`user:${userData.user.id}`);
-    if (!userProfile || !userProfile.tenantId) {
+    // Use the same tenant source as the working GET /assets route.
+    // Do not use the old KV-only tenant profile here, because it can be stale after project moves.
+    const { data: userProfile, error: profileError } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, tenant_id, role")
+      .eq("id", userData.user.id)
+      .single();
+
+    if (profileError || !userProfile || !userProfile.tenant_id) {
+      console.error("Asset create profile lookup failed:", profileError);
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
-    // Check if tenant ID is in UUID format (database requirement)
-    if (!isValidUuid(userProfile.tenantId)) {
-      console.error(`Invalid tenant ID format (not UUID): ${userProfile.tenantId}`);
-      return c.json({ 
-        error: "Organization data format is outdated. Cannot create assets with old tenant format.",
-        details: "Tenant ID must be in UUID format for database operations.",
-        action_required: "recreate_organization"
-      }, 400);
-    }
+    const tenantId = userProfile.tenant_id;
 
     const asset = await c.req.json();
-    
-    // Look up asset_type_id from asset type name
-    const assetTypeName = asset.type || asset.asset_type_name;
+
+    const parseNullableNumber = (value: any) => {
+      if (value === null || value === undefined || value === "") return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const parseNullableInteger = (value: any) => {
+      if (value === null || value === undefined || value === "") return null;
+      const parsed = parseInt(String(value), 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const cleanText = (value: any) => {
+      if (value === null || value === undefined) return null;
+      const text = String(value).trim();
+      return text.length > 0 ? text : null;
+    };
+
+    const assetRef = cleanText(
+      asset.asset_ref ||
+      asset.referenceNumber ||
+      asset.reference_number ||
+      asset.assetReference
+    );
+
+    if (!assetRef) {
+      return c.json({ error: "Asset reference is required" }, 400);
+    }
+
+    const assetTypeName = cleanText(
+      asset.type ||
+      asset.asset_type ||
+      asset.assetType ||
+      asset.asset_type_name
+    );
+
+    if (!assetTypeName) {
+      return c.json({ error: "Asset type is required" }, 400);
+    }
+
     const { data: assetType, error: typeError } = await supabase
       .from("asset_types")
-      .select("asset_type_id")
-      .eq("name", assetTypeName)
+      .select("asset_type_id, name")
+      .ilike("name", assetTypeName)
       .maybeSingle();
 
     if (typeError || !assetType) {
-      console.error("Error finding asset type:", typeError);
+      console.error("Error finding asset type:", typeError, "assetTypeName:", assetTypeName);
       return c.json({ error: `Invalid asset type: ${assetTypeName}` }, 400);
     }
 
-    // Look up status_id from status name
-    const statusName = asset.status || "Active";
+    const statusName = cleanText(asset.status) || "Active";
     const { data: statusData, error: statusError } = await supabase
       .from("asset_status")
-      .select("status_id")
-      .eq("name", statusName)
+      .select("status_id, name")
+      .ilike("name", statusName)
       .maybeSingle();
 
     if (statusError || !statusData) {
-      console.error("Error finding status:", statusError);
+      console.error("Error finding asset status:", statusError, "statusName:", statusName);
       return c.json({ error: `Invalid status: ${statusName}` }, 400);
     }
-    
-    // Map frontend field names to database field names (using actual schema)
+
+    const roadNumber = cleanText(asset.road_number || asset.roadNumber || asset.road_name || asset.roadName);
+    const roadSubsection = cleanText(asset.road_subsection || asset.roadSubsection);
+    const roadName = cleanText(asset.full_road_name || asset.fullRoadName) ||
+      (roadNumber && roadSubsection ? `${roadNumber}${roadSubsection}` : roadNumber);
+
+    const description = cleanText(asset.description || asset.name || asset.asset_name || asset.assetName);
+    const ownerEntity = cleanText(asset.owner_entity || asset.owner || asset.owned_by);
+    const maintenanceResponsibility = cleanText(
+      asset.maintenance_responsibility ||
+      asset.responsible_party ||
+      asset.responsibleParty
+    );
+
+    // Important: insert into the real public.tams360_assets table used by GET /assets via tams360_assets_v.
+    // Do not insert into legacy "assets", and do not include non-existent columns such as description,
+    // owned_by, or responsible_party.
     const assetData = {
-      tenant_id: userProfile.tenantId,
-      asset_ref: asset.referenceNumber || asset.asset_ref,
+      tenant_id: tenantId,
+      asset_ref: assetRef,
       asset_type_id: assetType.asset_type_id,
-      description: asset.name || asset.description,
-      region: asset.region,
-      depot: asset.depot,
-      road_number: asset.roadNumber || asset.road_number,
-      road_name: asset.roadName || asset.road_name,
-      km_marker: asset.kilometer ? parseFloat(asset.kilometer) : null,
-      install_date: asset.installDate || asset.install_date || null,
-      useful_life_years: asset.expectedLife ? parseInt(asset.expectedLife) : null,
+      road_number: roadNumber,
+      road_name: roadName,
+      km_marker: parseNullableNumber(asset.km_marker ?? asset.kilometer ?? asset.km),
+      region: cleanText(asset.region),
+      depot: cleanText(asset.depot),
+      gps_lat: parseNullableNumber(asset.gps_lat ?? asset.latitude ?? asset.start_latitude),
+      gps_lng: parseNullableNumber(asset.gps_lng ?? asset.longitude ?? asset.start_longitude),
+      install_date: cleanText(asset.install_date || asset.installDate),
+      useful_life_years: parseNullableInteger(asset.useful_life_years ?? asset.expectedLife),
       status_id: statusData.status_id,
-      gps_lat: asset.latitude ? parseFloat(asset.latitude) : null,
-      gps_lng: asset.longitude ? parseFloat(asset.longitude) : null,
-      notes: asset.notes,
-      owned_by: asset.owner,
-      responsible_party: asset.responsibleParty || asset.responsible_party,
-      replacement_value: asset.replacementValue ? parseFloat(asset.replacementValue) : null,
-      purchase_price: asset.installationCost ? parseFloat(asset.installationCost) : null,
+      notes: cleanText(asset.notes),
+      owner_entity: ownerEntity,
+      maintenance_responsibility: maintenanceResponsibility,
+      replacement_value: parseNullableNumber(asset.replacement_value ?? asset.replacementValue),
+      purchase_price: parseNullableNumber(asset.purchase_price ?? asset.installationCost),
       created_by: userData.user.id,
+      updated_by: userData.user.id,
+      metadata: {
+        source: "mobile_field_capture",
+        description,
+        asset_name: cleanText(asset.asset_name || asset.assetName),
+        condition: cleanText(asset.condition),
+        ward: cleanText(asset.ward),
+        road_subsection: roadSubsection,
+        direction: cleanText(asset.direction),
+        road_side: cleanText(asset.road_side || asset.roadSide),
+        orientation: cleanText(asset.orientation || asset.direction),
+        installer_name: cleanText(asset.installer_name || asset.installer),
+        photo_urls: Array.isArray(asset.photo_urls) ? asset.photo_urls : [],
+        geometry_type: cleanText(asset.geometry_type || asset.geometryType),
+        end_latitude: parseNullableNumber(asset.end_latitude ?? asset.endLatitude),
+        end_longitude: parseNullableNumber(asset.end_longitude ?? asset.endLongitude),
+        captured_at: cleanText(asset.capturedAt || asset.captured_at) || new Date().toISOString(),
+        captured_by: userData.user.id,
+      },
     };
 
-    // Try to insert into database first
     const { data: insertedAsset, error: insertError } = await supabase
-      .from("assets")
+      .from("tams360_assets")
       .insert(assetData)
-      .select()
+      .select("*")
       .single();
 
-    if (insertError) {
-      console.error("Error inserting asset into database:", insertError);
-      // Fallback to KV store
-      const assetId = `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const assetRecord = {
-        id: assetId,
-        tenantId: userProfile.tenantId,
-        ...asset,
-        createdBy: userData.user.id,
-        assignedTo: userData.user.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await kv.set(`asset:${assetId}`, assetRecord);
-      
-      // Log audit trail
-      await kv.set(`audit:${Date.now()}`, {
-        action: "asset_created",
-        userId: userData.user.id,
-        assetId,
-        timestamp: new Date().toISOString(),
-      });
-
-      return c.json({ success: true, asset: assetRecord });
+    if (insertError || !insertedAsset) {
+      console.error("Error inserting asset into public.tams360_assets:", insertError, "payload:", assetData);
+      return c.json({
+        success: false,
+        error: "Failed to save asset to database",
+        details: insertError?.message,
+      }, 500);
     }
 
-    // Log inventory change in database (non-blocking - fire and forget)
+    // Verify that the same source used by GET /assets can read this record back.
+    const { data: verifiedAsset, error: verifyError } = await supabase
+      .from("tams360_assets_v")
+      .select("*")
+      .eq("asset_id", insertedAsset.asset_id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (verifyError || !verifiedAsset) {
+      console.error("Asset inserted but not visible in tams360_assets_v:", verifyError, insertedAsset.asset_id);
+      return c.json({
+        success: true,
+        savedTo: "database",
+        warning: "Asset was inserted but is not visible in the asset view yet.",
+        asset: insertedAsset,
+      });
+    }
+
     supabase
-      .from('asset_inventory_log')
+      .from("asset_inventory_log")
       .insert({
         asset_id: insertedAsset.asset_id,
-        action: 'CREATE',
+        action: "CREATE",
         changed_by: userData.user.id,
-        changes_summary: `Asset created via web app`,
+        changes_summary: `Asset created via mobile field capture`,
       })
       .then(({ error: logError }) => {
         if (logError) {
-          console.error('Warning: Failed to log inventory change:', logError);
+          console.error("Warning: Failed to log inventory change:", logError);
         }
       });
 
-    // Return immediately without waiting for log
-    return c.json({ success: true, asset: insertedAsset });
-  } catch (error) {
+    return c.json({
+      success: true,
+      savedTo: "database",
+      asset: verifiedAsset,
+    });
+  } catch (error: any) {
     console.error("Error creating asset:", error);
-    return c.json({ error: "Failed to create asset" }, 500);
+    return c.json({ error: "Failed to create asset", details: error?.message }, 500);
   }
 });
 
@@ -4104,7 +4183,7 @@ app.post("/make-server-c894a9ff/assets/bulk-assign", async (c) => {
 
     // Get user profile to check role
     const userProfile = await kv.get(`user:${userData.user.id}`);
-    if (!userProfile || !userProfile.tenantId) {
+    if (!userProfile || !userProfile.tenant_id) {
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
@@ -4133,7 +4212,7 @@ app.post("/make-server-c894a9ff/assets/bulk-assign", async (c) => {
       .from("assets")
       .update(updateData)
       .in("asset_id", assetIds)
-      .eq("tenant_id", userProfile.tenantId)
+      .eq("tenant_id", userProfile.tenant_id)
       .select();
 
     if (updateError) {
@@ -6478,7 +6557,7 @@ app.get("/make-server-c894a9ff/maintenance", async (c) => {
 
 //     // Get user profile to retrieve tenantId
 //     const userProfile = await kv.get(`user:${userData.user.id}`);
-//     if (!userProfile || !userProfile.tenantId) {
+//     if (!userProfile || !userProfile.tenant_id) {
 //       return c.json({ error: "User not associated with an organization" }, 403);
 //     }
 
@@ -6488,7 +6567,7 @@ app.get("/make-server-c894a9ff/maintenance", async (c) => {
 //     const { data: record, error } = await supabase
 //       .from("maintenance_records")
 //       .insert({
-//         tenant_id: userProfile.tenantId,
+//         tenant_id: userProfile.tenant_id,
 //         asset_id: maintenance.asset_id,
 //         maintenance_type: maintenance.maintenance_type,
 //         scheduled_date: maintenance.scheduled_date || null,
@@ -6509,7 +6588,7 @@ app.get("/make-server-c894a9ff/maintenance", async (c) => {
 //       const maintenanceId = `maintenance-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 //       const maintenanceRecord = {
 //         maintenance_id: maintenanceId,
-//         tenant_id: userProfile.tenantId,
+//         tenant_id: userProfile.tenant_id,
 //         ...maintenance,
 //         logged_by: userData.user.id,
 //         created_at: new Date().toISOString(),
@@ -6739,283 +6818,51 @@ app.post("/make-server-c894a9ff/inspections", async (c) => {
       return c.json({ error: "Invalid session" }, 401);
     }
 
-    // Get user profile to retrieve tenantId
-    const userProfile = await kv.get(`user:${userData.user.id}`);
-    if (!userProfile || !userProfile.tenantId) {
+    // Use the same tenant source as the working asset routes.
+    // Do not use old KV-only tenant data here.
+    const { data: userProfile, error: profileError } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, tenant_id, role")
+      .eq("id", userData.user.id)
+      .single();
+
+    if (profileError || !userProfile || !userProfile.tenant_id) {
+      console.error("Inspection create profile lookup failed:", profileError);
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
-    // Check if tenant ID is in UUID format (database requirement)
-    if (!isValidUuid(userProfile.tenantId)) {
-      console.error(`Invalid tenant ID format (not UUID): ${userProfile.tenantId}`);
-      return c.json({ 
-        error: "Organization data format is outdated. Cannot create inspections with old tenant format.",
-        details: "Tenant ID must be in UUID format for database operations.",
-        action_required: "recreate_organization"
+    if (!isValidUuid(userProfile.tenant_id)) {
+      console.error(`Invalid tenant ID format: ${userProfile.tenant_id}`);
+      return c.json({
+        error: "Invalid organization/tenant ID format.",
+        details: "tenant_id must be a UUID.",
       }, 400);
     }
 
     const inspection = await c.req.json();
 
-    // Prepare calculation metadata
-    const ci_value = inspection.ci ?? inspection.ci_final ?? inspection.conditional_index ?? null;
-    const calculationMetadata = {
-      ci_health: inspection.ci_health ?? null,
-      ci_safety: inspection.ci_safety ?? null,
-      ci_final: ci_value,
-      degree: inspection.degree ?? null,
-      extent: inspection.extent ?? null,
-      relevancy: inspection.relevancy ?? null,
-      worst_urgency: inspection.calculated_urgency ?? null,
-      component_count: inspection.component_scores?.length || 0,
-    };
-
-    // Determine CI band
-    const ciBand = ci_value
-      ? ci_value >= 75
-        ? "Excellent"
-        : ci_value >= 50
-        ? "Good"
-        : ci_value >= 25
-        ? "Fair"
-        : "Poor"
-      : null;
-
-    // Insert inspection record
-    const { data: inspectionRecord, error: inspectionError } = await supabase
-      .from("inspections")
-      .insert({
-        tenant_id: userProfile.tenantId,
-        asset_id: inspection.asset_id,
-        inspection_date: inspection.inspection_date,
-        inspector_name: inspection.inspector_name,
-        weather_conditions: inspection.weather_conditions,
-        conditional_index: ci_value,
-        deru_value: null, // Can be calculated later if needed
-        calculated_urgency: inspection.calculated_urgency,
-        total_remedial_cost: inspection.total_remedial_cost || 0,
-        ci_band: ciBand,
-        calculation_metadata: calculationMetadata,
-        inspector_id: userData.user.id,
-      })
-      .select()
-      .single();
+    const { data: rpcResult, error: inspectionError } = await supabase
+      .rpc("tams360_mobile_create_inspection", {
+        p_payload: inspection,
+        p_user_id: userData.user.id,
+        p_tenant_id: userProfile.tenant_id,
+      });
 
     if (inspectionError) {
-      console.error("Error creating inspection:", inspectionError);
-      // Fallback to KV
-      const inspectionId = `inspection-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const record = {
-        inspection_id: inspectionId,
-        tenant_id: userProfile.tenantId,
-        ...inspection,
-        inspector_id: userData.user.id,
-        created_at: new Date().toISOString(),
-      };
-      await kv.set(`inspection:${inspectionId}`, record);
-      return c.json({ success: true, inspection: record });
+      console.error("Error creating inspection via RPC:", inspectionError);
+      return c.json({
+        success: false,
+        error: "Failed to save inspection to database",
+        details: inspectionError.message,
+        code: inspectionError.code,
+        hint: inspectionError.hint,
+      }, 500);
     }
 
-    // Insert component scores
-    if (inspection.component_scores && inspection.component_scores.length > 0) {
-      const componentScores = inspection.component_scores.map((score: any) => ({
-        inspection_id: inspectionRecord.inspection_id,
-        component_name: score.component_name,
-        degree: score.degree,
-        extent: score.extent,
-        relevancy: score.relevancy,
-        urgency: score.urgency,
-        conditional_index: score.conditional_index,
-        quantity: score.quantity,
-        unit: score.unit,
-        remedial_work: score.remedial_work,
-        rate: score.rate,
-        cost: score.cost,
-        comments: score.comments,
-        photo_url: score.photo_url,
-      }));
-
-      const { error: scoresError } = await supabase
-        .from("inspection_component_scores")
-        .insert(componentScores);
-
-      if (scoresError) {
-        console.error("Error inserting component scores:", scoresError);
-      }
-    }
-
-    // ============================================================================
-    // EMAIL NOTIFICATION: Send inspection alert if critical
-    // ============================================================================
-    try {
-      const { data: tenantData } = await supabase
-        .from("tenant_settings")
-        .select("organization_name, notification_emails, auto_notify_on_critical")
-        .eq("tenant_id", userProfile.tenantId)
-        .single();
-      
-      const autoNotifyOnCritical = tenantData?.auto_notify_on_critical !== false;
-      const notificationEmails = tenantData?.notification_emails || [];
-      
-      if (autoNotifyOnCritical && notificationEmails.length > 0) {
-        const isCriticalInspection = 
-          (ci_value && ci_value < 50) || 
-          (inspection.calculated_urgency && ["Critical", "High"].includes(inspection.calculated_urgency));
-        
-        if (isCriticalInspection) {
-          console.log(`[Email Notification] Sending critical inspection alerts (CI: ${ci_value}, Urgency: ${inspection.calculated_urgency})`);
-          
-          const { data: asset } = await supabase
-            .from("tams360_assets_v")
-            .select("asset_ref, asset_type_name")
-            .eq("asset_id", inspection.asset_id)
-            .single();
-          
-          for (const email of notificationEmails) {
-            await emailService.sendInspectionAlert(email, {
-              assetRef: asset?.asset_ref || "Unknown",
-              assetType: asset?.asset_type_name || "Unknown",
-              inspectionDate: new Date(inspection.inspection_date).toLocaleDateString('en-ZA'),
-              ci: ci_value || 0,
-              urgency: inspection.calculated_urgency || "Unknown",
-              inspectorName: inspection.inspector_name || "Unknown",
-              organizationName: tenantData?.organization_name || "TAMS360",
-              dashboardUrl: "https://app.tams360.co.za",
-            });
-          }
-          console.log(`[Email Notification] ✅ Sent ${notificationEmails.length} inspection alert emails`);
-        }
-      }
-    } catch (emailError) {
-      console.error("[Email Notification] Error sending inspection alert:", emailError);
-    }
-
-    // ============================================================================
-    // WORKFLOW AUTOMATION: Auto-create maintenance based on CI score
-    // ============================================================================
-    try {
-      // Check if automation is enabled for this tenant
-      const { data: tenantSettings } = await supabase
-        .from("tenant_settings")
-        .select("automation_rules")
-        .eq("tenant_id", userProfile.tenantId)
-        .single();
-
-      const automationRules = tenantSettings?.automation_rules || {};
-      const enableAutoMaintenance = automationRules.enable_auto_maintenance !== false; // Enabled by default
-
-      if (enableAutoMaintenance) {
-        const ciThreshold = automationRules.ci_threshold || 50; // Default: CI < 50 triggers maintenance
-        const urgencyThreshold = automationRules.urgency_threshold || "Medium"; // Default: Medium or higher
-
-        console.log(`[Workflow Automation] Checking CI: ${ci_value} against threshold: ${ciThreshold}`);
-        console.log(`[Workflow Automation] Checking Urgency: ${inspection.calculated_urgency} against threshold: ${urgencyThreshold}`);
-
-        // Determine if maintenance should be auto-created
-        const shouldCreateMaintenance = 
-          (ci_value && ci_value < ciThreshold) ||
-          (inspection.calculated_urgency && 
-           ["Critical", "High", "Medium"].indexOf(inspection.calculated_urgency) >= 
-           ["Critical", "High", "Medium"].indexOf(urgencyThreshold));
-
-        if (shouldCreateMaintenance) {
-          console.log(`[Workflow Automation] Triggering auto-maintenance creation for asset ${inspection.asset_id}`);
-
-          // Determine maintenance priority based on CI and urgency
-          let priority = "Medium";
-          if (ci_value < 25 || inspection.calculated_urgency === "Critical") {
-            priority = "Critical";
-          } else if (ci_value < 40 || inspection.calculated_urgency === "High") {
-            priority = "High";
-          }
-
-          // Determine maintenance type based on urgency
-          let maintenanceType = "Preventive";
-          if (inspection.calculated_urgency === "Critical" || inspection.calculated_urgency === "High") {
-            maintenanceType = "Corrective";
-          }
-
-          // Calculate scheduled date (immediate for critical, 7 days for high, 30 days for medium)
-          const now = new Date();
-          let scheduledDate = new Date(now);
-          if (priority === "Critical") {
-            // Immediate
-            scheduledDate = now;
-          } else if (priority === "High") {
-            scheduledDate.setDate(now.getDate() + 7);
-          } else {
-            scheduledDate.setDate(now.getDate() + 30);
-          }
-
-          // Create maintenance work order
-          const { data: maintenanceRecord, error: maintenanceError } = await supabase
-            .from("maintenance")
-            .insert({
-              tenant_id: userProfile.tenantId,
-              asset_id: inspection.asset_id,
-              inspection_id: inspectionRecord.inspection_id,
-              maintenance_type: maintenanceType,
-              description: `Auto-generated from inspection (CI: ${ci_value?.toFixed(1) || 'N/A'}, Urgency: ${inspection.calculated_urgency || 'N/A'})`,
-              scheduled_date: scheduledDate.toISOString(),
-              priority: priority,
-              status: "Scheduled",
-              estimated_cost: inspection.total_remedial_cost || 0,
-              created_by: userData.user.id,
-              auto_generated: true,
-            })
-            .select()
-            .single();
-
-          if (maintenanceError) {
-            console.error("[Workflow Automation] Error creating maintenance:", maintenanceError);
-          } else {
-            console.log(`[Workflow Automation] ✅ Created maintenance work order: ${maintenanceRecord.maintenance_id}`);
-            
-            // Send email notification about the auto-created maintenance
-            try {
-              const { data: asset } = await supabase
-                .from("tams360_assets_v")
-                .select("asset_ref, asset_type_name")
-                .eq("asset_id", inspection.asset_id)
-                .single();
-              
-              const { data: tenantData } = await supabase
-                .from("tenant_settings")
-                .select("organization_name, notification_emails")
-                .eq("tenant_id", userProfile.tenantId)
-                .single();
-              
-              const notificationEmails = tenantData?.notification_emails || [];
-              
-              if (notificationEmails.length > 0) {
-                for (const email of notificationEmails) {
-                  await emailService.sendMaintenanceCreatedNotification(email, {
-                    assetRef: asset?.asset_ref || "Unknown",
-                    assetType: asset?.asset_type_name || "Unknown",
-                    maintenanceType,
-                    scheduledDate: scheduledDate.toISOString(),
-                    priority,
-                    status: "Scheduled",
-                    organizationName: tenantData?.organization_name || "TAMS360",
-                    dashboardUrl: "https://app.tams360.co.za",
-                  });
-                }
-                console.log(`[Email Notification] ✅ Sent ${notificationEmails.length} maintenance creation notifications`);
-              }
-            } catch (emailError) {
-              console.error("[Email Notification] Error sending maintenance notification:", emailError);
-            }
-          }
-        } else {
-          console.log(`[Workflow Automation] No maintenance needed (CI: ${ci_value}, Urgency: ${inspection.calculated_urgency})`);
-        }
-      }
-    } catch (automationError) {
-      // Don't fail the inspection creation if automation fails
-      console.error("[Workflow Automation] Error in automation logic:", automationError);
-    }
-
-    return c.json({ success: true, inspection: inspectionRecord });
+    return c.json({
+      success: true,
+      inspection: rpcResult,
+    });
   } catch (error) {
     console.error("Error creating inspection:", error);
     return c.json({ error: "Failed to create inspection" }, 500);
@@ -7499,6 +7346,7 @@ app.put("/make-server-c894a9ff/inspections/:id", async (c) => {
       }));
 
       const { error: scoresError } = await supabase
+        .schema("tams360")
         .from("inspection_component_scores")
         .insert(componentScores);
 

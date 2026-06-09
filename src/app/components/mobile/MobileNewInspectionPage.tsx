@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { useTenant } from "../../contexts/TenantContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -30,6 +30,8 @@ import { toast } from "sonner";
 
 export default function MobileNewInspectionPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const assetFromUrl = searchParams.get("asset");
   const { user, accessToken } = useContext(AuthContext);
   const { tenantId } = useTenant();
   const [loading, setLoading] = useState(false);
@@ -41,6 +43,9 @@ export default function MobileNewInspectionPage() {
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [gettingLocation, setGettingLocation] = useState(false);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+  const [repairThreshold, setRepairThreshold] = useState(50);
+
+  const [assetSearch, setAssetSearch] = useState("");
 
   const [formData, setFormData] = useState({
     asset_id: "",
@@ -55,6 +60,9 @@ export default function MobileNewInspectionPage() {
   });
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+
+
+
 
   // Monitor online/offline status
   useEffect(() => {
@@ -72,6 +80,7 @@ export default function MobileNewInspectionPage() {
 
   useEffect(() => {
     fetchAssets();
+    fetchRepairThreshold();
     // Silently attempt location - completely suppress all errors
     try {
       if (navigator.geolocation) {
@@ -81,6 +90,28 @@ export default function MobileNewInspectionPage() {
       // Suppress completely
     }
   }, []);
+
+
+  const fetchRepairThreshold = async () => {
+    try {
+      const response = await fetch(`${API_URL}/tenant/settings`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const threshold =
+          data?.settings?.remedial_threshold ??
+          data?.settings?.repair_threshold ??
+          data?.tenant?.remedial_threshold ??
+          data?.remedial_threshold;
+        if (threshold !== undefined && threshold !== null && !Number.isNaN(Number(threshold))) {
+          setRepairThreshold(Number(threshold));
+        }
+      }
+    } catch (error) {
+      // Keep default from tenant settings currently known as 50.
+    }
+  };
 
   const getCurrentLocation = () => {
     // Completely suppress geolocation errors
@@ -118,22 +149,142 @@ export default function MobileNewInspectionPage() {
     }
   };
 
+  const applySelectedAsset = (asset: any) => {
+    if (!asset) return;
+
+    const selectedId = asset.asset_id || asset.id;
+
+    setSelectedAsset(asset);
+
+    setFormData((prev: any) => ({
+      ...prev,
+      asset_id: selectedId,
+      asset_ref: asset.asset_ref || asset.asset_number || asset.reference_number,
+      asset_type: asset.asset_type_name || asset.asset_type || asset.type_name,
+    }));
+
+    const typeName = asset.asset_type_name || asset.asset_type || asset.type_name;
+    if (typeName) {
+      fetchComponentTemplate(typeName);
+    }
+  };
+
   const fetchAssets = async () => {
     try {
-      const response = await fetch(`${API_URL}/assets`, {
+      const assetParam = searchParams.get("asset");
+
+      let pendingAsset: any = null;
+
+      try {
+        const stored = localStorage.getItem("pending_inspection_asset");
+        if (stored) {
+          pendingAsset = JSON.parse(stored);
+        }
+      } catch (storageError) {
+        console.warn("Could not read pending inspection asset:", storageError);
+      }
+
+      if (assetParam && pendingAsset) {
+        const pendingId = pendingAsset.asset_id || pendingAsset.id;
+
+        if (String(pendingId) === String(assetParam)) {
+          applySelectedAsset({
+            ...pendingAsset,
+            asset_id: pendingId,
+            id: pendingId,
+          });
+        }
+      }
+
+      const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setAssets(data.assets || []);
+      if (!response.ok) {
+        console.error("Failed to fetch assets for inspection:", response.status);
+        return;
+      }
+
+      const result = await response.json();
+
+      const list =
+        Array.isArray(result) ? result :
+        Array.isArray(result.assets) ? result.assets :
+        Array.isArray(result.data) ? result.data :
+        Array.isArray(result.rows) ? result.rows :
+        Array.isArray(result.items) ? result.items :
+        [];
+
+      const safeList = list.map((asset: any) => ({
+        ...asset,
+        id: asset.id || asset.asset_id,
+        asset_id: asset.asset_id || asset.id,
+        asset_ref: asset.asset_ref || asset.asset_number || asset.reference_number || "",
+        asset_type_name: asset.asset_type_name || asset.asset_type || asset.type_name || asset.type || "",
+        description: asset.description || asset.metadata?.description || "",
+        latitude: asset.latitude ?? asset.gps_lat ?? null,
+        longitude: asset.longitude ?? asset.gps_lng ?? null,
+      }));
+
+      setAssets(safeList);
+
+      if (assetParam) {
+        let matchedAsset = safeList.find((asset: any) =>
+          String(asset.asset_id || asset.id) === String(assetParam)
+        );
+
+        if (!matchedAsset && pendingAsset) {
+          const pendingId = pendingAsset.asset_id || pendingAsset.id;
+
+          if (String(pendingId) === String(assetParam)) {
+            matchedAsset = {
+              ...pendingAsset,
+              asset_id: pendingId,
+              id: pendingId,
+            };
+          }
+        }
+
+        if (!matchedAsset) {
+          const detailResponse = await fetch(`${API_URL}/assets/${assetParam}`, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+
+          if (detailResponse.ok) {
+            const detailData = await detailResponse.json();
+            const detailAsset = detailData.asset || detailData.data || detailData;
+
+            const detailId = detailAsset.asset_id || detailAsset.id || assetParam;
+
+            matchedAsset = {
+              ...detailAsset,
+              asset_id: detailId,
+              id: detailId,
+              asset_ref: detailAsset.asset_ref || detailAsset.asset_number || detailAsset.reference_number || "",
+              asset_type_name: detailAsset.asset_type_name || detailAsset.asset_type || detailAsset.type_name || detailAsset.type || "",
+              description: detailAsset.description || detailAsset.metadata?.description || "",
+              latitude: detailAsset.latitude ?? detailAsset.gps_lat ?? null,
+              longitude: detailAsset.longitude ?? detailAsset.gps_lng ?? null,
+            };
+          }
+        }
+
+        if (matchedAsset) {
+          applySelectedAsset(matchedAsset);
+        } else {
+          console.warn("Asset from URL was not found after list, localStorage, and detail fetch:", assetParam);
+        }
       }
     } catch (error) {
       console.error("Error fetching assets:", error);
     }
   };
+
+
 
   const fetchComponentTemplate = async (assetTypeName: string) => {
     try {
@@ -181,12 +332,13 @@ export default function MobileNewInspectionPage() {
   };
 
   const handleAssetChange = (assetId: string) => {
-    const asset = assets.find((a) => a.asset_id === assetId);
+    const asset = assets.find((a) => String(a.asset_id || a.id) === String(assetId));
     setSelectedAsset(asset);
-    setFormData({ ...formData, asset_id: assetId });
+    setFormData((prev) => ({ ...prev, asset_id: assetId }));
 
-    if (asset?.asset_type_name) {
-      fetchComponentTemplate(asset.asset_type_name);
+    const typeName = asset?.asset_type_name || asset?.asset_type || asset?.type_name;
+    if (typeName) {
+      fetchComponentTemplate(typeName);
     }
     
     // Check GPS discrepancy if we have both current and asset coordinates
@@ -227,12 +379,55 @@ export default function MobileNewInspectionPage() {
     setFormData({ ...formData, component_scores: scores, aggregates });
   };
 
+  const getSupabaseAccessToken = () => {
+    const projectRef = "oerrmcvijhowvfqmhzaa";
+    const sessionKey = `sb-${projectRef}-auth-token`;
+
+    const rawSession =
+      localStorage.getItem(sessionKey) ||
+      sessionStorage.getItem(sessionKey);
+
+    if (!rawSession) {
+      console.error("Supabase auth session key not found:", sessionKey);
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(rawSession);
+
+      const token =
+        parsed?.access_token ||
+        parsed?.currentSession?.access_token ||
+        parsed?.session?.access_token;
+
+      if (!token) {
+        console.error("Supabase session exists but access_token was not found:", parsed);
+        return null;
+      }
+
+      if (token.split(".").length !== 3) {
+        console.error("Token found, but it is not a valid JWT:", token);
+        return null;
+      }
+
+      return token;
+    } catch (error) {
+      console.error("Failed to parse Supabase auth session:", error);
+      return null;
+    }
+  };
+
   const handleSubmit = async () => {
     if (!formData.asset_id) {
       toast.error("Please select an asset");
       return;
     }
     
+    if (photos.length === 0) {
+      toast.error("Please capture or upload the main inspection photo before saving.");
+      return;
+    }
+
     // Check template exists
     if (!componentTemplate || !componentTemplate.items || componentTemplate.items.length === 0) {
       toast.error("Cannot save inspection - no template loaded. Please select a different asset or contact an administrator.");
@@ -246,57 +441,78 @@ export default function MobileNewInspectionPage() {
         asset_id: formData.asset_id,
         inspection_date: formData.inspection_date,
         inspector_name: formData.inspector_name,
-        weather_conditions: formData.weather_conditions,
-        // Overall fields from aggregates
-        conditional_index: formData.aggregates.ci_health,
-        ci_safety: formData.aggregates.ci_safety,
-        ci_final: formData.aggregates.ci_final,
-        calculated_urgency: formData.aggregates.worst_urgency,
-        degree: formData.aggregates.overall_degree,
-        extent: formData.aggregates.overall_extent,
-        relevancy: formData.aggregates.overall_relevancy,
-        total_remedial_cost: formData.aggregates.total_cost || 0,
-        remedial_notes: formData.aggregates.overall_remedial || "",
-        // Combined comments
-        comments: [formData.aggregates.overall_remedial, formData.overall_comments]
-          .filter((c) => c)
-          .join("\n\n"),
-        // Component scores
-        component_scores: formData.component_scores.map((score: any) => ({
-          component_name: score.component_name,
-          degree: score.degree,
-          extent: score.extent,
-          relevancy: score.relevancy,
-          urgency: score.urgency,
-          conditional_index: score.ci,
-          quantity: score.quantity,
-          unit: score.unit,
-          remedial_work: score.remedial_work,
-          rate: score.rate,
-          cost: score.cost,
-          comments: score.comments,
-          photo_url: score.photo_url,
-        })),
+        weather_condition: formData.weather_condition,
+        condition: formData.condition,
+
+        // Do NOT calculate CI / DERU / final scores here.
+        // These are calculated centrally before/database storage.
+        degree: formData.degree || null,
+        extent: formData.extent || null,
+        relevancy: formData.relevancy || null,
+
+        remedial_notes: formData.remedial_notes || "",
+        comments: formData.comments || "",
+
+        component_scores: formData.component_scores || [],
         latitude: formData.latitude || null,
         longitude: formData.longitude || null,
+        photo_urls: formData.photo_urls || [],
       };
 
       if (isOnline) {
+        const inspectionAccessToken = accessToken;
+
+        if (!inspectionAccessToken) {
+          console.error("No AuthContext accessToken available for inspection save.");
+          toast.error("Login session is not available. Please refresh and log in again.");
+          setLoading(false);
+          return;
+        }
+
         const response = await fetch(`${API_URL}/inspections`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${inspectionAccessToken}`,
           },
           body: JSON.stringify(payload),
         });
 
         if (response.ok) {
-          toast.success("Inspection saved successfully!");
-          navigate("/mobile/inspections");
+          toast.success("Inspection saved successfully");
+
+          const selectedAssetId =
+            selectedAsset?.asset_id ||
+            selectedAsset?.id ||
+            formData.asset_id ||
+            assetFromUrl;
+
+          if (selectedAssetId) {
+            navigate(`/mobile/assets/${selectedAssetId}`);
+          } else {
+            navigate("/mobile/inspections");
+          }
+
+
+
         } else {
-          const error = await response.json();
-          toast.error(`Error: ${error.error}`);
+          let error: any = {};
+          try {
+            error = await response.json();
+          } catch {
+            error = { error: `HTTP ${response.status}`, details: response.statusText };
+          }
+
+          console.error("Inspection save failed status:", response.status);
+          console.error("Inspection save failed error JSON:", JSON.stringify(error, null, 2));
+          console.error("Inspection save failed payload JSON:", JSON.stringify(payload, null, 2));
+
+          toast.error(
+            error?.details ||
+            error?.message ||
+            error?.error ||
+            `Inspection save failed with HTTP ${response.status}`
+          );
         }
       } else {
         // Save offline
@@ -353,8 +569,37 @@ export default function MobileNewInspectionPage() {
     setPhotoPreviews(newPreviews);
   };
 
+
+  const filteredAssetOptions = assets
+    .filter((asset: any) => {
+      const q = assetSearch.toLowerCase().trim();
+      if (!q) return true;
+
+      const searchableText = [
+        asset.asset_ref,
+        asset.asset_number,
+        asset.reference_number,
+        asset.asset_type_name,
+        asset.asset_type,
+        asset.description,
+        asset.metadata?.description,
+        asset.road_number,
+        asset.road_name,
+        asset.region,
+        asset.depot,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(q);
+    })
+    .slice(0, 100);
+
+
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-20">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-40">
       {/* Fixed Header */}
       <div className="sticky top-0 z-20 bg-white dark:bg-slate-800 border-b shadow-sm">
         <div className="flex items-center justify-between p-4">
@@ -385,24 +630,50 @@ export default function MobileNewInspectionPage() {
             <CardTitle className="text-base">Inspection Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label className="text-sm">Asset *</Label>
-              <Select value={formData.asset_id} onValueChange={handleAssetChange}>
-                <SelectTrigger className="h-11">
-                  <SelectValue placeholder="Select asset to inspect" />
-                </SelectTrigger>
-                <SelectContent>
-                  {assets.map((asset) => (
-                    <SelectItem key={asset.asset_id} value={asset.asset_id}>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{asset.asset_ref}</span>
-                        <span className="text-xs text-slate-500">{asset.asset_type_name}</span>
-                      </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm">Asset *</Label>
+
+            <Input
+              value={assetSearch}
+              onChange={(e) => setAssetSearch(e.target.value)}
+              placeholder="Type asset ref, road, asset type, or description..."
+              className="h-11 mb-2"
+            />
+
+            <Select
+              value={formData.asset_id || ""}
+              onValueChange={handleAssetChange}
+            >
+              <SelectTrigger className="h-11">
+                <SelectValue placeholder="Select asset to inspect" />
+              </SelectTrigger>
+
+              <SelectContent>
+                {filteredAssetOptions.map((asset: any) => {
+                  const assetId = String(asset.asset_id || asset.id || "");
+                  const assetRef =
+                    asset.asset_ref ||
+                    asset.reference_number ||
+                    asset.asset_number ||
+                    asset.code ||
+                    "Unnamed asset";
+
+                  const assetType =
+                    asset.asset_type_name ||
+                    asset.asset_type ||
+                    asset.type_name ||
+                    "";
+
+                  return (
+                    <SelectItem key={assetId} value={assetId}>
+                      {assetType ? `${assetRef} - ${assetType}` : assetRef}
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -416,6 +687,13 @@ export default function MobileNewInspectionPage() {
               </div>
               <div className="space-y-2">
                 <Label className="text-sm">Weather</Label>
+                <Input
+                  value={assetSearch}
+                  onChange={(e) => setAssetSearch(e.target.value)}
+                  placeholder="Type asset reference, road, type, or description..."
+                  className="mb-2"
+                />                
+                
                 <Select
                   value={formData.weather_conditions}
                   onValueChange={(value) => setFormData({ ...formData, weather_conditions: value })}
@@ -496,9 +774,9 @@ export default function MobileNewInspectionPage() {
         {/* Component Inspection Form */}
         {selectedAsset && componentTemplate ? (
           <ComponentInspectionForm
-            assetType={selectedAsset.asset_type_name}
+            assetType={selectedAsset.asset_type_name || selectedAsset.asset_type || selectedAsset.type_name}
             components={componentTemplate.items || []}
-            repairThreshold={60}
+            repairThreshold={repairThreshold}
             onScoresChange={handleComponentScoresChange}
           />
         ) : selectedAsset && !componentTemplate ? (
@@ -611,12 +889,13 @@ export default function MobileNewInspectionPage() {
         </Card>
       </div>
 
-      {/* Fixed Bottom Action Bar */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white dark:bg-slate-800 border-t shadow-lg z-10">
-        <Button 
-          onClick={handleSubmit} 
+      {/* Fixed Bottom Action Bar - kept above mobile bottom navigation */}
+      <div className="fixed left-0 right-0 bottom-16 sm:bottom-0 p-3 bg-white dark:bg-slate-800 border-t shadow-lg z-50">
+        <Button
+          type="button"
+          onClick={handleSubmit}
           disabled={loading || !formData.asset_id}
-          className="w-full h-12 text-base"
+          className="w-full h-12 text-base bg-[#37aee2] hover:bg-[#2a9dcc] text-white"
           size="lg"
         >
           {loading ? (
