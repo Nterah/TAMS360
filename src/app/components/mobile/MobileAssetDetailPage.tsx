@@ -4,7 +4,6 @@ import { AuthContext } from "../../App";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { toast } from "sonner";
 import { 
   ArrowLeft, 
   MapPin, 
@@ -19,6 +18,18 @@ import {
   AlertCircle
 } from "lucide-react";
 import { projectId } from "../../../../utils/supabase/info";
+
+interface AssetPhoto {
+  photo_id?: string;
+  url?: string;
+  signedUrl?: string;
+  file_path?: string;
+  file_name?: string;
+  name?: string;
+  caption?: string;
+  source?: string;
+  bucket_id?: string;
+}
 
 interface Asset {
   id: string;
@@ -35,6 +46,7 @@ interface Asset {
   chainage?: number;
   side?: string;
   photos?: string[];
+  photo_objects?: AssetPhoto[];
   notes?: string;
   last_inspection_date?: string;
   ci_score?: number;
@@ -45,11 +57,60 @@ export default function MobileAssetDetailPage() {
   const navigate = useNavigate();
   const { accessToken } = useContext(AuthContext);
   const [asset, setAsset] = useState<Asset | null>(null);
+  const [assetPhotos, setAssetPhotos] = useState<AssetPhoto[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchAssetDetails();
   }, [assetId]);
+
+  const normalisePhotoList = (rawPhotos: any[] = [], rawObjects: any[] = []): AssetPhoto[] => {
+    const combined: AssetPhoto[] = [];
+
+    for (const photo of rawObjects || []) {
+      const url = photo?.url || photo?.signedUrl;
+      if (url) combined.push(photo);
+    }
+
+    for (const photo of rawPhotos || []) {
+      if (typeof photo === "string" && photo) {
+        combined.push({ url: photo, signedUrl: photo, caption: "Asset Photo" });
+      } else if (photo?.url || photo?.signedUrl) {
+        combined.push(photo);
+      }
+    }
+
+    const seen = new Set<string>();
+    return combined.filter((photo) => {
+      const key = photo.url || photo.signedUrl || photo.file_path || photo.file_name || "";
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const fetchResolvedPhotos = async (apiUrl: string) => {
+    if (!assetId || !accessToken) return;
+
+    try {
+      const response = await fetch(`${apiUrl}/assets/${assetId}/photos`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        console.warn("Failed to fetch resolved asset photos", await response.text());
+        return;
+      }
+
+      const data = await response.json();
+      const photos = normalisePhotoList(data.photos || [], []);
+      setAssetPhotos(photos);
+    } catch (error) {
+      console.error("Error fetching resolved photos:", error);
+    }
+  };
 
   const fetchAssetDetails = async () => {
     const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
@@ -63,7 +124,10 @@ export default function MobileAssetDetailPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setAsset(data.asset);
+        const nextAsset = data.asset;
+        setAsset(nextAsset);
+        setAssetPhotos(normalisePhotoList(nextAsset?.photos || [], nextAsset?.photo_objects || []));
+        await fetchResolvedPhotos(API_URL);
       } else {
         console.error("Failed to fetch asset details");
       }
@@ -127,6 +191,10 @@ export default function MobileAssetDetailPage() {
     );
   }
 
+  const photoItems = assetPhotos.length > 0
+    ? assetPhotos
+    : normalisePhotoList(asset.photos || [], asset.photo_objects || []);
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-20">
       {/* Fixed Header */}
@@ -153,24 +221,37 @@ export default function MobileAssetDetailPage() {
 
       <div className="p-4 space-y-4">
         {/* Photos */}
-        {asset.photos && asset.photos.length > 0 && (
+        {photoItems.length > 0 && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <ImageIcon className="w-4 h-4" />
-                Photos
+                Photos ({photoItems.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-2">
-                {asset.photos.map((photo, index) => (
-                  <img
-                    key={index}
-                    src={photo}
-                    alt={`Asset photo ${index + 1}`}
-                    className="w-full aspect-square object-cover rounded-lg border"
-                  />
-                ))}
+                {photoItems.map((photo, index) => {
+                  const src = photo.url || photo.signedUrl || "";
+                  return (
+                    <div key={`${photo.file_path || src || index}`} className="space-y-1">
+                      <img
+                        src={src}
+                        alt={photo.caption || `Asset photo ${index + 1}`}
+                        className="w-full aspect-square object-cover rounded-lg border bg-slate-100"
+                        loading="lazy"
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                      {(photo.caption || photo.source) && (
+                        <p className="text-[10px] text-slate-500 truncate">
+                          {photo.caption || photo.source}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -284,26 +365,7 @@ export default function MobileAssetDetailPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
-                      const selectedAssetId = asset?.asset_id || asset?.id;
-
-                      if (!selectedAssetId) {
-                        toast.error("Cannot start inspection because asset ID is missing");
-                        console.error("Missing asset ID on mobile asset detail:", asset);
-                        return;
-                      }
-
-                      localStorage.setItem(
-                        "pending_inspection_asset",
-                        JSON.stringify({
-                          ...asset,
-                          asset_id: selectedAssetId,
-                          id: selectedAssetId,
-                        })
-                      );
-
-                      navigate(`/mobile/inspections/new?asset=${selectedAssetId}`);
-                    }}
+                    onClick={() => navigate(`/mobile/map?asset=${asset.id}`)}
                     className="gap-2 flex-1"
                   >
                     <MapPin className="w-4 h-4" />
@@ -350,29 +412,7 @@ export default function MobileAssetDetailPage() {
         <div className="flex gap-3">
           <Button
             className="flex-1 gap-2"
-            onClick={() => {
-              const selectedAssetId =
-                asset?.asset_id ||
-                asset?.id ||
-                asset?.assetId;
-
-              if (!selectedAssetId) {
-                toast.error("Cannot start inspection because asset ID is missing");
-                console.error("Missing asset id on asset detail object:", asset);
-                return;
-              }
-
-              localStorage.setItem(
-                "pending_inspection_asset",
-                JSON.stringify({
-                  ...asset,
-                  asset_id: selectedAssetId,
-                  id: selectedAssetId,
-                })
-              );
-
-              navigate(`/mobile/inspections/new?asset=${selectedAssetId}`);
-            }}
+            onClick={() => navigate(`/mobile/inspections/new?asset=${asset.id}`)}
           >
             <ClipboardCheck className="w-4 h-4" />
             New Inspection

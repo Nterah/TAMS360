@@ -610,6 +610,62 @@ const worstUrgency = String(
           </CardContent>
         </Card>
 
+        {/* Inspection / Asset Photos */}
+        {photos.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <ImageIcon className="w-4 h-4" />
+                Inspection Photos ({photos.length})
+              </CardTitle>
+              <CardDescription>
+                Photos linked to this inspection asset
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                {photos.map((photo: any, index: number) => {
+                  const src =
+                    photo.signedUrl ||
+                    photo.signed_url ||
+                    photo.url ||
+                    photo.publicUrl ||
+                    photo.public_url ||
+                    "";
+
+                  if (!src) return null;
+
+                  return (
+                    <button
+                      key={`${photo.file_path || photo.path || src || index}`}
+                      type="button"
+                      className="text-left"
+                      onClick={() => window.open(src, "_blank")}
+                    >
+                      <img
+                        src={src}
+                        alt={photo.caption || `Inspection photo ${index + 1}`}
+                        className="w-full h-24 object-cover rounded-md border bg-slate-100"
+                        loading="lazy"
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                      <p className="text-[10px] text-muted-foreground truncate mt-1">
+                        {photo.caption ||
+                          photo.source ||
+                          photo.photo_number ||
+                          `Photo ${index + 1}`}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Component Details */}
         {enrichedComponents.length > 0 && (
           <Card>
