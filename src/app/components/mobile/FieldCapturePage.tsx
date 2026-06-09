@@ -67,6 +67,7 @@ type CaptureFormData = {
   geometryType: string;
   endLatitude: string;
   endLongitude: string;
+  additionalFields: Record<string, string>;
 };
 
 const FALLBACK_TENANT_NAME = "Johannesburg Roads Agency (JRA)";
@@ -104,6 +105,137 @@ const DIRECTIONS = ["NB", "SB", "EB", "WB", "North", "South", "East", "West", "B
 const ROAD_SIDES = ["LHS", "RHS", "Median", "Both", "None"];
 const CONDITIONS = ["Excellent", "Good", "Fair", "Poor", "Critical"];
 const STATUSES = ["Active", "Inactive", "Needs Maintenance", "Scheduled for Replacement"];
+
+const ADDITIONAL_ASSET_FIELDS: Record<string, string[]> = {
+  Signage: [
+    "mounting_type",
+    "number_of_posts_supports",
+    "width_m",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+  "Road Sign": [
+    "mounting_type",
+    "number_of_posts_supports",
+    "width_m",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+  Guardrail: [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "number_of_posts_supports",
+    "width_m",
+    "length_m",
+    "orientation_position",
+  ],
+  "Safety Barrier": [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "mounting_type",
+    "number_of_beams",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+  "Safety Barriers": [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "mounting_type",
+    "number_of_beams",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+  "Traffic Signal": [],
+  Guidepost: [
+    "mounting_type",
+    "number_of_posts_supports",
+    "width_m",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+  "Guide Post": [
+    "mounting_type",
+    "number_of_posts_supports",
+    "width_m",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+  Gantry: [
+    "number_of_posts_supports",
+    "number_of_beams",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+  "Road Marking": [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "width_m",
+    "length_m",
+  ],
+  "Road Markings": [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "width_m",
+    "length_m",
+  ],
+  "Raised Road Marker": [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "mounting_type",
+    "length_m",
+  ],
+  "Raised Road Markers": [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "mounting_type",
+    "length_m",
+  ],
+  Fence: [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "mounting_type",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+  Fencing: [
+    "end_road_km",
+    "end_latitude",
+    "end_longitude",
+    "mounting_type",
+    "length_m",
+    "height_m",
+    "orientation_position",
+  ],
+};
+
+const ADDITIONAL_FIELD_LABELS: Record<string, string> = {
+  mounting_type: "Mounting Type",
+  number_of_posts_supports: "No. of Posts / Supports",
+  number_of_beams: "No. of Beams",
+  width_m: "Width (m)",
+  length_m: "Length (m)",
+  height_m: "Height (m)",
+  orientation_position: "Orientation / Position",
+  end_road_km: "End Road KM",
+  end_latitude: "End Latitude",
+  end_longitude: "End Longitude",
+};
 
 function cleanText(value: any): string {
   return String(value ?? "").trim();
@@ -232,7 +364,7 @@ export default function FieldCapturePage() {
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CaptureFormData>({
   assetReference: "",
   assetType: "",
   roadName: "",
@@ -262,12 +394,27 @@ export default function FieldCapturePage() {
   geometryType: "Point",
   endLatitude: "",
   endLongitude: "",
+  additionalFields: {},
 });
 
   const assetTypeNames = useMemo(() => assetTypes.map((type) => type.name), [assetTypes]);
 
   const updateField = (field: keyof CaptureFormData, value: string) => {
     setFormData((current) => ({ ...current, [field]: value }));
+  };
+
+
+  const selectedAdditionalFields =
+    ADDITIONAL_ASSET_FIELDS[formData.assetType] || [];
+
+  const updateAdditionalField = (fieldName: string, value: string) => {
+    setFormData((current) => ({
+      ...current,
+      additionalFields: {
+        ...(current.additionalFields || {}),
+        [fieldName]: value,
+      },
+    }));
   };
 
   useEffect(() => {
@@ -541,8 +688,8 @@ export default function FieldCapturePage() {
       });
 
       if (uploadResponse.ok) {
-        const { url } = await uploadResponse.json();
-        photoUrls.push(url);
+        const { url, path } = await uploadResponse.json();
+        photoUrls.push(path || url);
       }
     }
 
@@ -577,6 +724,21 @@ export default function FieldCapturePage() {
         condition: assetData.condition,
         status: assetData.status || "Active",
         notes: assetData.notes || null,
+
+        additional_fields: assetData.additionalFields || {},
+        mounting_type: assetData.additionalFields?.mounting_type || null,
+        number_of_posts_supports: assetData.additionalFields?.number_of_posts_supports || null,
+        number_of_beams: assetData.additionalFields?.number_of_beams || null,
+        width_m: assetData.additionalFields?.width_m || null,
+        length_m: assetData.additionalFields?.length_m || null,
+        height_m: assetData.additionalFields?.height_m || null,
+        orientation_position:
+          assetData.additionalFields?.orientation_position ||
+          assetData.orientationPosition ||
+          null,
+        end_road_km: assetData.additionalFields?.end_road_km || null,
+        end_latitude: assetData.additionalFields?.end_latitude || assetData.endLatitude || null,
+        end_longitude: assetData.additionalFields?.end_longitude || assetData.endLongitude || null,
         photo_urls: photoUrls,
 
         region: assetData.region || null,
@@ -823,6 +985,36 @@ export default function FieldCapturePage() {
                 </Select>
               </div>
             </div>
+
+
+            {selectedAdditionalFields.length > 0 && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold">Additional Asset Details</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Extra fields required for {formData.assetType}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {selectedAdditionalFields.map((fieldName) => (
+                    <div key={fieldName} className="space-y-1.5">
+                      <Label className="text-xs">
+                        {ADDITIONAL_FIELD_LABELS[fieldName] || fieldName}
+                      </Label>
+                      <Input
+                        value={formData.additionalFields?.[fieldName] || ""}
+                        onChange={(event) =>
+                          updateAdditionalField(fieldName, event.target.value)
+                        }
+                        placeholder={ADDITIONAL_FIELD_LABELS[fieldName] || fieldName}
+                        className="h-9 text-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-1.5"><Label className="text-xs">Notes</Label><Textarea value={formData.notes} onChange={(e) => updateField("notes", e.target.value)} placeholder="Additional observations..." rows={3} className="text-sm resize-none" /></div>
 
