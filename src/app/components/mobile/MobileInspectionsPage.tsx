@@ -46,6 +46,7 @@ export default function MobileInspectionsPage() {
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [filteredInspections, setFilteredInspections] = useState<Inspection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterUrgency, setFilterUrgency] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
@@ -61,11 +62,26 @@ export default function MobileInspectionsPage() {
 
     // Search filter
     if (searchQuery) {
-      filtered = filtered.filter(inspection => 
-        inspection.asset_ref.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        inspection.asset_description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        inspection.inspector_name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+      const q = searchQuery.toLowerCase().trim();
+
+      filtered = filtered.filter((inspection: any) => {
+        const searchableText = [
+          inspection.asset_ref,
+          inspection.asset_number,
+          inspection.asset_description,
+          inspection.asset_type_name,
+          inspection.inspector_name,
+          inspection.inspection_date,
+          inspection.urgency,
+          inspection.status,
+          inspection.overall_comments,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return searchableText.includes(q);
+      });
     }
 
     // Urgency filter
@@ -76,11 +92,15 @@ export default function MobileInspectionsPage() {
     setFilteredInspections(filtered);
   }, [searchQuery, filterUrgency, inspections]);
 
+
+
+
+  
   const fetchInspections = async () => {
     const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
     try {
-      const response = await fetch(`${API_URL}/inspections?limit=100`, {
+      const response = await fetch(`${API_URL}/inspections?pageSize=5000`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -88,11 +108,19 @@ export default function MobileInspectionsPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setInspections(data.inspections || []);
-        setFilteredInspections(data.inspections || []);
+        const list = data.inspections || data.rows || data.data || [];
+        setInspections(Array.isArray(list) ? list : []);
+        setFilteredInspections(Array.isArray(list) ? list : []);
+        setLoadError("");
+      } else {
+        const errorText = await response.text();
+        setLoadError(errorText || "Failed to load inspections");
+        setInspections([]);
+        setFilteredInspections([]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to fetch inspections:", error);
+      setLoadError(error?.message || "Failed to load inspections");
     } finally {
       setLoading(false);
     }
@@ -196,7 +224,7 @@ export default function MobileInspectionsPage() {
       {/* Inspection Count */}
       <div className="px-4 py-3 bg-slate-100 dark:bg-slate-800/50">
         <p className="text-sm text-slate-600 dark:text-slate-400">
-          {filteredInspections.length} inspection{filteredInspections.length !== 1 ? "s" : ""} found
+          {filteredInspections.length} inspection{filteredInspections.length !== 1 ? "s" : ""} loaded
         </p>
       </div>
 
@@ -205,6 +233,15 @@ export default function MobileInspectionsPage() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          </div>
+        ) : loadError ? (
+          <div className="text-center py-12">
+            <AlertCircle className="w-12 h-12 mx-auto mb-3 text-red-400" />
+            <p className="text-red-600 dark:text-red-400 text-sm">Failed to load inspections</p>
+            <p className="text-xs text-slate-500 mt-2 break-words">{loadError}</p>
+            <Button className="mt-4" variant="outline" size="sm" onClick={fetchInspections}>
+              Try Again
+            </Button>
           </div>
         ) : filteredInspections.length === 0 ? (
           <div className="text-center py-12">

@@ -4,6 +4,7 @@ import { AuthContext } from "../../App";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
+import { toast } from "sonner";
 import { 
   ArrowLeft, 
   MapPin, 
@@ -283,7 +284,26 @@ export default function MobileAssetDetailPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => navigate(`/mobile/map?asset=${asset.id}`)}
+                    onClick={() => {
+                      const selectedAssetId = asset?.asset_id || asset?.id;
+
+                      if (!selectedAssetId) {
+                        toast.error("Cannot start inspection because asset ID is missing");
+                        console.error("Missing asset ID on mobile asset detail:", asset);
+                        return;
+                      }
+
+                      localStorage.setItem(
+                        "pending_inspection_asset",
+                        JSON.stringify({
+                          ...asset,
+                          asset_id: selectedAssetId,
+                          id: selectedAssetId,
+                        })
+                      );
+
+                      navigate(`/mobile/inspections/new?asset=${selectedAssetId}`);
+                    }}
                     className="gap-2 flex-1"
                   >
                     <MapPin className="w-4 h-4" />
@@ -330,7 +350,29 @@ export default function MobileAssetDetailPage() {
         <div className="flex gap-3">
           <Button
             className="flex-1 gap-2"
-            onClick={() => navigate(`/mobile/inspections/new?asset=${asset.id}`)}
+            onClick={() => {
+              const selectedAssetId =
+                asset?.asset_id ||
+                asset?.id ||
+                asset?.assetId;
+
+              if (!selectedAssetId) {
+                toast.error("Cannot start inspection because asset ID is missing");
+                console.error("Missing asset id on asset detail object:", asset);
+                return;
+              }
+
+              localStorage.setItem(
+                "pending_inspection_asset",
+                JSON.stringify({
+                  ...asset,
+                  asset_id: selectedAssetId,
+                  id: selectedAssetId,
+                })
+              );
+
+              navigate(`/mobile/inspections/new?asset=${selectedAssetId}`);
+            }}
           >
             <ClipboardCheck className="w-4 h-4" />
             New Inspection

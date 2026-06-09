@@ -168,6 +168,7 @@ export default function MobileMapPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [totalAssetsAvailable, setTotalAssetsAvailable] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -469,7 +470,7 @@ export default function MobileMapPage() {
 
   const fetchAssets = async () => {
     try {
-      const data = await api.get<{ assets: any[]; total: number }>("/assets?pageSize=500");
+      const data = await api.get<{ assets: any[]; total: number }>("/assets?pageSize=5000");
       
       const mappedAssets = (data.assets || []).map((asset: any) => ({
         ...asset,
@@ -488,6 +489,7 @@ export default function MobileMapPage() {
       })).filter((asset: any) => asset.latitude && asset.longitude);
       
       setAssets(mappedAssets);
+      setTotalAssetsAvailable(data.total ?? data.count ?? data.assets?.length ?? mappedAssets.length);
     } catch (error) {
       console.error("Failed to fetch assets:", error);
     } finally {
@@ -536,7 +538,7 @@ export default function MobileMapPage() {
         {/* Asset Count */}
         <Badge variant="secondary" className="shadow-lg px-3 py-1.5 text-xs">
           <MapPin className="w-3 h-3 mr-1.5" />
-          {filteredAssets.length} Assets
+          {filteredAssets.length}{totalAssetsAvailable && totalAssetsAvailable > filteredAssets.length ? ` of ${totalAssetsAvailable}` : ""} Assets loaded
         </Badge>
 
         {/* Color Mode Selector */}

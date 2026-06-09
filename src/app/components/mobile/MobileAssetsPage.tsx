@@ -61,25 +61,46 @@ export default function MobileAssetsPage() {
 
   // Apply filters
   useEffect(() => {
-    let filtered = [...assets];
+    const q = searchQuery.toLowerCase().trim();
 
-    // Search filter
-    if (searchQuery) {
-      filtered = filtered.filter(asset => 
-        asset.asset_ref.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        asset.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        asset.asset_type_name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
+    let filtered = assets.filter((asset: any) => {
+      if (!q) return true;
 
-    // Type filter
+      const searchableText = [
+        asset.id,
+        asset.asset_id,
+        asset.asset_ref,
+        asset.asset_number,
+        asset.reference_number,
+        asset.asset_type_name,
+        asset.asset_type,
+        asset.type,
+        asset.road_number,
+        asset.road_name,
+        asset.region,
+        asset.depot,
+        asset.owner_entity,
+        asset.maintenance_responsibility,
+        asset.description,
+        asset.name,
+        asset.metadata?.description,
+        asset.metadata?.road_subsection,
+        asset.metadata?.orientation,
+        asset.metadata?.road_side,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(q);
+    });
+
     if (filterType !== "all") {
-      filtered = filtered.filter(asset => asset.asset_type_name === filterType);
+      filtered = filtered.filter((asset: any) => asset.asset_type_name === filterType);
     }
 
-    // Condition filter
     if (filterCondition !== "all") {
-      filtered = filtered.filter(asset => asset.condition === filterCondition);
+      filtered = filtered.filter((asset: any) => asset.condition === filterCondition);
     }
 
     setFilteredAssets(filtered);
@@ -89,19 +110,65 @@ export default function MobileAssetsPage() {
     const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
     try {
-      const response = await fetch(`${API_URL}/assets?limit=100`, {
+      setLoading(true);
+
+      const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setAssets(data.assets || []);
-        setFilteredAssets(data.assets || []);
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+          result?.message ||
+          `Failed to fetch assets: ${response.status}`
+        );
       }
+
+      const list =
+        Array.isArray(result) ? result :
+        Array.isArray(result.assets) ? result.assets :
+        Array.isArray(result.data) ? result.data :
+        Array.isArray(result.rows) ? result.rows :
+        Array.isArray(result.items) ? result.items :
+        [];
+
+      const normalised = list.map((asset: any) => ({
+        ...asset,
+        id: asset.id || asset.asset_id,
+        asset_id: asset.asset_id || asset.id,
+        asset_ref: asset.asset_ref || asset.asset_number || asset.reference_number || "",
+        asset_type_name: asset.asset_type_name || asset.asset_type || asset.type || "",
+        description:
+          asset.description ||
+          asset.metadata?.description ||
+          asset.name ||
+          asset.asset_name ||
+          "",
+        condition:
+          asset.condition ||
+          asset.condition_name ||
+          asset.metadata?.condition ||
+          "",
+        status:
+          asset.status ||
+          asset.status_name ||
+          "Active",
+        latitude: Number(asset.latitude ?? asset.gps_lat ?? 0),
+        longitude: Number(asset.longitude ?? asset.gps_lng ?? 0),
+        gps_lat: Number(asset.gps_lat ?? asset.latitude ?? 0),
+        gps_lng: Number(asset.gps_lng ?? asset.longitude ?? 0),
+      }));
+
+      setAssets(normalised);
+      setFilteredAssets(normalised);
     } catch (error) {
       console.error("Failed to fetch assets:", error);
+      setAssets([]);
+      setFilteredAssets([]);
     } finally {
       setLoading(false);
     }
@@ -245,7 +312,7 @@ export default function MobileAssetsPage() {
             <Card
               key={asset.id || `asset-${index}`}
               className="border-2 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
-              onClick={() => navigate(`/mobile/assets/${asset.id}`)}
+              onClick={() => navigate(`/mobile/assets/${asset.asset_id || asset.id}`)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
@@ -284,7 +351,7 @@ export default function MobileAssetsPage() {
                     className="h-6 px-2 text-xs gap-1"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/mobile/map?asset=${asset.id}`);
+                      navigate(`/mobile/map?asset=${asset.asset_id || asset.id}`);
                     }}
                   >
                     <Navigation2 className="w-3 h-3" />

@@ -75,7 +75,9 @@ const CONFIGS: Record<ConfigKey, { title: string; description: string; fields: F
     description: "Default repair rates used when inspection component quantities are costed.",
     fields: [
       { key: "asset_type", label: "Asset Type" },
-      { key: "component_name", label: "Component Name" },
+      { key: "component_order", label: "Order", type: "number" },
+      { key: "component_name", label: "Code" },
+      { key: "component_display_name", label: "Component Name" },
       { key: "repair_action", label: "Repair Action" },
       { key: "unit_of_measure", label: "Unit" },
       { key: "default_rate", label: "Default Rate", type: "number" },
@@ -168,7 +170,12 @@ export default function TenantConfigurationTab({ accessToken }: { accessToken: s
 
   const filteredRows = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    const currentRows = rows[activeConfig] || [];
+
+    // Hide inactive rows by default.
+    // This keeps deactivated/dirty rows such as old Gantry placeholder rates out of the main admin view.
+    const currentRows = (rows[activeConfig] || []).filter(
+      (row) => row.is_active !== false
+    );
 
     if (!term) return currentRows;
 
@@ -300,78 +307,16 @@ export default function TenantConfigurationTab({ accessToken }: { accessToken: s
                 </div>
               </div>
 
-              {editingRow && activeConfig === configKey && (
-                <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
-                  <div className="flex justify-between items-center">
-                    <h4 className="font-semibold">
-                      {editingRow.id ? "Edit Configuration Row" : "Add Configuration Row"}
-                    </h4>
-                    {editingRow.is_global_default && (
-                      <Badge variant="outline">
-                        Editing this global default will create a tenant override
-                      </Badge>
-                    )}
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-3">
-                    {activeFields.map((field) => (
-                      <div key={field.key} className="space-y-2">
-                        <Label>{field.label}</Label>
-
-                        {field.type === "boolean" ? (
-                          <select
-                            className="w-full border rounded-md h-10 px-3 bg-background"
-                            value={editingRow[field.key] ? "true" : "false"}
-                            onChange={(event) =>
-                              setEditingRow({
-                                ...editingRow,
-                                [field.key]: event.target.value === "true",
-                              })
-                            }
-                          >
-                            <option value="true">Active</option>
-                            <option value="false">Inactive</option>
-                          </select>
-                        ) : (
-                          <Input
-                            type={field.type === "number" ? "number" : "text"}
-                            value={editingRow[field.key] ?? ""}
-                            onChange={(event) =>
-                              setEditingRow({
-                                ...editingRow,
-                                [field.key]:
-                                  field.type === "number"
-                                    ? Number(event.target.value)
-                                    : event.target.value,
-                              })
-                            }
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex gap-2 justify-end">
-                    <Button variant="outline" onClick={() => setEditingRow(null)}>
-                      Cancel
-                    </Button>
-                    <Button onClick={saveRow}>
-                      <Save className="size-4 mr-2" />
-                      Save
-                    </Button>
-                  </div>
-                </div>
-              )}
 
               <div className="rounded-md border overflow-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Source</TableHead>
+                      <TableHead>Actions</TableHead>
                       {activeFields.map((field) => (
                         <TableHead key={field.key}>{field.label}</TableHead>
                       ))}
-                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
 
@@ -391,18 +336,8 @@ export default function TenantConfigurationTab({ accessToken }: { accessToken: s
                             </Badge>
                           </TableCell>
 
-                          {activeFields.map((field) => (
-                            <TableCell key={field.key} className="whitespace-nowrap">
-                              {field.type === "boolean"
-                                ? row[field.key]
-                                  ? "Yes"
-                                  : "No"
-                                : row[field.key] ?? "-"}
-                            </TableCell>
-                          ))}
-
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex gap-2">
                               <Button size="sm" variant="outline" onClick={() => startEdit(row)}>
                                 Edit
                               </Button>
@@ -412,6 +347,16 @@ export default function TenantConfigurationTab({ accessToken }: { accessToken: s
                               </Button>
                             </div>
                           </TableCell>
+
+                          {activeFields.map((field) => (
+                            <TableCell key={field.key} className="whitespace-nowrap">
+                              {field.type === "boolean"
+                                ? row[field.key]
+                                  ? "Yes"
+                                  : "No"
+                                : row[field.key] ?? "-"}
+                            </TableCell>
+                          ))}
                         </TableRow>
                       ))
                     )}
@@ -421,6 +366,83 @@ export default function TenantConfigurationTab({ accessToken }: { accessToken: s
             </TabsContent>
           ))}
         </Tabs>
+
+        {editingRow && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
+              <div className="flex justify-between items-start gap-4 mb-4">
+                <div>
+                  <h4 className="font-semibold text-lg">
+                    {editingRow.id ? "Edit Configuration Row" : "Add Configuration Row"}
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    {CONFIGS[activeConfig].title}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {editingRow.is_global_default && (
+                    <Badge variant="outline">
+                      Editing this global default will create a tenant override
+                    </Badge>
+                  )}
+
+                  <Button variant="outline" size="sm" onClick={() => setEditingRow(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                {activeFields.map((field) => (
+                  <div key={field.key} className="space-y-2">
+                    <Label>{field.label}</Label>
+
+                    {field.type === "boolean" ? (
+                      <select
+                        className="w-full border rounded-md h-10 px-3 bg-background"
+                        value={editingRow[field.key] ? "true" : "false"}
+                        onChange={(event) =>
+                          setEditingRow({
+                            ...editingRow,
+                            [field.key]: event.target.value === "true",
+                          })
+                        }
+                      >
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                      </select>
+                    ) : (
+                      <Input
+                        type={field.type === "number" ? "number" : "text"}
+                        value={editingRow[field.key] ?? ""}
+                        onChange={(event) =>
+                          setEditingRow({
+                            ...editingRow,
+                            [field.key]:
+                              field.type === "number"
+                                ? Number(event.target.value)
+                                : event.target.value,
+                          })
+                        }
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2 justify-end mt-6">
+                <Button variant="outline" onClick={() => setEditingRow(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={saveRow}>
+                  <Save className="size-4 mr-2" />
+                  Save
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

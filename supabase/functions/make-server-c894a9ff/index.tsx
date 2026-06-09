@@ -2595,135 +2595,204 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
     }
 
     const accessToken = authHeader.split(" ")[1];
-    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(
-      accessToken,
-    );
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
 
     if (authError || !userData.user) {
       return c.json({ error: "Invalid session" }, 401);
     }
 
-    // Get user profile to retrieve tenantId
-    const userProfile = await kv.get(`user:${userData.user.id}`);
-    if (!userProfile || !userProfile.tenantId) {
+    // Use the same tenant source as the working GET /assets route.
+    // Do not use the old KV-only tenant profile here, because it can be stale after project moves.
+    const { data: userProfile, error: profileError } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, tenant_id, role")
+      .eq("id", userData.user.id)
+      .single();
+
+    if (profileError || !userProfile || !userProfile.tenant_id) {
+      console.error("Asset create profile lookup failed:", profileError);
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
-    // Check if tenant ID is in UUID format (database requirement)
-    if (!isValidUuid(userProfile.tenantId)) {
-      console.error(`Invalid tenant ID format (not UUID): ${userProfile.tenantId}`);
-      return c.json({ 
-        error: "Organization data format is outdated. Cannot create assets with old tenant format.",
-        details: "Tenant ID must be in UUID format for database operations.",
-        action_required: "recreate_organization"
-      }, 400);
-    }
+    const tenantId = userProfile.tenant_id;
 
     const asset = await c.req.json();
-    
-    // Look up asset_type_id from asset type name
-    const assetTypeName = asset.type || asset.asset_type_name;
+
+    const parseNullableNumber = (value: any) => {
+      if (value === null || value === undefined || value === "") return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const parseNullableInteger = (value: any) => {
+      if (value === null || value === undefined || value === "") return null;
+      const parsed = parseInt(String(value), 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const cleanText = (value: any) => {
+      if (value === null || value === undefined) return null;
+      const text = String(value).trim();
+      return text.length > 0 ? text : null;
+    };
+
+    const assetRef = cleanText(
+      asset.asset_ref ||
+      asset.referenceNumber ||
+      asset.reference_number ||
+      asset.assetReference
+    );
+
+    if (!assetRef) {
+      return c.json({ error: "Asset reference is required" }, 400);
+    }
+
+    const assetTypeName = cleanText(
+      asset.type ||
+      asset.asset_type ||
+      asset.assetType ||
+      asset.asset_type_name
+    );
+
+    if (!assetTypeName) {
+      return c.json({ error: "Asset type is required" }, 400);
+    }
+
     const { data: assetType, error: typeError } = await supabase
       .from("asset_types")
-      .select("asset_type_id")
-      .eq("name", assetTypeName)
+      .select("asset_type_id, name")
+      .ilike("name", assetTypeName)
       .maybeSingle();
 
     if (typeError || !assetType) {
-      console.error("Error finding asset type:", typeError);
+      console.error("Error finding asset type:", typeError, "assetTypeName:", assetTypeName);
       return c.json({ error: `Invalid asset type: ${assetTypeName}` }, 400);
     }
 
-    // Look up status_id from status name
-    const statusName = asset.status || "Active";
+    const statusName = cleanText(asset.status) || "Active";
     const { data: statusData, error: statusError } = await supabase
       .from("asset_status")
-      .select("status_id")
-      .eq("name", statusName)
+      .select("status_id, name")
+      .ilike("name", statusName)
       .maybeSingle();
 
     if (statusError || !statusData) {
-      console.error("Error finding status:", statusError);
+      console.error("Error finding asset status:", statusError, "statusName:", statusName);
       return c.json({ error: `Invalid status: ${statusName}` }, 400);
     }
-    
-    // Map frontend field names to database field names (using actual schema)
+
+    const roadNumber = cleanText(asset.road_number || asset.roadNumber || asset.road_name || asset.roadName);
+    const roadSubsection = cleanText(asset.road_subsection || asset.roadSubsection);
+    const roadName = cleanText(asset.full_road_name || asset.fullRoadName) ||
+      (roadNumber && roadSubsection ? `${roadNumber}${roadSubsection}` : roadNumber);
+
+    const description = cleanText(asset.description || asset.name || asset.asset_name || asset.assetName);
+    const ownerEntity = cleanText(asset.owner_entity || asset.owner || asset.owned_by);
+    const maintenanceResponsibility = cleanText(
+      asset.maintenance_responsibility ||
+      asset.responsible_party ||
+      asset.responsibleParty
+    );
+
+    // Important: insert into the real public.tams360_assets table used by GET /assets via tams360_assets_v.
+    // Do not insert into legacy "assets", and do not include non-existent columns such as description,
+    // owned_by, or responsible_party.
     const assetData = {
-      tenant_id: userProfile.tenantId,
-      asset_ref: asset.referenceNumber || asset.asset_ref,
+      tenant_id: tenantId,
+      asset_ref: assetRef,
       asset_type_id: assetType.asset_type_id,
-      description: asset.name || asset.description,
-      region: asset.region,
-      depot: asset.depot,
-      road_number: asset.roadNumber || asset.road_number,
-      road_name: asset.roadName || asset.road_name,
-      km_marker: asset.kilometer ? parseFloat(asset.kilometer) : null,
-      install_date: asset.installDate || asset.install_date || null,
-      useful_life_years: asset.expectedLife ? parseInt(asset.expectedLife) : null,
+      road_number: roadNumber,
+      road_name: roadName,
+      km_marker: parseNullableNumber(asset.km_marker ?? asset.kilometer ?? asset.km),
+      region: cleanText(asset.region),
+      depot: cleanText(asset.depot),
+      gps_lat: parseNullableNumber(asset.gps_lat ?? asset.latitude ?? asset.start_latitude),
+      gps_lng: parseNullableNumber(asset.gps_lng ?? asset.longitude ?? asset.start_longitude),
+      install_date: cleanText(asset.install_date || asset.installDate),
+      useful_life_years: parseNullableInteger(asset.useful_life_years ?? asset.expectedLife),
       status_id: statusData.status_id,
-      gps_lat: asset.latitude ? parseFloat(asset.latitude) : null,
-      gps_lng: asset.longitude ? parseFloat(asset.longitude) : null,
-      notes: asset.notes,
-      owned_by: asset.owner,
-      responsible_party: asset.responsibleParty || asset.responsible_party,
-      replacement_value: asset.replacementValue ? parseFloat(asset.replacementValue) : null,
-      purchase_price: asset.installationCost ? parseFloat(asset.installationCost) : null,
+      notes: cleanText(asset.notes),
+      owner_entity: ownerEntity,
+      maintenance_responsibility: maintenanceResponsibility,
+      replacement_value: parseNullableNumber(asset.replacement_value ?? asset.replacementValue),
+      purchase_price: parseNullableNumber(asset.purchase_price ?? asset.installationCost),
       created_by: userData.user.id,
+      updated_by: userData.user.id,
+      metadata: {
+        source: "mobile_field_capture",
+        description,
+        asset_name: cleanText(asset.asset_name || asset.assetName),
+        condition: cleanText(asset.condition),
+        ward: cleanText(asset.ward),
+        road_subsection: roadSubsection,
+        direction: cleanText(asset.direction),
+        road_side: cleanText(asset.road_side || asset.roadSide),
+        orientation: cleanText(asset.orientation || asset.direction),
+        installer_name: cleanText(asset.installer_name || asset.installer),
+        photo_urls: Array.isArray(asset.photo_urls) ? asset.photo_urls : [],
+        geometry_type: cleanText(asset.geometry_type || asset.geometryType),
+        end_latitude: parseNullableNumber(asset.end_latitude ?? asset.endLatitude),
+        end_longitude: parseNullableNumber(asset.end_longitude ?? asset.endLongitude),
+        captured_at: cleanText(asset.capturedAt || asset.captured_at) || new Date().toISOString(),
+        captured_by: userData.user.id,
+      },
     };
 
-    // Try to insert into database first
     const { data: insertedAsset, error: insertError } = await supabase
-      .from("assets")
+      .from("tams360_assets")
       .insert(assetData)
-      .select()
+      .select("*")
       .single();
 
-    if (insertError) {
-      console.error("Error inserting asset into database:", insertError);
-      // Fallback to KV store
-      const assetId = `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const assetRecord = {
-        id: assetId,
-        tenantId: userProfile.tenantId,
-        ...asset,
-        createdBy: userData.user.id,
-        assignedTo: userData.user.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await kv.set(`asset:${assetId}`, assetRecord);
-      
-      // Log audit trail
-      await kv.set(`audit:${Date.now()}`, {
-        action: "asset_created",
-        userId: userData.user.id,
-        assetId,
-        timestamp: new Date().toISOString(),
-      });
-
-      return c.json({ success: true, asset: assetRecord });
+    if (insertError || !insertedAsset) {
+      console.error("Error inserting asset into public.tams360_assets:", insertError, "payload:", assetData);
+      return c.json({
+        success: false,
+        error: "Failed to save asset to database",
+        details: insertError?.message,
+      }, 500);
     }
 
-    // Log inventory change in database (non-blocking - fire and forget)
+    // Verify that the same source used by GET /assets can read this record back.
+    const { data: verifiedAsset, error: verifyError } = await supabase
+      .from("tams360_assets_v")
+      .select("*")
+      .eq("asset_id", insertedAsset.asset_id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (verifyError || !verifiedAsset) {
+      console.error("Asset inserted but not visible in tams360_assets_v:", verifyError, insertedAsset.asset_id);
+      return c.json({
+        success: true,
+        savedTo: "database",
+        warning: "Asset was inserted but is not visible in the asset view yet.",
+        asset: insertedAsset,
+      });
+    }
+
     supabase
-      .from('asset_inventory_log')
+      .from("asset_inventory_log")
       .insert({
         asset_id: insertedAsset.asset_id,
-        action: 'CREATE',
+        action: "CREATE",
         changed_by: userData.user.id,
-        changes_summary: `Asset created via web app`,
+        changes_summary: `Asset created via mobile field capture`,
       })
       .then(({ error: logError }) => {
         if (logError) {
-          console.error('Warning: Failed to log inventory change:', logError);
+          console.error("Warning: Failed to log inventory change:", logError);
         }
       });
 
-    // Return immediately without waiting for log
-    return c.json({ success: true, asset: insertedAsset });
-  } catch (error) {
+    return c.json({
+      success: true,
+      savedTo: "database",
+      asset: verifiedAsset,
+    });
+  } catch (error: any) {
     console.error("Error creating asset:", error);
-    return c.json({ error: "Failed to create asset" }, 500);
+    return c.json({ error: "Failed to create asset", details: error?.message }, 500);
   }
 });
 
@@ -2822,7 +2891,7 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
 
     if (assetIds.length > 0) {
       const { data: latestInspections, error: latestInspectionError } = await supabase
-        .from("inspections")
+        .from("tams360_inspections_v")
         .select(`
           inspection_id,
           asset_id,
@@ -2851,31 +2920,54 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
       const latestInspection = latestInspectionByAsset.get(asset.asset_id) || null;
       const metadata = latestInspection?.calculation_metadata || {};
 
-      const latestFinalCI =
-        metadata.ci_final ??
-        latestInspection?.conditional_index ??
-        asset.ci_final ??
-        asset.latest_ci_final ??
-        asset.latest_final_ci ??
-        asset.latest_ci ??
-        null;
+    const latestUrgency =
+      metadata.worst_urgency ??
+      latestInspection?.calculated_urgency ??
+      asset.latest_urgency ??
+      asset.urgency ??
+      null;
 
-      const latestHealthCI =
-        metadata.ci_health ??
-        asset.ci_health ??
-        null;
+    const urgencyCode = String(latestUrgency ?? "").trim().toLowerCase();
 
-      const latestSafetyCI =
-        metadata.ci_safety ??
-        asset.ci_safety ??
-        null;
+    const derivedSafetyCI =
+      urgencyCode === "4" || urgencyCode.includes("immediate") || urgencyCode.includes("critical")
+        ? 0
+        : urgencyCode === "3" || urgencyCode.includes("high")
+        ? 25
+        : urgencyCode === "2" || urgencyCode.includes("medium")
+        ? 50
+        : urgencyCode === "1" || urgencyCode.includes("low")
+        ? 75
+        : urgencyCode === "0" || urgencyCode.includes("routine")
+        ? 90
+        : urgencyCode === "r" || urgencyCode.includes("record")
+        ? 100
+        : null;
 
-      const latestUrgency =
-        metadata.worst_urgency ??
-        latestInspection?.calculated_urgency ??
-        asset.latest_urgency ??
-        asset.urgency ??
-        null;
+    const latestHealthCI =
+      metadata.ci_health ??
+      latestInspection?.conditional_index ??
+      asset.ci_health ??
+      asset.latest_ci ??
+      null;
+
+    const latestSafetyCI =
+      metadata.ci_safety ??
+      asset.ci_safety ??
+      derivedSafetyCI ??
+      null;
+
+    const latestFinalCI =
+      metadata.ci_final ??
+      asset.ci_final ??
+      asset.latest_ci_final ??
+      asset.latest_final_ci ??
+      (
+        latestHealthCI !== null && latestHealthCI !== undefined &&
+        latestSafetyCI !== null && latestSafetyCI !== undefined
+          ? Math.min(Number(latestHealthCI), Number(latestSafetyCI))
+          : latestInspection?.conditional_index ?? asset.latest_ci ?? null
+      );
 
       // Calculate remaining life
       const installDate = asset.install_date ? new Date(asset.install_date) : null;
@@ -2940,84 +3032,6 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     }
     console.error("Error fetching assets:", error);
     return c.json({ error: "Failed to fetch assets" }, 500);
-  }
-});
-
-// Get full asset register report rows
-// Used by Reports -> Asset Inventory.
-// This intentionally uses the spreadsheet-backed report view, not the lean map/list asset view.
-app.get("/make-server-c894a9ff/reports/asset-register", async (c) => {
-  try {
-    const authHeader = c.req.header("Authorization");
-
-    if (!authHeader) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-
-    const accessToken = authHeader.split(" ")[1];
-    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
-
-    if (authError || !userData.user) {
-      return c.json({ error: "Invalid session" }, 401);
-    }
-
-    const { data: userProfile, error: profileError } = await supabase
-      .from("tams360_user_profiles_v")
-      .select("id, tenant_id, role")
-      .eq("id", userData.user.id)
-      .single();
-
-    if (profileError || !userProfile || !userProfile.tenant_id) {
-      return c.json({ error: "User not associated with an organization" }, 403);
-    }
-
-    const page = parseInt(c.req.query("page") || "1");
-    const requestedPageSize = parseInt(c.req.query("pageSize") || "5000");
-    const pageSize = Math.min(requestedPageSize, 5000);
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
-    const includeCount = page === 1;
-
-    console.log(
-      `GET /reports/asset-register - user:${userData.user.id}, tenant:${userProfile.tenant_id}, page:${page}, pageSize:${pageSize}`
-    );
-
-    const { data: assets, error, count } = await supabase
-      .from("tams360_asset_register_report_v")
-      .select("*", { count: includeCount ? "exact" : undefined })
-      .eq("tenant_id", userProfile.tenant_id)
-      .order("asset_ref", { ascending: true })
-      .range(from, to);
-
-    if (error) {
-      console.error("Error fetching asset register report view:", error);
-      return c.json(
-        {
-          error: "Failed to fetch asset register report",
-          details: error.message,
-          code: error.code,
-        },
-        500
-      );
-    }
-
-    return c.json({
-      assets: assets || [],
-      total: count ?? assets?.length ?? 0,
-      page,
-      pageSize,
-      totalPages: Math.ceil((count ?? assets?.length ?? 0) / pageSize),
-      source: "tams360_asset_register_report_v",
-    });
-  } catch (error: any) {
-    console.error("Error in asset register report endpoint:", error);
-    return c.json(
-      {
-        error: "Failed to fetch asset register report",
-        details: error?.message,
-      },
-      500
-    );
   }
 });
 

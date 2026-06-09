@@ -70,15 +70,18 @@ export default function ComponentInspectionForm({
     
     return components.map((comp) => ({
       component_name: comp.component_name,
+      component_display_name: comp.component_display_name || comp.component_label || comp.component_name,
+      component_order: comp.component_order ?? null,
+      what_to_inspect: comp.what_to_inspect || "",
       degree: "",
       extent: "",
       relevancy: "",
       urgency: "",
       ci: null,
       quantity: comp.default_quantity || null,
-      unit: comp.quantity_unit || "",
+      unit: comp.unit_of_measure || comp.quantity_unit || "",
       remedial_work: "",
-      rate: null,
+      rate: comp.default_rate ?? comp.rate ?? null,
       cost: null,
       comments: "",
       photo_url: undefined,
@@ -90,14 +93,19 @@ export default function ComponentInspectionForm({
 
   // Calculate CI for a single component
   const calculateComponentCI = (D: string, E: string, R: string): number | null => {
-    // Guard: if any invalid/blank → CI blank
-    if (!D || !E || !R || D === "U" || E === "U" || R === "U") {
+    // D=X or D=0 → CI=100 (Record only / No defect). Extent and relevancy are not required.
+    if (D === "X" || D === "0" || D === "N") {
+      return 100;
+    }
+
+    // D=U means unable to inspect. Save the component, but leave CI blank.
+    if (D === "U") {
       return null;
     }
 
-    // D=X or D=0 → CI=100 (Record only / No defect)
-    if (D === "X" || D === "0") {
-      return 100;
+    // Guard: if any invalid/blank for actual defects → CI blank
+    if (!D || !E || !R || E === "U" || R === "U") {
+      return null;
     }
 
     // Parse to numbers
@@ -123,10 +131,12 @@ export default function ComponentInspectionForm({
   // Calculate urgency based on decision tree
   const calculateUrgency = (D: string, E: string, R: string): string => {
     // Unable to inspect
-    if (D === "U" || E === "U" || R === "U") return "U";
+    if (D === "U") return "U";
 
-    // Record only
-    if (D === "X" || D === "0") return "R";
+    // Record only / no defect / not applicable
+    if (D === "X" || D === "0" || D === "N") return "R";
+
+    if (E === "U" || R === "U") return "U";
 
     const d = parseInt(D);
     const e = parseInt(E);
@@ -182,13 +192,21 @@ export default function ComponentInspectionForm({
 
     // Recalculate CI and urgency if D/E/R changed
     if (field === "degree" || field === "extent" || field === "relevancy") {
+      if (field === "degree" && ["0", "X", "U", "N"].includes(String(value))) {
+        updated[index].extent = "";
+        updated[index].relevancy = "";
+        updated[index].quantity = null;
+        updated[index].cost = null;
+        updated[index].remedial_work = "";
+      }
+
       const { degree, extent, relevancy } = updated[index];
       updated[index].ci = calculateComponentCI(degree, extent, relevancy);
       updated[index].urgency = calculateUrgency(degree, extent, relevancy) || "";
 
       // Recalculate cost based on CI and repair threshold
       const ci = updated[index].ci;
-      if (ci !== null && ci <= repairThreshold) {
+      if (ci !== null && ci <= repairThreshold && !["R", "U"].includes(updated[index].urgency)) {
         // Apply remedial work and cost
         const quantity = updated[index].quantity || 0;
         const rate = updated[index].rate || 0;
@@ -202,7 +220,7 @@ export default function ComponentInspectionForm({
     // Recalculate cost if quantity or rate changed
     if (field === "quantity" || field === "rate") {
       const ci = updated[index].ci;
-      if (ci !== null && ci <= repairThreshold) {
+      if (ci !== null && ci <= repairThreshold && !["R", "U"].includes(updated[index].urgency)) {
         const quantity = updated[index].quantity || 0;
         const rate = updated[index].rate || 0;
         updated[index].cost = quantity * rate;
@@ -397,7 +415,7 @@ export default function ComponentInspectionForm({
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">
-                  {score.component_name}
+                  {score.component_display_name || score.component_name}
                 </CardTitle>
                 <div className="flex items-center gap-2">
                   {score.ci !== null && (
@@ -418,6 +436,12 @@ export default function ComponentInspectionForm({
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {score.what_to_inspect && (
+                <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/30">
+                  <span className="font-medium">Inspect: </span>{score.what_to_inspect}
+                </div>
+              )}
+
               {/* D/E/R Scoring */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
@@ -436,6 +460,7 @@ export default function ComponentInspectionForm({
                       <SelectItem value="3">3 - Severe</SelectItem>
                       <SelectItem value="X">X - Record only</SelectItem>
                       <SelectItem value="U">U - Unable to inspect</SelectItem>
+                      <SelectItem value="N">N - Not applicable</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -444,6 +469,7 @@ export default function ComponentInspectionForm({
                   <Select
                     value={score.extent}
                     onValueChange={(value) => updateComponentScore(index, "extent", value)}
+                    disabled={["0", "X", "U", "N"].includes(score.degree)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select extent" />
@@ -462,6 +488,7 @@ export default function ComponentInspectionForm({
                   <Select
                     value={score.relevancy}
                     onValueChange={(value) => updateComponentScore(index, "relevancy", value)}
+                    disabled={["0", "X", "U", "N"].includes(score.degree)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select relevancy" />
@@ -478,7 +505,7 @@ export default function ComponentInspectionForm({
               </div>
 
               {/* Remedial Work & Costing (only if CI <= threshold) */}
-              {score.ci !== null && score.ci <= repairThreshold && (
+              {score.ci !== null && score.ci <= repairThreshold && !["R", "U"].includes(score.urgency) && (
                 <div className="border-t pt-4 space-y-4">
                   <div className="bg-warning/10 p-3 rounded-md">
                     <p className="text-sm font-medium text-warning">
