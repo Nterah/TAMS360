@@ -652,24 +652,32 @@ export default function FieldCapturePage() {
       );
     }
 
+    const assetData = {
+      ...formData,
+      assetReference: finalReference,
+      description: finalDescription,
+      photos: photos.map((p) => p.file.name),
+      capturedAt: new Date().toISOString(),
+      capturedBy: user?.id,
+      tenantId,
+      offline: !isOnline,
+    };
+
     setSaving(true);
     try {
-      const assetData = {
-        ...formData,
-        assetReference: finalReference,
-        description: finalDescription,
-        photos: photos.map((p) => p.file.name),
-        capturedAt: new Date().toISOString(),
-        capturedBy: user?.id,
-        tenantId,
-        offline: !isOnline,
-      };
-
       if (isOnline) await saveOnline(assetData);
       else saveOffline(assetData);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Save error:", error);
-      toast.error("Failed to save asset");
+
+      const message = error?.message || "Failed to save asset";
+      if (isOnline && (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("aborted"))) {
+        toast.warning("Connection dropped while saving. Saving offline instead.");
+        saveOffline(assetData);
+        return;
+      }
+
+      toast.error(message);
       setSaving(false);
     }
   };

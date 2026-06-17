@@ -434,30 +434,31 @@ export default function MobileNewInspectionPage() {
       return;
     }
 
+    const payload = {
+      asset_id: formData.asset_id,
+      inspection_date: formData.inspection_date,
+      inspector_name: formData.inspector_name,
+      weather_condition: formData.weather_condition,
+      condition: formData.condition,
+
+      // Do NOT calculate CI / DERU / final scores here.
+      // These are calculated centrally before/database storage.
+      degree: formData.degree || null,
+      extent: formData.extent || null,
+      relevancy: formData.relevancy || null,
+
+      remedial_notes: formData.remedial_notes || "",
+      comments: formData.comments || "",
+
+      component_scores: formData.component_scores || [],
+      latitude: formData.latitude || null,
+      longitude: formData.longitude || null,
+      photo_urls: formData.photo_urls || [],
+    };
+
     setLoading(true);
 
     try {
-      const payload = {
-        asset_id: formData.asset_id,
-        inspection_date: formData.inspection_date,
-        inspector_name: formData.inspector_name,
-        weather_condition: formData.weather_condition,
-        condition: formData.condition,
-
-        // Do NOT calculate CI / DERU / final scores here.
-        // These are calculated centrally before/database storage.
-        degree: formData.degree || null,
-        extent: formData.extent || null,
-        relevancy: formData.relevancy || null,
-
-        remedial_notes: formData.remedial_notes || "",
-        comments: formData.comments || "",
-
-        component_scores: formData.component_scores || [],
-        latitude: formData.latitude || null,
-        longitude: formData.longitude || null,
-        photo_urls: formData.photo_urls || [],
-      };
 
       if (isOnline) {
         const inspectionAccessToken = accessToken;
@@ -529,9 +530,27 @@ export default function MobileNewInspectionPage() {
         toast.success("Inspection saved offline. Will sync when online.");
         navigate("/mobile/inspections");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving inspection:", error);
-      toast.error("Failed to save inspection");
+
+      const message = error?.message || "Failed to save inspection";
+      if (isOnline && (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("aborted"))) {
+        const offlineInspections = JSON.parse(
+          localStorage.getItem("offline_inspections") || "[]"
+        );
+        offlineInspections.push({
+          ...payload,
+          id: `offline_${Date.now()}`,
+          offline: true,
+          created_at: new Date().toISOString(),
+        });
+        localStorage.setItem("offline_inspections", JSON.stringify(offlineInspections));
+        toast.warning("Connection dropped while saving. Inspection was saved offline.");
+        navigate("/mobile/inspections");
+        return;
+      }
+
+      toast.error(message);
     } finally {
       setLoading(false);
     }

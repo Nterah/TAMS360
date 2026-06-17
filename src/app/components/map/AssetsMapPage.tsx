@@ -7,7 +7,7 @@ import { AssetMap, Asset } from '../AssetMap';
 import { MapFilters, MapFilterState } from '../MapFilters';
 import { Map, LayoutGrid, RefreshCw, Maximize2, Minimize2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 
 export default function AssetsMapPage() {
@@ -30,17 +30,20 @@ export default function AssetsMapPage() {
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   useEffect(() => {
+    if (!accessToken) return;
     fetchAssets();
-  }, []);
+  }, [accessToken]);
 
   const fetchAssets = async () => {
+    if (!accessToken) return;
+
     setLoading(true);
     setError(null);
     try {
       // Fetch first page with count
       const response = await fetch(`${API_URL}/assets?pageSize=500`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
 
@@ -59,7 +62,7 @@ export default function AssetsMapPage() {
           for (let page = 2; page <= Math.min(data.totalPages, 4); page++) {
             const pageResponse = await fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
               headers: {
-                Authorization: `Bearer ${accessToken || publicAnonKey}`,
+                Authorization: `Bearer ${accessToken}`,
               },
             });
             if (pageResponse.ok) {

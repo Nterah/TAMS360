@@ -122,7 +122,7 @@ export const OfflineProvider: React.FC<OfflineProviderProps> = ({ children }) =>
     setSyncStatus("syncing");
     setSyncError(null);
 
-    const accessToken = localStorage.getItem("tams360_access_token") || publicAnonKey;
+    const accessToken = localStorage.getItem("tams360_token") || publicAnonKey;
     const failedItems: PendingSyncItem[] = [];
     let successCount = 0;
 

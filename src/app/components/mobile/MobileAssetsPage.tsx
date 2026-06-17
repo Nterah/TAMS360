@@ -2,6 +2,8 @@ import { useState, useEffect, useContext } from "react";
 import { AuthContext } from "../../App";
 import { useTenant } from "../../contexts/TenantContext";
 import { useNavigate } from "react-router-dom";
+import { useOffline } from "../offline/OfflineContext";
+import { AssetsCacheService } from "../../utils/offlineCache";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
@@ -45,10 +47,13 @@ interface Asset {
 export default function MobileAssetsPage() {
   const { accessToken } = useContext(AuthContext);
   const { tenantId } = useTenant();
+  const { isOnline } = useOffline();
   const navigate = useNavigate();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [loadedFromCache, setLoadedFromCache] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [filterCondition, setFilterCondition] = useState("all");
@@ -56,8 +61,9 @@ export default function MobileAssetsPage() {
 
   // Fetch assets
   useEffect(() => {
+    if (!accessToken) return;
     fetchAssets();
-  }, [accessToken, tenantId]);
+  }, [accessToken, tenantId, isOnline]);
 
   // Apply filters
   useEffect(() => {
@@ -106,11 +112,66 @@ export default function MobileAssetsPage() {
     setFilteredAssets(filtered);
   }, [searchQuery, filterType, filterCondition, assets]);
 
+  const normaliseAssets = (list: any[]) =>
+    list.map((asset: any) => ({
+      ...asset,
+      id: asset.id || asset.asset_id,
+      asset_id: asset.asset_id || asset.id,
+      asset_ref: asset.asset_ref || asset.asset_number || asset.reference_number || "",
+      asset_type_name: asset.asset_type_name || asset.asset_type || asset.type || "",
+      description:
+        asset.description ||
+        asset.metadata?.description ||
+        asset.name ||
+        asset.asset_name ||
+        "",
+      condition:
+        asset.condition ||
+        asset.condition_name ||
+        asset.metadata?.condition ||
+        "",
+      status:
+        asset.status ||
+        asset.status_name ||
+        "Active",
+      latitude: Number(asset.latitude ?? asset.gps_lat ?? 0),
+      longitude: Number(asset.longitude ?? asset.gps_lng ?? 0),
+      gps_lat: Number(asset.gps_lat ?? asset.latitude ?? 0),
+      gps_lng: Number(asset.gps_lng ?? asset.longitude ?? 0),
+    }));
+
+  const loadCachedAssets = async (fallbackMessage?: string) => {
+    const cached = await AssetsCacheService.getAll();
+    const normalisedCached = normaliseAssets(cached);
+
+    if (normalisedCached.length > 0) {
+      setAssets(normalisedCached);
+      setFilteredAssets(normalisedCached);
+      setLoadedFromCache(true);
+      setLoadError("");
+      return true;
+    }
+
+    setAssets([]);
+    setFilteredAssets([]);
+    setLoadedFromCache(false);
+    setLoadError(fallbackMessage || "Failed to load assets");
+    return false;
+  };
+
   const fetchAssets = async () => {
+    if (!accessToken) return;
+
     const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
     try {
       setLoading(true);
+      setLoadError("");
+
+      if (!isOnline) {
+        await loadCachedAssets("No cached assets available offline");
+        return;
+      }
 
       const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
         headers: {
@@ -136,39 +197,19 @@ export default function MobileAssetsPage() {
         Array.isArray(result.items) ? result.items :
         [];
 
-      const normalised = list.map((asset: any) => ({
-        ...asset,
-        id: asset.id || asset.asset_id,
-        asset_id: asset.asset_id || asset.id,
-        asset_ref: asset.asset_ref || asset.asset_number || asset.reference_number || "",
-        asset_type_name: asset.asset_type_name || asset.asset_type || asset.type || "",
-        description:
-          asset.description ||
-          asset.metadata?.description ||
-          asset.name ||
-          asset.asset_name ||
-          "",
-        condition:
-          asset.condition ||
-          asset.condition_name ||
-          asset.metadata?.condition ||
-          "",
-        status:
-          asset.status ||
-          asset.status_name ||
-          "Active",
-        latitude: Number(asset.latitude ?? asset.gps_lat ?? 0),
-        longitude: Number(asset.longitude ?? asset.gps_lng ?? 0),
-        gps_lat: Number(asset.gps_lat ?? asset.latitude ?? 0),
-        gps_lng: Number(asset.gps_lng ?? asset.longitude ?? 0),
-      }));
+      const normalised = normaliseAssets(list);
 
       setAssets(normalised);
       setFilteredAssets(normalised);
+      setLoadedFromCache(false);
+      await AssetsCacheService.setAll(normalised);
     } catch (error) {
       console.error("Failed to fetch assets:", error);
-      setAssets([]);
-      setFilteredAssets([]);
+      const message = error instanceof Error ? error.message : "Failed to load assets";
+      const loadedCached = await loadCachedAssets(message);
+      if (!loadedCached) {
+        setLoadError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -290,6 +331,11 @@ export default function MobileAssetsPage() {
         <p className="text-sm text-slate-600 dark:text-slate-400">
           {filteredAssets.length} asset{filteredAssets.length !== 1 ? "s" : ""} found
         </p>
+        {loadedFromCache && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+            Showing cached assets because the device is offline.
+          </p>
+        )}
       </div>
 
       {/* Assets List */}
@@ -297,6 +343,15 @@ export default function MobileAssetsPage() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          </div>
+        ) : loadError ? (
+          <div className="text-center py-12">
+            <AlertCircle className="w-12 h-12 mx-auto mb-3 text-red-400" />
+            <p className="text-red-600 dark:text-red-400 text-sm">Failed to load assets</p>
+            <p className="text-xs text-slate-500 mt-2 break-words">{loadError}</p>
+            <Button className="mt-4" variant="outline" size="sm" onClick={fetchAssets}>
+              Try Again
+            </Button>
           </div>
         ) : filteredAssets.length === 0 ? (
           <div className="text-center py-12">

@@ -119,8 +119,9 @@ export default function AssetsPage() {
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   useEffect(() => {
+    if (!accessToken) return;
     fetchAssets();
-  }, []);
+  }, [accessToken]);
 
   // Read URL parameters and apply filters
   useEffect(() => {
@@ -148,11 +149,13 @@ export default function AssetsPage() {
   }, [searchParams]);
 
   const fetchAssets = async () => {
+    if (!accessToken) return;
+
     try {
       // Fetch first page with count
       const response = await fetch(`${API_URL}/assets?pageSize=500`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
 
@@ -169,7 +172,7 @@ export default function AssetsPage() {
           for (let page = 2; page <= Math.min(data.totalPages, 4); page++) {
             const pageResponse = await fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
               headers: {
-                Authorization: `Bearer ${accessToken || publicAnonKey}`,
+                Authorization: `Bearer ${accessToken}`,
               },
             });
             if (pageResponse.ok) {
