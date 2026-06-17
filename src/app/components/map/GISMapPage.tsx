@@ -86,6 +86,14 @@ export default function GISMapPage() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    if (!accessToken) {
+      return () => {
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+      };
+    }
+
     fetchAssets();
     fetchOverlayLayers();
     
@@ -96,7 +104,7 @@ export default function GISMapPage() {
         console.log("Aborted pending asset requests on unmount");
       }
     };
-  }, []);
+  }, [accessToken]);
 
   // Dynamically initialize layer visibility when assets change
   useEffect(() => {
@@ -128,6 +136,8 @@ export default function GISMapPage() {
   }, [selectedAsset]);
 
   const fetchAssets = async () => {
+    if (!accessToken) return;
+
     try {
       setHasNetworkError(false); // Reset error state on new fetch
       
@@ -145,7 +155,7 @@ export default function GISMapPage() {
       // Fetch assets in smaller batches (100 per page) to avoid timeouts
       const response = await fetch(`${API_URL}/assets?pageSize=100`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         signal: abortController.signal,
       });
@@ -227,7 +237,7 @@ export default function GISMapPage() {
             pagePromises.push(
               fetch(`${API_URL}/assets?page=${page}&pageSize=100`, {
                 headers: {
-                  Authorization: `Bearer ${accessToken || publicAnonKey}`,
+                  Authorization: `Bearer ${accessToken}`,
                 },
                 signal: abortController.signal,
               })
@@ -355,10 +365,12 @@ export default function GISMapPage() {
   };
 
   const fetchOverlayLayers = async () => {
+    if (!accessToken) return;
+
     try {
       const response = await fetch(`${API_URL}/map/overlays`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
 

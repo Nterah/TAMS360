@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId } from "../../../../utils/supabase/info";
 import { useOffline } from "../offline/OfflineContext";
 import { InspectionsCacheService } from "../../utils/offlineCache";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
@@ -62,9 +62,10 @@ export default function InspectionsPage() {
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   useEffect(() => {
+    if (!accessToken) return;
     loadInspections();
     fetchStats();
-  }, [isOnline]);
+  }, [isOnline, accessToken]);
 
   const loadInspections = async () => {
     // If offline, try to load from cache first
@@ -84,10 +85,12 @@ export default function InspectionsPage() {
   };
 
   const fetchInspections = async () => {
+    if (!accessToken) return;
+
     try {
       const response = await fetch(`${API_URL}/inspections?pageSize=500`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
 
@@ -104,7 +107,7 @@ export default function InspectionsPage() {
           for (let page = 2; page <= Math.min(data.totalPages, 4); page++) {
             const pageResponse = await fetch(`${API_URL}/inspections?page=${page}&pageSize=500`, {
               headers: {
-                Authorization: `Bearer ${accessToken || publicAnonKey}`,
+                Authorization: `Bearer ${accessToken}`,
               },
             });
             if (pageResponse.ok) {
@@ -113,10 +116,10 @@ export default function InspectionsPage() {
             }
           }
           setInspections(allInspections);
-        }
-        
-        // Cache for offline use
-        if (isOnline) {
+          if (isOnline) {
+            await InspectionsCacheService.setAll(allInspections);
+          }
+        } else if (isOnline) {
           await InspectionsCacheService.setAll(inspectionsList);
         }
       } else {
@@ -147,10 +150,12 @@ export default function InspectionsPage() {
   };
 
   const fetchStats = async () => {
+    if (!accessToken) return;
+
     try {
       const response = await fetch(`${API_URL}/inspections/stats`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
 
