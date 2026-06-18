@@ -21,6 +21,7 @@ import { ColumnCustomizer, ColumnConfig } from "../ui/column-customizer";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import EnhancedAssetForm from "./EnhancedAssetForm";
 import { requiresMigration, handleMigrationRequired } from "../../utils/migrationHelper";
+import { mergePendingOfflineAssets, removePendingOfflineAsset } from "../../utils/offlineAssets";
 
 import {
   getCIDisplay,
@@ -162,9 +163,10 @@ export default function AssetsPage() {
       if (response.ok) {
         const data = await response.json();
         const firstPageAssets = (data.assets || []).map(normaliseAssetForDisplay);
+        const initialMerged = mergePendingOfflineAssets(firstPageAssets);
 
-        setAssets(firstPageAssets);
-        setTotalAssetCount(data.total || 0);
+        setAssets(initialMerged.assets);
+        setTotalAssetCount((data.total || 0) + initialMerged.pendingCount);
         
         // Load more pages if needed (up to 2000 assets for table display)
         if (data.totalPages > 1) {
@@ -180,7 +182,9 @@ export default function AssetsPage() {
               allAssets.push(...(pageData.assets || []).map(normaliseAssetForDisplay));
             }
           }
-          setAssets(allAssets);
+          const mergedAllAssets = mergePendingOfflineAssets(allAssets);
+          setAssets(mergedAllAssets.assets);
+          setTotalAssetCount((data.total || allAssets.length) + mergedAllAssets.pendingCount);
         }
       }
     } catch (error) {
@@ -435,19 +439,35 @@ export default function AssetsPage() {
     return { label: "Poor", variant: "destructive" as const };
   };
 
-  const handleViewAsset = (assetId: string) => {
-    navigate(`/assets/${assetId}`);
+  const handleViewAsset = (asset: any) => {
+    if (asset.is_offline_pending) {
+      toast.info("This asset is saved locally and will be fully available after sync.");
+      return;
+    }
+    navigate(`/assets/${asset.asset_id}`);
   };
 
-  const handleEditAsset = (assetId: string) => {
-    navigate(`/assets/${assetId}/edit`);
+  const handleEditAsset = (asset: any) => {
+    if (asset.is_offline_pending) {
+      toast.info("Pending offline assets can't be edited here until they sync.");
+      return;
+    }
+    navigate(`/assets/${asset.asset_id}/edit`);
   };
 
-  const handleDeleteAsset = async (assetId: string) => {
+  const handleDeleteAsset = async (asset: any) => {
     if (!confirm("Are you sure you want to delete this asset?")) return;
+
+    if (asset.is_offline_pending) {
+      removePendingOfflineAsset(asset.asset_id);
+      setAssets((current) => current.filter((row) => String(row.asset_id) !== String(asset.asset_id)));
+      setTotalAssetCount((current) => Math.max(0, current - 1));
+      toast.success("Pending offline asset removed.");
+      return;
+    }
     
     try {
-      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+      const response = await fetch(`${API_URL}/assets/${asset.asset_id}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -869,7 +889,7 @@ export default function AssetsPage() {
                           <Button 
                             variant="ghost" 
                             size="sm"
-                            onClick={() => handleViewAsset(asset.asset_id)}
+                            onClick={() => handleViewAsset(asset)}
                             className="h-8 w-8 p-0"
                             title="View details"
                           >
@@ -878,7 +898,7 @@ export default function AssetsPage() {
                           <Button 
                             variant="ghost" 
                             size="sm"
-                            onClick={() => handleEditAsset(asset.asset_id)}
+                            onClick={() => handleEditAsset(asset)}
                             className="h-8 w-8 p-0"
                             title="Edit asset"
                           >
@@ -887,7 +907,7 @@ export default function AssetsPage() {
                           <Button 
                             variant="ghost" 
                             size="sm"
-                            onClick={() => handleDeleteAsset(asset.asset_id)}
+                            onClick={() => handleDeleteAsset(asset)}
                             className="h-8 w-8 p-0"
                             title="Delete asset"
                           >
@@ -896,7 +916,12 @@ export default function AssetsPage() {
                         </div>
                       </TableCell>
                       {columns.find(c => c.id === "asset_ref")?.visible && (
-                        <TableCell className="font-medium">{asset.asset_ref || "N/A"}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{asset.asset_ref || "N/A"}</span>
+                            {asset.is_offline_pending && <Badge variant="secondary">Pending Sync</Badge>}
+                          </div>
+                        </TableCell>
                       )}
                       {columns.find(c => c.id === "asset_type")?.visible && (
                         <TableCell>
@@ -1018,6 +1043,7 @@ export default function AssetsPage() {
                         <h4 className="font-semibold">{asset.asset_ref || "N/A"}</h4>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">{asset.asset_type_name || "Unknown"}</Badge>
+                          {asset.is_offline_pending && <Badge variant="secondary">Pending Sync</Badge>}
                           <Badge className={ciDisplay.className} title={ciDisplay.label}>
                             CI: {ciDisplay.label}
                           </Badge>
@@ -1058,7 +1084,7 @@ export default function AssetsPage() {
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        onClick={() => handleViewAsset(asset.asset_id)}
+                        onClick={() => handleViewAsset(asset)}
                       >
                         <Eye className="w-4 h-4 mr-1" />
                         View Details
@@ -1070,12 +1096,12 @@ export default function AssetsPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditAsset(asset.asset_id)}>
+                          <DropdownMenuItem onClick={() => handleEditAsset(asset)}>
                             <Edit className="h-4 w-4 mr-2" />
                             Update
                           </DropdownMenuItem>
                           <DropdownMenuItem 
-                            onClick={() => handleDeleteAsset(asset.asset_id)}
+                            onClick={() => handleDeleteAsset(asset)}
                             className="text-destructive"
                           >
                             <Trash2 className="h-4 w-4 mr-2" />

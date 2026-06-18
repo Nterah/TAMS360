@@ -139,7 +139,6 @@ export default function MobileNewInspectionPage() {
         latitude: fix.latitude,
         longitude: fix.longitude,
       }));
-      setCurrentLocation({ lat: fix.latitude, lng: fix.longitude });
       setLocationAccuracy(fix.accuracy);
 
       const roundedAccuracy = Math.round(fix.accuracy);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -9,7 +9,7 @@ import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Badge } from "../ui/badge";
 import ComponentInspectionForm from "./ComponentInspectionForm";
-import { ArrowLeft, Save, CheckCircle, Camera, Upload, X, Image as ImageIcon, MapPin, Navigation2, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, CheckCircle, Camera, Upload, X, Image as ImageIcon, MapPin, Navigation2, Loader2, AlertCircle } from "lucide-react";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { toast } from "sonner";
 import {
@@ -21,6 +21,8 @@ import {
 
 export default function NewInspectionPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const assetFromUrl = searchParams.get("assetId");
   const { user, accessToken } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
   const [assets, setAssets] = useState<any[]>([]);
@@ -51,6 +53,52 @@ export default function NewInspectionPage() {
     fetchAssets();
     getCurrentLocation();
   }, []);
+
+  useEffect(() => {
+    if (!assetFromUrl || assets.length === 0) return;
+
+    const matchedAsset = assets.find(
+      (asset) => String(asset.asset_id || asset.id) === String(assetFromUrl)
+    );
+
+    if (matchedAsset) {
+      applySelectedAsset(matchedAsset);
+    } else {
+      fetchAssetById(assetFromUrl);
+    }
+  }, [assetFromUrl, assets]);
+
+  const normaliseAsset = (asset: any) => ({
+    ...asset,
+    id: asset.id || asset.asset_id,
+    asset_id: asset.asset_id || asset.id,
+    asset_ref: asset.asset_ref || asset.asset_number || asset.reference_number || "",
+    asset_type_name: asset.asset_type_name || asset.asset_type || asset.type_name || asset.type || "",
+    description: asset.description || asset.metadata?.description || asset.name || "",
+    latitude: asset.latitude ?? asset.gps_lat ?? null,
+    longitude: asset.longitude ?? asset.gps_lng ?? null,
+  });
+
+  const applySelectedAsset = (asset: any) => {
+    const normalisedAsset = normaliseAsset(asset);
+    const selectedId = String(normalisedAsset.asset_id || normalisedAsset.id);
+
+    setSelectedAsset(normalisedAsset);
+    setFormData((prev) =>
+      prev.asset_id === selectedId
+        ? prev
+        : { ...prev, asset_id: selectedId }
+    );
+
+    const typeName =
+      normalisedAsset.asset_type_name ||
+      normalisedAsset.asset_type ||
+      normalisedAsset.type_name;
+
+    if (typeName) {
+      fetchComponentTemplate(typeName);
+    }
+  };
 
   const getCurrentLocation = async () => {
     if (navigator.geolocation) {
@@ -108,7 +156,7 @@ export default function NewInspectionPage() {
 
   const fetchAssets = async () => {
     try {
-      const response = await fetch(`${API_URL}/assets`, {
+      const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
         headers: {
           Authorization: `Bearer ${accessToken || publicAnonKey}`,
         },
@@ -116,10 +164,46 @@ export default function NewInspectionPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setAssets(data.assets || []);
+        const list =
+          Array.isArray(data) ? data :
+          Array.isArray(data.assets) ? data.assets :
+          Array.isArray(data.data) ? data.data :
+          Array.isArray(data.rows) ? data.rows :
+          Array.isArray(data.items) ? data.items :
+          [];
+
+        setAssets(list.map(normaliseAsset));
       }
     } catch (error) {
       console.error("Error fetching assets:", error);
+    }
+  };
+
+  const fetchAssetById = async (assetId: string) => {
+    try {
+      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+        },
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      const asset = normaliseAsset(data.asset || data.data || data);
+
+      setAssets((current) => {
+        if (current.some((row) => String(row.asset_id || row.id) === String(asset.asset_id || asset.id))) {
+          return current;
+        }
+        return [asset, ...current];
+      });
+
+      applySelectedAsset(asset);
+    } catch (error) {
+      console.error("Error fetching asset for preselection:", error);
     }
   };
 
@@ -169,12 +253,11 @@ export default function NewInspectionPage() {
   };
 
   const handleAssetChange = (assetId: string) => {
-    const asset = assets.find((a) => a.asset_id === assetId);
-    setSelectedAsset(asset);
-    setFormData({ ...formData, asset_id: assetId });
-
-    if (asset?.asset_type_name) {
-      fetchComponentTemplate(asset.asset_type_name);
+    const asset = assets.find((a) => String(a.asset_id || a.id) === String(assetId));
+    if (asset) {
+      applySelectedAsset(asset);
+    } else {
+      setFormData((prev) => ({ ...prev, asset_id: assetId }));
     }
   };
 
