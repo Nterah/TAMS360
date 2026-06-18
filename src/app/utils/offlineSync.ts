@@ -80,7 +80,8 @@ export async function syncOfflineAssets(accessToken: string): Promise<SyncResult
 
           const formData = new FormData();
           formData.append("file", file);
-          formData.append("bucket", "asset-photos");
+          formData.append("bucket", "tams360-inspection-photos");
+          formData.append("folderPath", asset.assetReference || asset.description || "offline-asset");
 
           const uploadResponse = await fetch(`${API_URL}/storage/upload`, {
             method: "POST",
@@ -91,8 +92,8 @@ export async function syncOfflineAssets(accessToken: string): Promise<SyncResult
           });
 
           if (uploadResponse.ok) {
-            const { url } = await uploadResponse.json();
-            photoUrls.push(url);
+            const { url, path } = await uploadResponse.json();
+            photoUrls.push(path || url);
           }
         } catch (photoError) {
           console.warn("Failed to upload photo:", photoError);

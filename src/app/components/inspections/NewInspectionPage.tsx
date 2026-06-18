@@ -7,10 +7,17 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Badge } from "../ui/badge";
 import ComponentInspectionForm from "./ComponentInspectionForm";
-import { ArrowLeft, Save, CheckCircle, Camera, Upload, X, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, Save, CheckCircle, Camera, Upload, X, Image as ImageIcon, MapPin, Navigation2, Loader2 } from "lucide-react";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { toast } from "sonner";
+import {
+  buildGpsOverrideMessage,
+  captureBestGpsFix,
+  classifyGpsAccuracy,
+  shouldRequireGpsSaveOverride,
+} from "../../utils/gpsCapture";
 
 export default function NewInspectionPage() {
   const navigate = useNavigate();
@@ -22,6 +29,8 @@ export default function NewInspectionPage() {
   const [photos, setPhotos] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [gettingLocation, setGettingLocation] = useState(false);
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
 
   const [formData, setFormData] = useState({
     asset_id: "",
@@ -36,36 +45,62 @@ export default function NewInspectionPage() {
   });
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+  const gpsAccuracyStatus = classifyGpsAccuracy(locationAccuracy);
 
   useEffect(() => {
     fetchAssets();
     getCurrentLocation();
   }, []);
 
-  const getCurrentLocation = () => {
+  const getCurrentLocation = async () => {
     if (navigator.geolocation) {
-      toast.info("Detecting your location...");
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          setCurrentLocation({ lat: latitude, lng: longitude });
-          setFormData((prev) => ({
-            ...prev,
-            latitude,
-            longitude,
-          }));
-          toast.success(`Location detected: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
-        },
-        (error) => {
-          console.error("Error getting location:", error);
-          toast.error("Could not detect location. Please enable location services.");
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
+      setGettingLocation(true);
+      toast.info("Waiting for an accurate GPS fix...", { id: "desktop-inspection-gps" });
+
+      try {
+        const fix = await captureBestGpsFix({
+          onProgress: (candidate) => setLocationAccuracy(candidate.accuracy),
+        });
+
+        setCurrentLocation({ lat: fix.latitude, lng: fix.longitude });
+        setFormData((prev) => ({
+          ...prev,
+          latitude: fix.latitude,
+          longitude: fix.longitude,
+        }));
+        setLocationAccuracy(fix.accuracy);
+
+        const roundedAccuracy = Math.round(fix.accuracy);
+        const accuracyStatus = classifyGpsAccuracy(fix.accuracy);
+
+        if (accuracyStatus === "precise") {
+          toast.success(`Location captured (±${roundedAccuracy}m)`, {
+            id: "desktop-inspection-gps",
+          });
+        } else if (accuracyStatus === "acceptable") {
+          toast.warning(`Location captured with acceptable accuracy (±${roundedAccuracy}m).`, {
+            id: "desktop-inspection-gps",
+            duration: 6000,
+          });
+        } else if (accuracyStatus === "review") {
+          toast.warning(
+            `Location captured, but GPS accuracy is low (±${roundedAccuracy}m). Confirm before saving.`,
+            { id: "desktop-inspection-gps", duration: 7000 }
+          );
+        } else {
+          toast.error(
+            `GPS fix is very poor (±${roundedAccuracy}m). Retry before saving if possible.`,
+            { id: "desktop-inspection-gps", duration: 8000 }
+          );
         }
-      );
+      } catch (error: any) {
+        console.error("Error getting location:", error);
+        toast.error(error?.message || "Could not detect location. Please enable location services.", {
+          id: "desktop-inspection-gps",
+        });
+      } finally {
+        setGettingLocation(false);
+      }
     } else {
       toast.error("Geolocation is not supported by your device");
     }
@@ -156,6 +191,15 @@ export default function NewInspectionPage() {
     // Check template exists
     if (!componentTemplate || !componentTemplate.items || componentTemplate.items.length === 0) {
       toast.error("Cannot save inspection - no template loaded. Please select a different asset or contact an administrator.");
+      return;
+    }
+
+    if (
+      formData.latitude !== null &&
+      formData.longitude !== null &&
+      shouldRequireGpsSaveOverride(locationAccuracy) &&
+      !confirm(buildGpsOverrideMessage(locationAccuracy!))
+    ) {
       return;
     }
 
@@ -340,6 +384,41 @@ export default function NewInspectionPage() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <MapPin className="w-4 h-4" />
+              GPS Location
+              {locationAccuracy !== null && (
+                <Badge variant="outline" className="text-xs">
+                  ±{Math.round(locationAccuracy)}m
+                </Badge>
+              )}
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                value={
+                  currentLocation
+                    ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}`
+                    : "Not captured"
+                }
+                readOnly
+              />
+              <Button type="button" variant="outline" onClick={getCurrentLocation} disabled={gettingLocation}>
+                {gettingLocation ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation2 className="w-4 h-4" />}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {locationAccuracy === null
+                ? "Capture GPS and aim for ±30m or better when possible."
+                : gpsAccuracyStatus === "precise"
+                  ? "GPS is within the preferred range."
+                  : gpsAccuracyStatus === "acceptable"
+                    ? "Coordinates are usable, but waiting a little longer may improve the fix."
+                    : gpsAccuracyStatus === "review"
+                      ? "Saving will require confirming this lower-precision GPS fix."
+                      : "This fix is unreliable. Retry the capture before saving if possible."}
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Overall Comments</Label>

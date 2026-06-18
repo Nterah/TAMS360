@@ -27,6 +27,12 @@ import {
 } from "lucide-react";
 import { projectId } from "../../../../utils/supabase/info";
 import { toast } from "sonner";
+import {
+  buildGpsOverrideMessage,
+  captureBestGpsFix,
+  classifyGpsAccuracy,
+  shouldRequireGpsSaveOverride,
+} from "../../utils/gpsCapture";
 
 export default function MobileNewInspectionPage() {
   const navigate = useNavigate();
@@ -60,6 +66,7 @@ export default function MobileNewInspectionPage() {
   });
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+  const gpsAccuracyStatus = classifyGpsAccuracy(locationAccuracy);
 
 
 
@@ -113,38 +120,56 @@ export default function MobileNewInspectionPage() {
     }
   };
 
-  const getCurrentLocation = () => {
-    // Completely suppress geolocation errors
+  const getCurrentLocation = async () => {
     try {
       if (!navigator.geolocation) {
+        toast.error("Geolocation is not supported by your device");
         return;
       }
 
       setGettingLocation(true);
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude, accuracy } = position.coords;
-          setFormData((prev) => ({
-            ...prev,
-            latitude,
-            longitude,
-          }));
-          setLocationAccuracy(accuracy);
-          setGettingLocation(false);
-          toast.success(`Location captured (±${Math.round(accuracy)}m accuracy)`);
-        },
-        (error) => {
-          // Completely silent - no warnings, no errors
-          setGettingLocation(false);
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
-        }
-      );
-    } catch (error) {
-      // Suppress all geolocation errors completely
+      toast.info("Waiting for an accurate GPS fix...", { id: "mobile-inspection-gps" });
+
+      const fix = await captureBestGpsFix({
+        onProgress: (candidate) => setLocationAccuracy(candidate.accuracy),
+      });
+
+      setFormData((prev) => ({
+        ...prev,
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+      }));
+      setCurrentLocation({ lat: fix.latitude, lng: fix.longitude });
+      setLocationAccuracy(fix.accuracy);
+
+      const roundedAccuracy = Math.round(fix.accuracy);
+      const accuracyStatus = classifyGpsAccuracy(fix.accuracy);
+
+      if (accuracyStatus === "precise") {
+        toast.success(`Location captured (±${roundedAccuracy}m accuracy)`, {
+          id: "mobile-inspection-gps",
+        });
+      } else if (accuracyStatus === "acceptable") {
+        toast.warning(`Location captured with acceptable accuracy (±${roundedAccuracy}m).`, {
+          id: "mobile-inspection-gps",
+          duration: 6000,
+        });
+      } else if (accuracyStatus === "review") {
+        toast.warning(
+          `Location captured, but GPS accuracy is low (±${roundedAccuracy}m). Confirm before saving.`,
+          { id: "mobile-inspection-gps", duration: 7000 }
+        );
+      } else {
+        toast.error(
+          `GPS fix is very poor (±${roundedAccuracy}m). Retry before saving if possible.`,
+          { id: "mobile-inspection-gps", duration: 8000 }
+        );
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to capture your location", {
+        id: "mobile-inspection-gps",
+      });
+    } finally {
       setGettingLocation(false);
     }
   };
@@ -431,6 +456,15 @@ export default function MobileNewInspectionPage() {
     // Check template exists
     if (!componentTemplate || !componentTemplate.items || componentTemplate.items.length === 0) {
       toast.error("Cannot save inspection - no template loaded. Please select a different asset or contact an administrator.");
+      return;
+    }
+
+    if (
+      formData.latitude !== null &&
+      formData.longitude !== null &&
+      shouldRequireGpsSaveOverride(locationAccuracy) &&
+      !confirm(buildGpsOverrideMessage(locationAccuracy!))
+    ) {
       return;
     }
 
@@ -775,6 +809,17 @@ export default function MobileNewInspectionPage() {
                   )}
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {locationAccuracy === null
+                  ? "Capture GPS and aim for ±30m or better when possible."
+                  : gpsAccuracyStatus === "precise"
+                    ? "GPS is within the preferred range."
+                    : gpsAccuracyStatus === "acceptable"
+                      ? "Coordinates are usable, but waiting a little longer may improve the fix."
+                      : gpsAccuracyStatus === "review"
+                        ? "Saving will require confirming this lower-precision GPS fix."
+                        : "This fix is unreliable. Retry the capture before saving if possible."}
+              </p>
             </div>
 
             <div className="space-y-2">

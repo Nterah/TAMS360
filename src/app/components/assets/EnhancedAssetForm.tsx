@@ -10,6 +10,12 @@ import { Badge } from "../ui/badge";
 import { LocateFixed, RefreshCw, Info, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import {
+  buildGpsOverrideMessage,
+  captureBestGpsFix,
+  classifyGpsAccuracy,
+  shouldRequireGpsSaveOverride,
+} from "../../utils/gpsCapture";
 
 const ASSET_TYPE_ABBREVIATIONS: Record<string, string> = {
   "Signage": "SIG",
@@ -52,6 +58,8 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [detectingLocation, setDetectingLocation] = useState(false);
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+  const gpsAccuracyStatus = classifyGpsAccuracy(locationAccuracy);
 
   // Other asset fields
   const [assetName, setAssetName] = useState("");
@@ -82,40 +90,52 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
   // Don't auto-fetch sequential number - only fetch when user clicks refresh button
   // This prevents backend timeout errors on component mount
 
-  const detectLocation = () => {
+  const detectLocation = async () => {
     if (!navigator.geolocation) {
       toast.error("Geolocation is not supported by your browser");
       return;
     }
 
     setDetectingLocation(true);
-    toast.info("Detecting your location...");
+    toast.info("Waiting for an accurate GPS fix...", { id: "enhanced-asset-gps" });
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLatitude(position.coords.latitude.toFixed(6));
-        setLongitude(position.coords.longitude.toFixed(6));
-        toast.success(`Location detected: ${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`);
-        setDetectingLocation(false);
-      },
-      (error) => {
-        let errorMessage = "Unable to detect location";
-        if (error.code === error.PERMISSION_DENIED) {
-          errorMessage = "Location permission denied. Please enable location access in your browser settings.";
-        } else if (error.code === error.POSITION_UNAVAILABLE) {
-          errorMessage = "Location information unavailable. Please check your GPS settings.";
-        } else if (error.code === error.TIMEOUT) {
-          errorMessage = "Location request timed out. Please try again.";
-        }
-        toast.error(errorMessage);
-        setDetectingLocation(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
+    try {
+      const fix = await captureBestGpsFix({
+        onProgress: (candidate) => setLocationAccuracy(candidate.accuracy),
+      });
+
+      setLatitude(fix.latitude.toFixed(6));
+      setLongitude(fix.longitude.toFixed(6));
+      setLocationAccuracy(fix.accuracy);
+
+      const roundedAccuracy = Math.round(fix.accuracy);
+      const accuracyStatus = classifyGpsAccuracy(fix.accuracy);
+
+      if (accuracyStatus === "precise") {
+        toast.success(`Location detected (±${roundedAccuracy}m)`, { id: "enhanced-asset-gps" });
+      } else if (accuracyStatus === "acceptable") {
+        toast.warning(`Location detected with acceptable accuracy (±${roundedAccuracy}m).`, {
+          id: "enhanced-asset-gps",
+          duration: 6000,
+        });
+      } else if (accuracyStatus === "review") {
+        toast.warning(
+          `Location detected, but GPS accuracy is low (±${roundedAccuracy}m). Confirm before saving.`,
+          { id: "enhanced-asset-gps", duration: 7000 }
+        );
+      } else {
+        toast.error(
+          `GPS fix is very poor (±${roundedAccuracy}m). Retry or manually verify before saving.`,
+          { id: "enhanced-asset-gps", duration: 8000 }
+        );
       }
-    );
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to detect location", {
+        id: "enhanced-asset-gps",
+      });
+    } finally {
+      setDetectingLocation(false);
+    }
   };
 
   const fetchNextSequentialNumber = async () => {
@@ -210,6 +230,15 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
 
     if (!generatedAssetRef) {
       toast.error("Asset reference number is not generated");
+      return;
+    }
+
+    if (
+      latitude &&
+      longitude &&
+      shouldRequireGpsSaveOverride(locationAccuracy) &&
+      !confirm(buildGpsOverrideMessage(locationAccuracy!))
+    ) {
       return;
     }
 
@@ -409,7 +438,10 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
               type="number"
               step="any"
               value={latitude}
-              onChange={(e) => setLatitude(e.target.value)}
+              onChange={(e) => {
+                setLocationAccuracy(null);
+                setLatitude(e.target.value);
+              }}
               placeholder="-26.2041"
             />
           </div>
@@ -420,10 +452,42 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
               type="number"
               step="any"
               value={longitude}
-              onChange={(e) => setLongitude(e.target.value)}
+              onChange={(e) => {
+                setLocationAccuracy(null);
+                setLongitude(e.target.value);
+              }}
               placeholder="28.0473"
             />
           </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          {locationAccuracy !== null ? (
+            <>
+              <Badge
+                variant="outline"
+                className={
+                  gpsAccuracyStatus === "precise"
+                    ? "w-fit border-green-500 text-green-700"
+                    : gpsAccuracyStatus === "acceptable"
+                      ? "w-fit border-amber-500 text-amber-700"
+                      : "w-fit border-red-500 text-red-700"
+                }
+              >
+                Accuracy: ±{Math.round(locationAccuracy)}m
+              </Badge>
+              <p className="text-xs text-muted-foreground">
+                {gpsAccuracyStatus === "precise"
+                  ? "GPS is within the preferred range."
+                  : gpsAccuracyStatus === "acceptable"
+                    ? "Coordinates are usable, but waiting a little longer may improve the fix."
+                    : gpsAccuracyStatus === "review"
+                      ? "Saving will require confirming this lower-precision GPS fix."
+                      : "This fix is unreliable. Retry detection or manually verify the coordinates."}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">Capture GPS and aim for ±30m or better when possible.</p>
+          )}
         </div>
       </div>
 
