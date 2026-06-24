@@ -1,20 +1,20 @@
+import { AlertTriangle, Banknote, Calendar, ClipboardCheck, Clock, Edit, Eye, FileText, Filter, LayoutGrid, MoreVertical, Pencil, Plus, Search, Table as TableIcon, Trash2, TrendingUp, User, X } from "lucide-react";
 import { useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AuthContext } from "../../App";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { ClipboardCheck, Plus, Calendar, User, FileText, AlertTriangle, TrendingUp, MoreVertical, Eye, Edit, Trash2, Clock, Banknote, Filter, X, LayoutGrid, Table as TableIcon, Search, Pencil } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator } from "../ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Label } from "../ui/label";
-import { Input } from "../ui/input";
 import { toast } from "sonner";
 import { projectId } from "../../../../utils/supabase/info";
-import { useOffline } from "../offline/OfflineContext";
+import { AuthContext } from "../../App";
 import { InspectionsCacheService } from "../../utils/offlineCache";
+import { useOffline } from "../offline/OfflineContext";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { ColumnConfig, ColumnCustomizer } from "../ui/column-customizer";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { ColumnCustomizer, ColumnConfig } from "../ui/column-customizer";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 
 export default function InspectionsPage() {
@@ -299,7 +299,7 @@ export default function InspectionsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Asset Inspections</h1>
+          <h1 className="text-3xl font-bold mb-2">Asset Inspections85</h1>
           <p className="text-muted-foreground">Component-based inspections with Conditional Index scoring and urgency assessment</p>
         </div>
         <Button onClick={() => navigate("/inspections/new")}>
