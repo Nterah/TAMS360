@@ -299,7 +299,7 @@ export default function InspectionsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Asset Inspections85</h1>
+          <h1 className="text-3xl font-bold mb-2">Asset Inspections</h1>
           <p className="text-muted-foreground">Component-based inspections with Conditional Index scoring and urgency assessment</p>
         </div>
         <Button onClick={() => navigate("/inspections/new")}>
