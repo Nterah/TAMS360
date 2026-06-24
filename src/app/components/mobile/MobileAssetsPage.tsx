@@ -4,6 +4,8 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useNavigate } from "react-router-dom";
 import { useOffline } from "../offline/OfflineContext";
 import { AssetsCacheService } from "../../utils/offlineCache";
+import { mergePendingOfflineAssets } from "../../utils/offlineAssets";
+import { resolveAssetCoordinates } from "../../utils/assetDisplay";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
@@ -143,10 +145,11 @@ export default function MobileAssetsPage() {
   const loadCachedAssets = async (fallbackMessage?: string) => {
     const cached = await AssetsCacheService.getAll();
     const normalisedCached = normaliseAssets(cached);
+    const mergedCached = mergePendingOfflineAssets(normalisedCached).assets;
 
-    if (normalisedCached.length > 0) {
-      setAssets(normalisedCached);
-      setFilteredAssets(normalisedCached);
+    if (mergedCached.length > 0) {
+      setAssets(mergedCached);
+      setFilteredAssets(mergedCached);
       setLoadedFromCache(true);
       setLoadError("");
       return true;
@@ -198,9 +201,10 @@ export default function MobileAssetsPage() {
         [];
 
       const normalised = normaliseAssets(list);
+      const merged = mergePendingOfflineAssets(normalised).assets;
 
-      setAssets(normalised);
-      setFilteredAssets(normalised);
+      setAssets(merged);
+      setFilteredAssets(merged);
       setLoadedFromCache(false);
       await AssetsCacheService.setAll(normalised);
     } catch (error) {
@@ -367,7 +371,13 @@ export default function MobileAssetsPage() {
             <Card
               key={asset.id || `asset-${index}`}
               className="border-2 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
-              onClick={() => navigate(`/mobile/assets/${asset.asset_id || asset.id}`)}
+              onClick={() => {
+                if (asset.is_offline_pending) {
+                  toast.info("This asset is saved locally and will be fully available after sync.");
+                  return;
+                }
+                navigate(`/mobile/assets/${asset.asset_id || asset.id}`);
+              }}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-2">
@@ -382,6 +392,11 @@ export default function MobileAssetsPage() {
                           {asset.condition}
                         </span>
                       </Badge>
+                      {asset.is_offline_pending && (
+                        <Badge variant="secondary" className="text-xs">
+                          Pending Sync
+                        </Badge>
+                      )}
                     </div>
                     <h3 className="font-semibold text-sm mb-1 truncate">
                       {asset.description}
@@ -397,7 +412,8 @@ export default function MobileAssetsPage() {
                   <div className="flex items-center gap-1">
                     <MapPin className="w-3.5 h-3.5" />
                     <span>
-                      {(asset.gps_lat || asset.latitude)?.toFixed(4)}, {(asset.gps_lng || asset.longitude)?.toFixed(4)}
+                      {resolveAssetCoordinates(asset, { rejectNullIsland: true })?.lat.toFixed(4) ?? "-"},{" "}
+                      {resolveAssetCoordinates(asset, { rejectNullIsland: true })?.lng.toFixed(4) ?? "-"}
                     </span>
                   </div>
                   <Button
@@ -406,6 +422,10 @@ export default function MobileAssetsPage() {
                     className="h-6 px-2 text-xs gap-1"
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (asset.is_offline_pending) {
+                        toast.info("Sync this asset first before opening it on the map.");
+                        return;
+                      }
                       navigate(`/mobile/map?asset=${asset.asset_id || asset.id}`);
                     }}
                   >

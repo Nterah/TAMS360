@@ -21,6 +21,7 @@ import { ColumnCustomizer, ColumnConfig } from "../ui/column-customizer";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import EnhancedAssetForm from "./EnhancedAssetForm";
 import { requiresMigration, handleMigrationRequired } from "../../utils/migrationHelper";
+import { mergePendingOfflineAssets, removePendingOfflineAsset, storeRecentVisibleAsset } from "../../utils/offlineAssets";
 
 import {
   getCIDisplay,
@@ -162,9 +163,10 @@ export default function AssetsPage() {
       if (response.ok) {
         const data = await response.json();
         const firstPageAssets = (data.assets || []).map(normaliseAssetForDisplay);
+        const initialMerged = mergePendingOfflineAssets(firstPageAssets);
 
-        setAssets(firstPageAssets);
-        setTotalAssetCount(data.total || 0);
+        setAssets(initialMerged.assets);
+        setTotalAssetCount((data.total || 0) + initialMerged.pendingCount);
         
         // Load more pages if needed (up to 2000 assets for table display)
         if (data.totalPages > 1) {
@@ -180,7 +182,9 @@ export default function AssetsPage() {
               allAssets.push(...(pageData.assets || []).map(normaliseAssetForDisplay));
             }
           }
-          setAssets(allAssets);
+          const mergedAllAssets = mergePendingOfflineAssets(allAssets);
+          setAssets(mergedAllAssets.assets);
+          setTotalAssetCount((data.total || allAssets.length) + mergedAllAssets.pendingCount);
         }
       }
     } catch (error) {
@@ -263,8 +267,27 @@ export default function AssetsPage() {
       });
 
       if (response.ok) {
+        const result = await response.json().catch(() => ({}));
         toast.success("Asset created successfully!");
         setIsAddDialogOpen(false);
+        storeRecentVisibleAsset({
+          ...newAsset,
+          ...(result?.asset || result?.data || result || {}),
+          asset_ref: result?.asset?.asset_ref || result?.data?.asset_ref || newAsset.referenceNumber,
+          asset_type: result?.asset?.asset_type || result?.data?.asset_type || newAsset.type,
+          asset_type_name: result?.asset?.asset_type_name || result?.data?.asset_type_name || newAsset.type,
+          gps_lat: result?.asset?.gps_lat ?? result?.data?.gps_lat ?? newAsset.latitude,
+          gps_lng: result?.asset?.gps_lng ?? result?.data?.gps_lng ?? newAsset.longitude,
+          latitude: result?.asset?.latitude ?? result?.data?.latitude ?? newAsset.latitude,
+          longitude: result?.asset?.longitude ?? result?.data?.longitude ?? newAsset.longitude,
+          region_name: result?.asset?.region_name ?? result?.data?.region_name ?? newAsset.region,
+          depot_name: result?.asset?.depot_name ?? result?.data?.depot_name ?? newAsset.depot,
+          road_name: result?.asset?.road_name ?? result?.data?.road_name ?? newAsset.roadName,
+          road_number: result?.asset?.road_number ?? result?.data?.road_number ?? newAsset.roadNumber,
+          owner_name: result?.asset?.owner_name ?? result?.data?.owner_name ?? newAsset.owner,
+          status_name: result?.asset?.status_name ?? result?.data?.status_name ?? newAsset.status,
+          latest_condition: result?.asset?.latest_condition ?? result?.data?.latest_condition ?? newAsset.condition,
+        });
         fetchAssets();
         // Reset form
         setNewAsset({
@@ -435,19 +458,35 @@ export default function AssetsPage() {
     return { label: "Poor", variant: "destructive" as const };
   };
 
-  const handleViewAsset = (assetId: string) => {
-    navigate(`/assets/${assetId}`);
+  const handleViewAsset = (asset: any) => {
+    if (asset.is_offline_pending) {
+      toast.info("This asset is saved locally and will be fully available after sync.");
+      return;
+    }
+    navigate(`/assets/${asset.asset_id}`);
   };
 
-  const handleEditAsset = (assetId: string) => {
-    navigate(`/assets/${assetId}/edit`);
+  const handleEditAsset = (asset: any) => {
+    if (asset.is_offline_pending) {
+      toast.info("Pending offline assets can't be edited here until they sync.");
+      return;
+    }
+    navigate(`/assets/${asset.asset_id}/edit`);
   };
 
-  const handleDeleteAsset = async (assetId: string) => {
+  const handleDeleteAsset = async (asset: any) => {
     if (!confirm("Are you sure you want to delete this asset?")) return;
+
+    if (asset.is_offline_pending) {
+      removePendingOfflineAsset(asset.asset_id);
+      setAssets((current) => current.filter((row) => String(row.asset_id) !== String(asset.asset_id)));
+      setTotalAssetCount((current) => Math.max(0, current - 1));
+      toast.success("Pending offline asset removed.");
+      return;
+    }
     
     try {
-      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+      const response = await fetch(`${API_URL}/assets/${asset.asset_id}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -529,6 +568,23 @@ export default function AssetsPage() {
                       body: JSON.stringify({
                         ...assetData,
                         uniqueId: `${assetData.type.substring(0, 2).toUpperCase()}-${Date.now()}`,
+                        // Ensure canonical GPS fields are always populated
+                        gps_lat: assetData.latitude ? parseFloat(assetData.latitude) : null,
+                        gps_lng: assetData.longitude ? parseFloat(assetData.longitude) : null,
+                        end_latitude: assetData.endLatitude ? parseFloat(assetData.endLatitude) : null,
+                        end_longitude: assetData.endLongitude ? parseFloat(assetData.endLongitude) : null,
+                        // Field name aliases expected by the backend
+                        asset_ref: assetData.referenceNumber,
+                        asset_type: assetData.type,
+                        asset_type_name: assetData.type,
+                        road_number: assetData.roadNumber,
+                        road_name: assetData.roadName,
+                        install_date: assetData.installDate,
+                        expected_life: assetData.expectedLife,
+                        replacement_value: assetData.replacementValue,
+                        installation_cost: assetData.installationCost,
+                        responsible_party: assetData.responsibleParty,
+                        installer_name: assetData.installer,
                       }),
                       signal: controller.signal,
                     });
@@ -539,6 +595,24 @@ export default function AssetsPage() {
                       const result = await response.json();
                       toast.success("Asset created successfully!", { id: "create-asset" });
                       setIsAddDialogOpen(false);
+                      storeRecentVisibleAsset({
+                        ...assetData,
+                        ...(result?.asset || result?.data || result || {}),
+                        asset_ref: result?.asset?.asset_ref || result?.data?.asset_ref || assetData.referenceNumber,
+                        asset_type: result?.asset?.asset_type || result?.data?.asset_type || assetData.type,
+                        asset_type_name: result?.asset?.asset_type_name || result?.data?.asset_type_name || assetData.type,
+                        gps_lat: result?.asset?.gps_lat ?? result?.data?.gps_lat ?? assetData.latitude,
+                        gps_lng: result?.asset?.gps_lng ?? result?.data?.gps_lng ?? assetData.longitude,
+                        latitude: result?.asset?.latitude ?? result?.data?.latitude ?? assetData.latitude,
+                        longitude: result?.asset?.longitude ?? result?.data?.longitude ?? assetData.longitude,
+                        region_name: result?.asset?.region_name ?? result?.data?.region_name ?? assetData.region,
+                        depot_name: result?.asset?.depot_name ?? result?.data?.depot_name ?? assetData.depot,
+                        road_name: result?.asset?.road_name ?? result?.data?.road_name ?? assetData.roadName,
+                        road_number: result?.asset?.road_number ?? result?.data?.road_number ?? assetData.roadNumber,
+                        owner_name: result?.asset?.owner_name ?? result?.data?.owner_name ?? assetData.owner,
+                        status_name: result?.asset?.status_name ?? result?.data?.status_name ?? assetData.status,
+                        latest_condition: result?.asset?.latest_condition ?? result?.data?.latest_condition ?? assetData.condition,
+                      });
                       fetchAssets();
                     } else {
                       const error = await response.json().catch(() => ({ error: "Unknown error" }));
@@ -869,7 +943,7 @@ export default function AssetsPage() {
                           <Button 
                             variant="ghost" 
                             size="sm"
-                            onClick={() => handleViewAsset(asset.asset_id)}
+                            onClick={() => handleViewAsset(asset)}
                             className="h-8 w-8 p-0"
                             title="View details"
                           >
@@ -878,7 +952,7 @@ export default function AssetsPage() {
                           <Button 
                             variant="ghost" 
                             size="sm"
-                            onClick={() => handleEditAsset(asset.asset_id)}
+                            onClick={() => handleEditAsset(asset)}
                             className="h-8 w-8 p-0"
                             title="Edit asset"
                           >
@@ -887,7 +961,7 @@ export default function AssetsPage() {
                           <Button 
                             variant="ghost" 
                             size="sm"
-                            onClick={() => handleDeleteAsset(asset.asset_id)}
+                            onClick={() => handleDeleteAsset(asset)}
                             className="h-8 w-8 p-0"
                             title="Delete asset"
                           >
@@ -896,7 +970,12 @@ export default function AssetsPage() {
                         </div>
                       </TableCell>
                       {columns.find(c => c.id === "asset_ref")?.visible && (
-                        <TableCell className="font-medium">{asset.asset_ref || "N/A"}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{asset.asset_ref || "N/A"}</span>
+                            {asset.is_offline_pending && <Badge variant="secondary">Pending Sync</Badge>}
+                          </div>
+                        </TableCell>
                       )}
                       {columns.find(c => c.id === "asset_type")?.visible && (
                         <TableCell>
@@ -1018,6 +1097,7 @@ export default function AssetsPage() {
                         <h4 className="font-semibold">{asset.asset_ref || "N/A"}</h4>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">{asset.asset_type_name || "Unknown"}</Badge>
+                          {asset.is_offline_pending && <Badge variant="secondary">Pending Sync</Badge>}
                           <Badge className={ciDisplay.className} title={ciDisplay.label}>
                             CI: {ciDisplay.label}
                           </Badge>
@@ -1058,7 +1138,7 @@ export default function AssetsPage() {
                       <Button 
                         variant="outline" 
                         size="sm" 
-                        onClick={() => handleViewAsset(asset.asset_id)}
+                        onClick={() => handleViewAsset(asset)}
                       >
                         <Eye className="w-4 h-4 mr-1" />
                         View Details
@@ -1070,12 +1150,12 @@ export default function AssetsPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditAsset(asset.asset_id)}>
+                          <DropdownMenuItem onClick={() => handleEditAsset(asset)}>
                             <Edit className="h-4 w-4 mr-2" />
                             Update
                           </DropdownMenuItem>
                           <DropdownMenuItem 
-                            onClick={() => handleDeleteAsset(asset.asset_id)}
+                            onClick={() => handleDeleteAsset(asset)}
                             className="text-destructive"
                           >
                             <Trash2 className="h-4 w-4 mr-2" />

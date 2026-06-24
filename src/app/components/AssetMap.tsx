@@ -7,6 +7,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { MapPin, Eye } from 'lucide-react';
 import { Button } from './ui/button';
 import { createRoot } from 'react-dom/client';
+import { resolveAssetCoordinates } from '../utils/assetDisplay';
 
 // Asset interface matching the actual data structure
 export interface Asset {
@@ -112,11 +113,7 @@ export function AssetMap({
 
   // Filter assets with valid GPS coordinates
   const assetsWithGPS = assets.filter(
-    asset => {
-      const lat = asset.gps_lat || asset.gps_latitude || asset.latitude;
-      const lng = asset.gps_lng || asset.gps_longitude || asset.longitude;
-      return lat && lng;
-    }
+    asset => resolveAssetCoordinates(asset, { rejectNullIsland: true }) !== null
   );
 
   console.log('AssetMap Debug:', {
@@ -222,12 +219,10 @@ export function AssetMap({
     // Add new markers
     assetsWithGPS.forEach((asset) => {
       const ciBadge = getCIBadge(asset.latest_ci);
-      const lat = asset.gps_lat || asset.gps_latitude || asset.latitude;
-      const lng = asset.gps_lng || asset.gps_longitude || asset.longitude;
+      const coordinates = resolveAssetCoordinates(asset, { rejectNullIsland: true });
+      if (!coordinates) return;
 
-      if (!lat || !lng) return; // Safety check
-
-      const marker = L.marker([lat, lng], {
+      const marker = L.marker([coordinates.lat, coordinates.lng], {
         icon: createCustomIcon(asset.asset_type, asset.latest_ci),
         asset: asset // Store asset data in marker options
       });
@@ -326,11 +321,10 @@ export function AssetMap({
 
     // Fit bounds if we have markers - handle outliers by using padding and max zoom
     if (assetsWithGPS.length > 0) {
-      const latLngs = assetsWithGPS.map(asset => {
-        const lat = asset.gps_lat || asset.gps_latitude || asset.latitude!;
-        const lng = asset.gps_lng || asset.gps_longitude || asset.longitude!;
-        return [lat, lng] as [number, number];
-      });
+      const latLngs = assetsWithGPS
+        .map(asset => resolveAssetCoordinates(asset, { rejectNullIsland: true }))
+        .filter(Boolean)
+        .map(({ lat, lng }) => [lat, lng] as [number, number]);
       
       // Calculate bounds
       const bounds = L.latLngBounds(latLngs);

@@ -39,6 +39,10 @@ import {
 } from "../ui/sheet";
 import { Label } from "../ui/label";
 import { Checkbox } from "../ui/checkbox";
+import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from "../../utils/offlineAssets";
+import { resolveAssetCoordinates } from "../../utils/assetDisplay";
+import { captureBestGpsFix } from "../../utils/gpsCapture";
+import { toast } from "sonner";
 
 // Asset type icon SVG paths
 const ASSET_ICON_SHAPES = {
@@ -70,8 +74,8 @@ interface Asset {
   asset_ref: string;
   asset_type_name: string;
   description: string;
-  latitude: number;
-  longitude: number;
+  latitude?: number;
+  longitude?: number;
   condition: string;
   status: string;
   latest_ci?: number;
@@ -201,6 +205,52 @@ export default function MobileMapPage() {
   const userMarkerRef = useRef<L.Marker | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
 
+  const requestUserLocation = async ({
+    centerMap = false,
+    announceRequest = false,
+  }: {
+    centerMap?: boolean;
+    announceRequest?: boolean;
+  } = {}) => {
+    if (!navigator.geolocation) {
+      toast.error("Geolocation is not supported by your browser.");
+      return null;
+    }
+
+    if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") {
+      toast.error("Location requires a secure connection (HTTPS).");
+      return null;
+    }
+
+    if (announceRequest) {
+      toast.info("Requesting your location. Allow access when prompted.", {
+        id: "mobile-map-location",
+      });
+    }
+
+    setTrackingLocation(true);
+
+    try {
+      const fix = await captureBestGpsFix();
+      const userPos: [number, number] = [fix.latitude, fix.longitude];
+      setUserLocation(userPos);
+
+      if (centerMap && mapRef.current) {
+        mapRef.current.setView(userPos, 15);
+      }
+
+      return userPos;
+    } catch (error: any) {
+      console.error("Failed to get user location:", error);
+      toast.error(error?.message || "Unable to get your location.", {
+        id: "mobile-map-location",
+      });
+      return null;
+    } finally {
+      setTrackingLocation(false);
+    }
+  };
+
   // Initialize map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -267,28 +317,18 @@ export default function MobileMapPage() {
     fetchAssets();
   }, [accessToken, tenantId]);
 
+  useEffect(() => {
+    const handleAssetsChanged = () => {
+      fetchAssets();
+    };
+
+    window.addEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
+    return () => window.removeEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
+  }, [accessToken, tenantId]);
+
   // Get user's location
   useEffect(() => {
-    try {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const userPos: [number, number] = [
-              position.coords.latitude,
-              position.coords.longitude,
-            ];
-            setUserLocation(userPos);
-            if (mapRef.current && assets.length === 0) {
-              mapRef.current.setView(userPos, 13);
-            }
-          },
-          () => {}, // Silent error
-          { enableHighAccuracy: true }
-        );
-      }
-    } catch (error) {
-      // Suppress errors
-    }
+    void requestUserLocation({ centerMap: true });
   }, []);
 
   // Dynamically initialize layer visibility when assets change
@@ -423,9 +463,11 @@ export default function MobileMapPage() {
     // Add markers
     filteredAssets.forEach(asset => {
       if (!mapRef.current) return;
+      const coordinates = resolveAssetCoordinates(asset, { rejectNullIsland: true });
+      if (!coordinates) return;
 
       const icon = createAssetIcon(asset.asset_type_name, asset, colorMode);
-      const marker = L.marker([asset.latitude, asset.longitude], { icon });
+      const marker = L.marker([coordinates.lat, coordinates.lng], { icon });
       
       const popupContent = `
         <div class="min-w-[200px] p-2">
@@ -458,7 +500,10 @@ export default function MobileMapPage() {
     // Center on first asset if no user location
     if (filteredAssets.length > 0 && !userLocation) {
       const firstAsset = filteredAssets[0];
-      mapRef.current.setView([firstAsset.latitude, firstAsset.longitude], 13);
+      const coordinates = resolveAssetCoordinates(firstAsset, { rejectNullIsland: true });
+      if (coordinates) {
+        mapRef.current.setView([coordinates.lat, coordinates.lng], 13);
+      }
     }
 
     return () => {
@@ -472,24 +517,32 @@ export default function MobileMapPage() {
     try {
       const data = await api.get<{ assets: any[]; total: number }>("/assets?pageSize=5000");
       
-      const mappedAssets = (data.assets || []).map((asset: any) => ({
-        ...asset,
-        id: asset.asset_id || asset.id,
-        latitude: asset.gps_lat || asset.latitude,
-        longitude: asset.gps_lng || asset.longitude,
-        latest_ci: asset.latest_ci,
-        latest_urgency: asset.latest_urgency,
-        latest_condition: asset.latest_condition,
-        status_name: asset.status_name,
-        region_name: asset.region_name,
-        ward_name: asset.ward_name,
-        depot_name: asset.depot_name,
-        owner_name: asset.owner_name,
-        road_name: asset.road_name,
-      })).filter((asset: any) => asset.latitude && asset.longitude);
+      const mappedAssets = (data.assets || []).map((asset: any) => {
+        const coords = resolveAssetCoordinates(asset, { rejectNullIsland: true });
+
+        return {
+          ...asset,
+          id: asset.asset_id || asset.id,
+          latitude: coords?.lat,
+          longitude: coords?.lng,
+          latest_ci: asset.latest_ci,
+          latest_urgency: asset.latest_urgency,
+          latest_condition: asset.latest_condition,
+          status_name: asset.status_name,
+          region_name: asset.region_name,
+          ward_name: asset.ward_name,
+          depot_name: asset.depot_name,
+          owner_name: asset.owner_name,
+          road_name: asset.road_name,
+        };
+      });
+      const mergedAssets = mergePendingOfflineAssets(mappedAssets);
+      const mappableAssets = mergedAssets.assets.filter(
+        (asset: any) => resolveAssetCoordinates(asset, { rejectNullIsland: true }) !== null
+      );
       
-      setAssets(mappedAssets);
-      setTotalAssetsAvailable(data.total ?? data.count ?? data.assets?.length ?? mappedAssets.length);
+      setAssets(mappableAssets);
+      setTotalAssetsAvailable((data.total ?? data.count ?? data.assets?.length ?? mappedAssets.length) + mergedAssets.pendingCount);
     } catch (error) {
       console.error("Failed to fetch assets:", error);
     } finally {
@@ -499,30 +552,7 @@ export default function MobileMapPage() {
 
   const centerOnUser = () => {
     if (!userLocation) {
-      setTrackingLocation(true);
-      try {
-        if (!navigator.geolocation) {
-          setTrackingLocation(false);
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const userPos: [number, number] = [
-              position.coords.latitude,
-              position.coords.longitude,
-            ];
-            setUserLocation(userPos);
-            if (mapRef.current) {
-              mapRef.current.setView(userPos, 15);
-            }
-            setTrackingLocation(false);
-          },
-          () => setTrackingLocation(false),
-          { enableHighAccuracy: true }
-        );
-      } catch (error) {
-        setTrackingLocation(false);
-      }
+      void requestUserLocation({ centerMap: true, announceRequest: true });
     } else if (mapRef.current) {
       mapRef.current.setView(userLocation, 15);
     }

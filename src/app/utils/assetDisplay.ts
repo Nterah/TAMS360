@@ -397,13 +397,43 @@ export function normaliseGeometryType(value: any): GeometryKind {
   return "Point";
 }
 
-function isValidLatLng(lat: any, lng: any): boolean {
+export function isValidLatLng(lat: any, lng: any): boolean {
   const latNum = toNumber(lat);
   const lngNum = toNumber(lng);
 
   if (latNum === null || lngNum === null) return false;
 
   return latNum >= -90 && latNum <= 90 && lngNum >= -180 && lngNum <= 180;
+}
+
+export function isNullIslandLatLng(lat: any, lng: any): boolean {
+  const latNum = toNumber(lat);
+  const lngNum = toNumber(lng);
+
+  return latNum === 0 && lngNum === 0;
+}
+
+export function resolveAssetCoordinates(
+  source: any,
+  options: { rejectNullIsland?: boolean } = {}
+): { lat: number; lng: number } | null {
+  if (!source) return null;
+
+  const lat = firstDefined(source.gps_lat, source.gps_latitude, source.latitude);
+  const lng = firstDefined(source.gps_lng, source.gps_longitude, source.longitude);
+
+  if (!isValidLatLng(lat, lng)) return null;
+
+  const resolved = {
+    lat: Number(lat),
+    lng: Number(lng),
+  };
+
+  if (options.rejectNullIsland && isNullIslandLatLng(resolved.lat, resolved.lng)) {
+    return null;
+  }
+
+  return resolved;
 }
 
 function pointFromLatLng(lat: any, lng: any): [number, number] | null {

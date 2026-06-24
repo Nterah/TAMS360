@@ -2,6 +2,8 @@ import { useState, useEffect, useContext } from "react";
 import { AuthContext } from "../../App";
 import { useTenant } from "../../contexts/TenantContext";
 import { useNavigate } from "react-router-dom";
+import { useOffline } from "../offline/OfflineContext";
+import { InspectionsCacheService } from "../../utils/offlineCache";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
@@ -42,19 +44,22 @@ interface Inspection {
 export default function MobileInspectionsPage() {
   const { accessToken } = useContext(AuthContext);
   const { tenantId } = useTenant();
+  const { isOnline } = useOffline();
   const navigate = useNavigate();
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [filteredInspections, setFilteredInspections] = useState<Inspection[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [loadedFromCache, setLoadedFromCache] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterUrgency, setFilterUrgency] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
 
   // Fetch inspections
   useEffect(() => {
+    if (!accessToken) return;
     fetchInspections();
-  }, [accessToken, tenantId]);
+  }, [accessToken, tenantId, isOnline]);
 
   // Apply filters
   useEffect(() => {
@@ -92,14 +97,49 @@ export default function MobileInspectionsPage() {
     setFilteredInspections(filtered);
   }, [searchQuery, filterUrgency, inspections]);
 
+  const normaliseInspections = (list: any[]) =>
+    list.map((inspection: any) => ({
+      ...inspection,
+      inspection_id: inspection.inspection_id || inspection.id,
+    }));
+
+  const loadCachedInspections = async (fallbackMessage?: string) => {
+    const cached = await InspectionsCacheService.getAll();
+    const normalisedCached = normaliseInspections(cached);
+
+    if (normalisedCached.length > 0) {
+      setInspections(normalisedCached);
+      setFilteredInspections(normalisedCached);
+      setLoadedFromCache(true);
+      setLoadError("");
+      return true;
+    }
+
+    setInspections([]);
+    setFilteredInspections([]);
+    setLoadedFromCache(false);
+    setLoadError(fallbackMessage || "Failed to load inspections");
+    return false;
+  };
+
 
 
 
   
   const fetchInspections = async () => {
+    if (!accessToken) return;
+
     const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
     try {
+      setLoading(true);
+      setLoadError("");
+
+      if (!isOnline) {
+        await loadCachedInspections("No cached inspections available offline");
+        return;
+      }
+
       const response = await fetch(`${API_URL}/inspections?pageSize=5000`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -109,18 +149,26 @@ export default function MobileInspectionsPage() {
       if (response.ok) {
         const data = await response.json();
         const list = data.inspections || data.rows || data.data || [];
-        setInspections(Array.isArray(list) ? list : []);
-        setFilteredInspections(Array.isArray(list) ? list : []);
+        const normalised = normaliseInspections(Array.isArray(list) ? list : []);
+        setInspections(normalised);
+        setFilteredInspections(normalised);
+        setLoadedFromCache(false);
         setLoadError("");
+        await InspectionsCacheService.setAll(normalised);
       } else {
         const errorText = await response.text();
-        setLoadError(errorText || "Failed to load inspections");
-        setInspections([]);
-        setFilteredInspections([]);
+        const loadedCached = await loadCachedInspections(errorText || "Failed to load inspections");
+        if (!loadedCached) {
+          setLoadError(errorText || "Failed to load inspections");
+        }
       }
     } catch (error: any) {
       console.error("Failed to fetch inspections:", error);
-      setLoadError(error?.message || "Failed to load inspections");
+      const message = error?.message || "Failed to load inspections";
+      const loadedCached = await loadCachedInspections(message);
+      if (!loadedCached) {
+        setLoadError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -226,6 +274,11 @@ export default function MobileInspectionsPage() {
         <p className="text-sm text-slate-600 dark:text-slate-400">
           {filteredInspections.length} inspection{filteredInspections.length !== 1 ? "s" : ""} loaded
         </p>
+        {loadedFromCache && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+            Showing cached inspections because the device is offline.
+          </p>
+        )}
       </div>
 
       {/* Inspections List */}

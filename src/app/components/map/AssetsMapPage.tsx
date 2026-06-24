@@ -7,8 +7,10 @@ import { AssetMap, Asset } from '../AssetMap';
 import { MapFilters, MapFilterState } from '../MapFilters';
 import { Map, LayoutGrid, RefreshCw, Maximize2, Minimize2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from '../../utils/offlineAssets';
+import { resolveAssetCoordinates } from '../../utils/assetDisplay';
 
 export default function AssetsMapPage() {
   const { accessToken, user } = useContext(AuthContext);
@@ -30,27 +32,42 @@ export default function AssetsMapPage() {
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   useEffect(() => {
+    if (!accessToken) return;
     fetchAssets();
-  }, []);
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+
+    const handleAssetsChanged = () => {
+      fetchAssets();
+    };
+
+    window.addEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
+    return () => window.removeEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
+  }, [accessToken]);
 
   const fetchAssets = async () => {
+    if (!accessToken) return;
+
     setLoading(true);
     setError(null);
     try {
       // Fetch first page with count
       const response = await fetch(`${API_URL}/assets?pageSize=500`, {
         headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
 
       if (response.ok) {
         const data = await response.json();
         const fetchedAssets = data.assets || [];
-        setAssets(fetchedAssets);
+        const mergedAssets = mergePendingOfflineAssets(fetchedAssets).assets;
+        setAssets(mergedAssets);
 
         // Initialize asset type filters to show all by default
-        const types = new Set(fetchedAssets.map((a: Asset) => a.asset_type).filter(Boolean));
+        const types = new Set(mergedAssets.map((a: Asset) => a.asset_type).filter(Boolean));
         setFilters(prev => ({ ...prev, assetTypes: types }));
 
         // Load more pages if needed (up to 2000 assets for map display)
@@ -59,7 +76,7 @@ export default function AssetsMapPage() {
           for (let page = 2; page <= Math.min(data.totalPages, 4); page++) {
             const pageResponse = await fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
               headers: {
-                Authorization: `Bearer ${accessToken || publicAnonKey}`,
+                Authorization: `Bearer ${accessToken}`,
               },
             });
             if (pageResponse.ok) {
@@ -67,8 +84,9 @@ export default function AssetsMapPage() {
               allAssets.push(...(pageData.assets || []));
             }
           }
-          setAssets(allAssets);
-          const allTypes = new Set(allAssets.map((a: Asset) => a.asset_type).filter(Boolean));
+          const mergedAllAssets = mergePendingOfflineAssets(allAssets).assets;
+          setAssets(mergedAllAssets);
+          const allTypes = new Set(mergedAllAssets.map((a: Asset) => a.asset_type).filter(Boolean));
           setFilters(prev => ({ ...prev, assetTypes: allTypes }));
         }
       } else {
@@ -153,6 +171,10 @@ export default function AssetsMapPage() {
 
     return true;
   });
+
+  const assetsWithCoordinatesCount = assets.filter(
+    (asset) => resolveAssetCoordinates(asset, { rejectNullIsland: true }) !== null
+  ).length;
 
   // Extract unique values for filters
   const availableTypes = Array.from(new Set(assets.map(a => a.asset_type).filter(Boolean)));
@@ -240,10 +262,10 @@ export default function AssetsMapPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-[#010D13]">
-                {assets.filter(a => a.gps_lat && a.gps_lng).length}
+                {assetsWithCoordinatesCount}
               </div>
               <p className="text-xs text-[#455B5E] mt-1">
-                {Math.round((assets.filter(a => a.gps_lat && a.gps_lng).length / Math.max(assets.length, 1)) * 100)}% coverage
+                {Math.round((assetsWithCoordinatesCount / Math.max(assets.length, 1)) * 100)}% coverage
               </p>
             </CardContent>
           </Card>

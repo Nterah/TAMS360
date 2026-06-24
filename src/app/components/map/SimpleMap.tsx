@@ -15,6 +15,7 @@ import {
   getUrgencyDisplay,
   resolveCI,
   resolveUrgency,
+  resolveAssetCoordinates,
 } from "../../utils/assetDisplay";
 
 interface SimpleMapProps {
@@ -578,12 +579,11 @@ export function SimpleMap({
     const markers: L.Marker[] = [];
     
     assets.forEach(asset => {
-      if (!asset.latitude || !asset.longitude) {
-        return;
-      }
+      const coordinates = resolveAssetCoordinates(asset, { rejectNullIsland: true });
+      if (!coordinates) return;
 
       const marker = L.marker(
-        [asset.latitude, asset.longitude],
+        [coordinates.lat, coordinates.lng],
         { icon: createAssetIcon(asset.type, asset, colorMode) }
       );
 

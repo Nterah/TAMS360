@@ -24,6 +24,17 @@ import {
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import {
+  addPendingOfflineAsset,
+  storeRecentVisibleAsset,
+} from "../../utils/offlineAssets";
+import {
+  buildGpsOverrideMessage,
+  captureBestGpsFix,
+  classifyGpsAccuracy,
+  shouldRequireGpsSaveOverride,
+} from "../../utils/gpsCapture";
+import { resolveAssetCoordinates } from "../../utils/assetDisplay";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -398,6 +409,7 @@ export default function FieldCapturePage() {
 });
 
   const assetTypeNames = useMemo(() => assetTypes.map((type) => type.name), [assetTypes]);
+  const gpsAccuracyStatus = classifyGpsAccuracy(locationAccuracy);
 
   const updateField = (field: keyof CaptureFormData, value: string) => {
     setFormData((current) => ({ ...current, [field]: value }));
@@ -550,46 +562,49 @@ export default function FieldCapturePage() {
     }
   };
 
-  const getCurrentLocation = () => {
+  const getCurrentLocation = async () => {
     try {
       if (!navigator.geolocation) return;
       setGettingLocation(true);
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const accuracy = position.coords.accuracy;
-          setLocationAccuracy(accuracy);
+      toast.info("Waiting for an accurate GPS fix...", { id: "field-capture-gps" });
 
-          if (accuracy > 1000) {
-            setGettingLocation(false);
-            toast.warning(
-              `GPS accuracy is poor (±${Math.round(accuracy)}m). Please manually confirm the latitude/longitude before saving.`,
-              { duration: 7000 }
-            );
+      const fix = await captureBestGpsFix({
+        onProgress: (candidate) => setLocationAccuracy(candidate.accuracy),
+      });
 
-            setFormData((current) => ({
-              ...current,
-              latitude: position.coords.latitude.toFixed(6),
-              longitude: position.coords.longitude.toFixed(6),
-            }));
+      setLocationAccuracy(fix.accuracy);
+      setFormData((current) => ({
+        ...current,
+        latitude: fix.latitude.toFixed(6),
+        longitude: fix.longitude.toFixed(6),
+      }));
 
-            return;
-          }
+      const roundedAccuracy = Math.round(fix.accuracy);
+      const accuracyStatus = classifyGpsAccuracy(fix.accuracy);
 
-          setFormData((current) => ({
-            ...current,
-            latitude: position.coords.latitude.toFixed(6),
-            longitude: position.coords.longitude.toFixed(6),
-          }));
-
-          setGettingLocation(false);
-          toast.success(`Location captured (±${Math.round(accuracy)}m)`);
-        },
-        () => {
-          setGettingLocation(false);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    } catch {
+      if (accuracyStatus === "precise") {
+        toast.success(`Location captured (±${roundedAccuracy}m)`, { id: "field-capture-gps" });
+      } else if (accuracyStatus === "acceptable") {
+        toast.warning(`Location captured with acceptable accuracy (±${roundedAccuracy}m).`, {
+          id: "field-capture-gps",
+          duration: 6000,
+        });
+      } else if (accuracyStatus === "review") {
+        toast.warning(
+          `Location captured, but GPS accuracy is low (±${roundedAccuracy}m). Confirm before saving.`,
+          { id: "field-capture-gps", duration: 7000 }
+        );
+      } else {
+        toast.error(
+          `GPS fix is very poor (±${roundedAccuracy}m). Retry or manually verify before saving.`,
+          { id: "field-capture-gps", duration: 8000 }
+        );
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "Unable to capture your location", {
+        id: "field-capture-gps",
+      });
+    } finally {
       setGettingLocation(false);
     }
   };
@@ -642,34 +657,57 @@ export default function FieldCapturePage() {
       toast.error("Please enter or generate description");
       return;
     }
-    if (!formData.latitude || !formData.longitude) {
-      toast.warning("GPS location not captured. Asset will be saved without coordinates.");
+
+    const resolvedCoordinates = resolveAssetCoordinates(
+      {
+        latitude: formData.latitude,
+        longitude: formData.longitude,
+      },
+      { rejectNullIsland: true }
+    );
+
+    if (!resolvedCoordinates) {
+      toast.error("A valid GPS location is required. On the Android simulator, set a mock location before saving.");
+      return;
     }
 
-    if (locationAccuracy && locationAccuracy > 100) {
-      toast.warning(
-        `GPS accuracy is low: ±${Math.round(locationAccuracy)}m. Asset will still be saved.`
-      );
+    if (
+      formData.latitude &&
+      formData.longitude &&
+      shouldRequireGpsSaveOverride(locationAccuracy) &&
+      !confirm(buildGpsOverrideMessage(locationAccuracy!))
+    ) {
+      return;
     }
+
+    const assetData = {
+      ...formData,
+      assetReference: finalReference,
+      description: finalDescription,
+      latitude: resolvedCoordinates.lat.toFixed(6),
+      longitude: resolvedCoordinates.lng.toFixed(6),
+      photos: photos.map((p) => p.file.name),
+      capturedAt: new Date().toISOString(),
+      capturedBy: user?.id,
+      tenantId,
+      offline: !isOnline,
+    };
 
     setSaving(true);
     try {
-      const assetData = {
-        ...formData,
-        assetReference: finalReference,
-        description: finalDescription,
-        photos: photos.map((p) => p.file.name),
-        capturedAt: new Date().toISOString(),
-        capturedBy: user?.id,
-        tenantId,
-        offline: !isOnline,
-      };
-
       if (isOnline) await saveOnline(assetData);
       else saveOffline(assetData);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Save error:", error);
-      toast.error("Failed to save asset");
+
+      const message = error?.message || "Failed to save asset";
+      if (isOnline && (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("aborted"))) {
+        toast.warning("Connection dropped while saving. Saving offline instead.");
+        saveOffline(assetData);
+        return;
+      }
+
+      toast.error(message);
       setSaving(false);
     }
   };
@@ -679,7 +717,8 @@ export default function FieldCapturePage() {
     for (const photo of photos) {
       const uploadFormData = new FormData();
       uploadFormData.append("file", photo.file);
-      uploadFormData.append("bucket", "asset-photos");
+      uploadFormData.append("bucket", "tams360-inspection-photos");
+      uploadFormData.append("folderPath", assetData.assetReference);
 
       const uploadResponse = await fetch(`${API_URL}/storage/upload`, {
         method: "POST",
@@ -783,6 +822,29 @@ export default function FieldCapturePage() {
     const savedAsset = saved?.asset || saved?.data || saved;
 
     toast.success(`Asset saved: ${assetData.assetReference}`);
+    storeRecentVisibleAsset({
+      ...assetData,
+      ...savedAsset,
+      asset_id: savedAsset?.asset_id || savedAsset?.id,
+      id: savedAsset?.asset_id || savedAsset?.id || assetData.assetReference,
+      asset_ref: savedAsset?.asset_ref || assetData.assetReference,
+      asset_type: savedAsset?.asset_type || assetData.assetType,
+      asset_type_name: savedAsset?.asset_type_name || assetData.assetType,
+      gps_lat: savedAsset?.gps_lat ?? assetData.latitude,
+      gps_lng: savedAsset?.gps_lng ?? assetData.longitude,
+      latitude: savedAsset?.latitude ?? assetData.latitude,
+      longitude: savedAsset?.longitude ?? assetData.longitude,
+      road_name:
+        savedAsset?.road_name ??
+        (assetData.roadSubsection ? `${assetData.roadName}${assetData.roadSubsection}` : assetData.roadName),
+      road_number: savedAsset?.road_number ?? assetData.roadName,
+      owner_name: savedAsset?.owner_name ?? assetData.owner ?? null,
+      depot_name: savedAsset?.depot_name ?? assetData.depot ?? null,
+      region_name: savedAsset?.region_name ?? assetData.region ?? null,
+      ward_name: savedAsset?.ward_name ?? assetData.ward ?? null,
+      status_name: savedAsset?.status_name ?? assetData.status ?? "Active",
+      latest_condition: savedAsset?.latest_condition ?? assetData.condition,
+    });
     setSaving(false);
 
     if (savedAsset?.asset_id) {
@@ -795,14 +857,12 @@ export default function FieldCapturePage() {
   };
 
   const saveOffline = (assetData: any) => {
-    const offlineAssets = JSON.parse(localStorage.getItem("offline_assets") || "[]");
-    offlineAssets.push({
+    addPendingOfflineAsset({
       ...assetData,
       id: `offline_${Date.now()}`,
       photos: photos.map((p) => ({ name: p.file.name, data: p.preview })),
       sync_status: "pending",
     });
-    localStorage.setItem("offline_assets", JSON.stringify(offlineAssets));
     toast.success("Asset saved offline. It will need to sync when online.");
     setSaving(false);
     navigate("/mobile/assets");
@@ -836,10 +896,45 @@ export default function FieldCapturePage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5"><Label className="text-xs">Latitude</Label><Input value={formData.latitude} onChange={(e) => updateField("latitude", e.target.value)} placeholder="0.000000" className="h-9 text-sm" /></div>
-              <div className="space-y-1.5"><Label className="text-xs">Longitude</Label><Input value={formData.longitude} onChange={(e) => updateField("longitude", e.target.value)} placeholder="0.000000" className="h-9 text-sm" /></div>
+              <div className="space-y-1.5"><Label className="text-xs">Latitude</Label><Input value={formData.latitude} onChange={(e) => { setLocationAccuracy(null); updateField("latitude", e.target.value); }} placeholder="0.000000" className="h-9 text-sm" /></div>
+              <div className="space-y-1.5"><Label className="text-xs">Longitude</Label><Input value={formData.longitude} onChange={(e) => { setLocationAccuracy(null); updateField("longitude", e.target.value); }} placeholder="0.000000" className="h-9 text-sm" /></div>
             </div>
-            {locationAccuracy && <p className="text-xs text-muted-foreground">Accuracy: ±{locationAccuracy.toFixed(0)}m</p>}
+            {locationAccuracy !== null ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <Badge
+                    variant="outline"
+                    className={
+                      gpsAccuracyStatus === "precise"
+                        ? "border-green-500 text-green-700"
+                        : gpsAccuracyStatus === "acceptable"
+                          ? "border-amber-500 text-amber-700"
+                          : "border-red-500 text-red-700"
+                    }
+                  >
+                    {gpsAccuracyStatus === "precise"
+                      ? "Precise GPS"
+                      : gpsAccuracyStatus === "acceptable"
+                        ? "Acceptable GPS"
+                        : gpsAccuracyStatus === "review"
+                          ? "Confirm before save"
+                          : "Retry GPS capture"}
+                  </Badge>
+                  <p className="text-xs text-muted-foreground">Accuracy: ±{locationAccuracy.toFixed(0)}m</p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {gpsAccuracyStatus === "precise"
+                    ? "GPS is within the preferred range."
+                    : gpsAccuracyStatus === "acceptable"
+                      ? "Coordinates are usable, but wait for a better fix if possible."
+                      : gpsAccuracyStatus === "review"
+                        ? "Location was captured, but saving requires confirming this lower-precision fix."
+                        : "This fix is unreliable. Retry capture or manually verify the coordinates."}
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Capture GPS and aim for ±30m or better when possible.</p>
+            )}
             <Button onClick={getCurrentLocation} disabled={gettingLocation} variant="outline" size="sm" className="w-full">
               {gettingLocation ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Getting Location...</> : <><Navigation2 className="w-4 h-4 mr-2" />Update Location</>}
             </Button>

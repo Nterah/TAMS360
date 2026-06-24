@@ -1824,14 +1824,19 @@ app.post("/make-server-c894a9ff/storage/upload", async (c) => {
 
     const formData = await c.req.formData();
     const file = formData.get('file');
-    const bucketType = formData.get('bucket') || 'asset-photos';
+    const bucketType = String(formData.get('bucket') || 'asset-photos').trim();
+    const folderPath = String(formData.get('folderPath') || '')
+      .trim()
+      .replace(/^\/+|\/+$/g, '');
     
     if (!file || !(file instanceof File)) {
       return c.json({ error: "No file provided" }, 400);
     }
 
     // Create bucket if it doesn't exist
-    const bucketName = `make-c894a9ff-${bucketType}`;
+    const bucketName = bucketType === PHOTO_BUCKET || bucketType.startsWith('make-c894a9ff-')
+      ? bucketType
+      : `make-c894a9ff-${bucketType}`;
     const { data: buckets } = await supabase.storage.listBuckets();
     const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
     
@@ -1839,9 +1844,12 @@ app.post("/make-server-c894a9ff/storage/upload", async (c) => {
       await supabase.storage.createBucket(bucketName, { public: false });
     }
 
-    // Upload file with tenant-scoped path
+    // Upload file with either asset_ref folder path or tenant-scoped fallback
     const fileExt = file.name.split('.').pop();
-    const fileName = `${userProfile.tenant_id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const safeOriginalName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+    const fileName = folderPath
+      ? `${folderPath}/${Date.now()}-${safeOriginalName}`
+      : `${userProfile.tenant_id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
     
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(bucketName)
@@ -1862,6 +1870,7 @@ app.post("/make-server-c894a9ff/storage/upload", async (c) => {
 
     return c.json({ 
       success: true, 
+      bucket: bucketName,
       url: urlData?.signedUrl,
       path: fileName
     });
@@ -3884,6 +3893,64 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
     );
 
     console.log(`[PHOTOS] Filtered to ${imageFiles.length} image files`);
+
+    const photoUrlsFallback = Array.isArray(asset.photo_urls) ? asset.photo_urls : [];
+
+    const fallbackPhotos = imageFiles.length === 0
+      ? await Promise.all(
+          photoUrlsFallback.map(async (rawPath: string, index: number) => {
+            if (!rawPath) return null;
+
+            if (/^https?:\/\//i.test(rawPath)) {
+              return {
+                url: rawPath,
+                signedUrl: rawPath,
+                file_path: rawPath,
+                file_name: rawPath.split('/').pop() || `photo-${index + 1}`,
+                caption: `Photo ${index + 1}`,
+                source: 'asset_photo_urls',
+                bucket_id: null,
+              };
+            }
+
+            let bucketName = 'make-c894a9ff-asset-photos';
+            let filePath = rawPath.replace(/^\/+/, '');
+
+            if (filePath.startsWith(`${PHOTO_BUCKET}/`)) {
+              bucketName = PHOTO_BUCKET;
+              filePath = filePath.slice(PHOTO_BUCKET.length + 1);
+            } else if (filePath.startsWith('make-c894a9ff-asset-photos/')) {
+              filePath = filePath.slice('make-c894a9ff-asset-photos/'.length);
+            }
+
+            const { data: signedData, error: signedError } = await supabase.storage
+              .from(bucketName)
+              .createSignedUrl(filePath, 3600);
+
+            if (signedError) {
+              console.warn(`[PHOTOS] Fallback signed URL failed for ${bucketName}/${filePath}:`, signedError);
+              return null;
+            }
+
+            return {
+              url: signedData?.signedUrl,
+              signedUrl: signedData?.signedUrl,
+              file_path: filePath,
+              file_name: filePath.split('/').pop() || `photo-${index + 1}`,
+              caption: `Photo ${index + 1}`,
+              source: 'asset_photo_urls',
+              bucket_id: bucketName,
+            };
+          })
+        )
+      : [];
+
+    const resolvedFallbackPhotos = fallbackPhotos.filter(Boolean);
+
+    if (resolvedFallbackPhotos.length > 0) {
+      console.log(`[PHOTOS] Resolved ${resolvedFallbackPhotos.length} fallback photos from asset.photo_urls`);
+      return c.json({ photos: resolvedFallbackPhotos });
+    }
     
     // Generate signed URLs for each photo
     const photosWithUrls = await Promise.all(

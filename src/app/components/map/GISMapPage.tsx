@@ -16,6 +16,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { SimpleMap } from "./SimpleMap";
+import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from "../../utils/offlineAssets";
+import { resolveAssetCoordinates } from "../../utils/assetDisplay";
 
 const ASSET_TYPES = [
   "Road Sign",
@@ -106,6 +108,17 @@ export default function GISMapPage() {
     };
   }, [accessToken]);
 
+  useEffect(() => {
+    if (!accessToken) return;
+
+    const handleAssetsChanged = () => {
+      fetchAssets();
+    };
+
+    window.addEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
+    return () => window.removeEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
+  }, [accessToken]);
+
   // Dynamically initialize layer visibility when assets change
   useEffect(() => {
     if (assets.length > 0) {
@@ -184,38 +197,43 @@ export default function GISMapPage() {
         
         // Map snake_case to camelCase for consistency
         // IMPORTANT: Database uses gps_lat and gps_lng, not latitude/longitude
-        const mappedAssets = rawAssets.map((asset: any) => ({
-          ...asset,
-          id: asset.asset_id || asset.id,
-          name: asset.asset_name || asset.name,
-          type: asset.asset_type_name || asset.asset_type || asset.type,
-          referenceNumber: asset.asset_ref || asset.reference_number || asset.referenceNumber,
-          roadName: asset.road_name || asset.roadName,
-          roadNumber: asset.road_number || asset.roadNumber,
-          kilometer: asset.km_marker || asset.kilometer || asset.km,
-          condition: asset.latest_condition || asset.condition,
-          status: asset.status_name || asset.status,
-          // Map database fields gps_lat/gps_lng to latitude/longitude
-          latitude: asset.gps_lat || asset.latitude,
-          longitude: asset.gps_lng || asset.longitude,
-          // PRESERVE database fields for CI, urgency, status, condition, and organizational fields
-          latest_ci: asset.latest_ci,
-          latest_urgency: asset.latest_urgency,
-          latest_condition: asset.latest_condition,
-          status_name: asset.status_name,
-          region_name: asset.region_name,
-          ward_name: asset.ward_name,
-          depot_name: asset.depot_name,
-          owner_name: asset.owner_name,
-          responsible_party_name: asset.responsible_party_name,
-          road_name: asset.road_name,
-        }));
+        const mappedAssets = rawAssets.map((asset: any) => {
+          const coords = resolveAssetCoordinates(asset, { rejectNullIsland: true });
+
+          return {
+            ...asset,
+            id: asset.asset_id || asset.id,
+            name: asset.asset_name || asset.name,
+            type: asset.asset_type_name || asset.asset_type || asset.type,
+            referenceNumber: asset.asset_ref || asset.reference_number || asset.referenceNumber,
+            roadName: asset.road_name || asset.roadName,
+            roadNumber: asset.road_number || asset.roadNumber,
+            kilometer: asset.km_marker || asset.kilometer || asset.km,
+            condition: asset.latest_condition || asset.condition,
+            status: asset.status_name || asset.status,
+            latitude: coords?.lat,
+            longitude: coords?.lng,
+            latest_ci: asset.latest_ci,
+            latest_urgency: asset.latest_urgency,
+            latest_condition: asset.latest_condition,
+            status_name: asset.status_name,
+            region_name: asset.region_name,
+            ward_name: asset.ward_name,
+            depot_name: asset.depot_name,
+            owner_name: asset.owner_name,
+            responsible_party_name: asset.responsible_party_name,
+            road_name: asset.road_name,
+          };
+        });
         
-        setAssets(mappedAssets);
-        setTotalAssetCount(data.total || 0);
+        const mergedAssets = mergePendingOfflineAssets(mappedAssets);
+        setAssets(mergedAssets.assets);
+        setTotalAssetCount((data.total || 0) + mergedAssets.pendingCount);
         
         // Debug: Log how many assets have coordinates
-        const withCoords = mappedAssets.filter((a: any) => a.latitude && a.longitude);
+        const withCoords = mappedAssets.filter(
+          (a: any) => resolveAssetCoordinates(a, { rejectNullIsland: true }) !== null
+        );
         console.log(`Assets with coordinates: ${withCoords.length} of ${mappedAssets.length}`);
         
         if (withCoords.length > 0) {
@@ -259,41 +277,46 @@ export default function GISMapPage() {
               const validResults = results.filter(r => r !== null);
               
               validResults.forEach(pageData => {
-                const pageMappedAssets = (pageData.assets || []).map((asset: any) => ({
-                  ...asset,
-                  id: asset.asset_id || asset.id,
-                  name: asset.asset_name || asset.name,
-                  type: asset.asset_type_name || asset.asset_type || asset.type,
-                  referenceNumber: asset.asset_ref || asset.reference_number || asset.referenceNumber,
-                  roadName: asset.road_name || asset.roadName,
-                  roadNumber: asset.road_number || asset.roadNumber,
-                  kilometer: asset.km_marker || asset.kilometer || asset.km,
-                  condition: asset.latest_condition || asset.condition,
-                  status: asset.status_name || asset.status,
-                  // Map database fields gps_lat/gps_lng to latitude/longitude
-                  latitude: asset.gps_lat || asset.latitude,
-                  longitude: asset.gps_lng || asset.longitude,
-                  // PRESERVE database fields for CI, urgency, status, condition, and organizational fields
-                  latest_ci: asset.latest_ci,
-                  latest_urgency: asset.latest_urgency,
-                  latest_condition: asset.latest_condition,
-                  status_name: asset.status_name,
-                  region_name: asset.region_name,
-                  ward_name: asset.ward_name,
-                  depot_name: asset.depot_name,
-                  owner_name: asset.owner_name,
-                  responsible_party_name: asset.responsible_party_name,
-                  road_name: asset.road_name,
-                }));
+                const pageMappedAssets = (pageData.assets || []).map((asset: any) => {
+                  const coords = resolveAssetCoordinates(asset, { rejectNullIsland: true });
+
+                  return {
+                    ...asset,
+                    id: asset.asset_id || asset.id,
+                    name: asset.asset_name || asset.name,
+                    type: asset.asset_type_name || asset.asset_type || asset.type,
+                    referenceNumber: asset.asset_ref || asset.reference_number || asset.referenceNumber,
+                    roadName: asset.road_name || asset.roadName,
+                    roadNumber: asset.road_number || asset.roadNumber,
+                    kilometer: asset.km_marker || asset.kilometer || asset.km,
+                    condition: asset.latest_condition || asset.condition,
+                    status: asset.status_name || asset.status,
+                    latitude: coords?.lat,
+                    longitude: coords?.lng,
+                    latest_ci: asset.latest_ci,
+                    latest_urgency: asset.latest_urgency,
+                    latest_condition: asset.latest_condition,
+                    status_name: asset.status_name,
+                    region_name: asset.region_name,
+                    ward_name: asset.ward_name,
+                    depot_name: asset.depot_name,
+                    owner_name: asset.owner_name,
+                    responsible_party_name: asset.responsible_party_name,
+                    road_name: asset.road_name,
+                  };
+                });
                 allAssets.push(...pageMappedAssets);
               });
               
-              setAssets(allAssets);
-              setTotalAssetCount(allAssets.length);
+              const mergedAllAssets = mergePendingOfflineAssets(allAssets);
+              setAssets(mergedAllAssets.assets);
+              setTotalAssetCount(allAssets.length + mergedAllAssets.pendingCount);
               toast.success(`Loaded all ${allAssets.length} assets successfully`);
               
               // Debug: Log how many assets have coordinates after all pages
-              const withCoordsAll = allAssets.filter((a: any) => a.latitude && a.longitude);
+              const withCoordsAll = allAssets.filter(
+                (a: any) => resolveAssetCoordinates(a, { rejectNullIsland: true }) !== null
+              );
               console.log(`Total assets with coordinates (all pages): ${withCoordsAll.length} of ${allAssets.length}`);
             })
             .catch(err => {
@@ -305,13 +328,15 @@ export default function GISMapPage() {
               console.error("Error loading additional pages:", err);
               toast.error("Some assets failed to load");
               // Still use what we have
-              setAssets(allAssets);
+              const mergedAllAssets = mergePendingOfflineAssets(allAssets);
+              setAssets(mergedAllAssets.assets);
+              setTotalAssetCount(allAssets.length + mergedAllAssets.pendingCount);
             });
         }
 
         // Center map on first asset with coordinates
         const firstAssetWithCoords = mappedAssets.find(
-          (a: any) => a.latitude && a.longitude
+          (a: any) => resolveAssetCoordinates(a, { rejectNullIsland: true }) !== null
         );
         if (firstAssetWithCoords) {
           setMapCenter([firstAssetWithCoords.latitude, firstAssetWithCoords.longitude]);
@@ -604,8 +629,10 @@ export default function GISMapPage() {
   };
 
   const centerOnAsset = (asset: any) => {
-    if (asset.latitude && asset.longitude) {
-      setMapCenter([asset.latitude, asset.longitude]);
+    const coordinates = resolveAssetCoordinates(asset, { rejectNullIsland: true });
+
+    if (coordinates) {
+      setMapCenter([coordinates.lat, coordinates.lng]);
       setMapZoom(16);
       setSelectedAsset(asset);
       toast.success(`Centered on ${asset.name || asset.referenceNumber}`);
@@ -617,7 +644,7 @@ export default function GISMapPage() {
   const filteredAssets = useMemo(() => {
     const filtered = assets.filter((asset) => {
       // Only show assets with coordinates
-      if (!asset.latitude || !asset.longitude) return false;
+      if (!resolveAssetCoordinates(asset, { rejectNullIsland: true })) return false;
 
       // Apply filters
       if (filters.type !== "all" && asset.type !== filters.type) return false;
@@ -684,11 +711,11 @@ export default function GISMapPage() {
 
   // Debug: Count assets with/without coordinates
   const assetsWithCoords = useMemo(() => {
-    return assets.filter(a => a.latitude && a.longitude).length;
+    return assets.filter(a => resolveAssetCoordinates(a, { rejectNullIsland: true }) !== null).length;
   }, [assets]);
 
   const assetsWithoutCoords = useMemo(() => {
-    return assets.filter(a => !a.latitude || !a.longitude).length;
+    return assets.filter(a => resolveAssetCoordinates(a, { rejectNullIsland: true }) === null).length;
   }, [assets]);
 
   const isAdmin = user?.role === "admin" || user?.role === "supervisor";
@@ -1064,7 +1091,9 @@ export default function GISMapPage() {
 
                 <div className="space-y-2 max-h-[400px] overflow-y-auto">
                   {ASSET_TYPES.map((type) => {
-                    const count = assets.filter((a) => a.type === type && a.latitude && a.longitude).length;
+                    const count = assets.filter(
+                      (a) => a.type === type && resolveAssetCoordinates(a, { rejectNullIsland: true }) !== null
+                    ).length;
                     return (
                       <div key={type} className="flex items-center justify-between p-2 rounded hover:bg-accent">
                         <div className="flex items-center space-x-2 flex-1">

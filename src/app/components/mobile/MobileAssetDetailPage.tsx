@@ -18,6 +18,7 @@ import {
   AlertCircle
 } from "lucide-react";
 import { projectId } from "../../../../utils/supabase/info";
+import { resolveAssetCoordinates } from "../../utils/assetDisplay";
 
 interface AssetPhoto {
   photo_id?: string;
@@ -59,6 +60,7 @@ export default function MobileAssetDetailPage() {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [assetPhotos, setAssetPhotos] = useState<AssetPhoto[]>([]);
   const [loading, setLoading] = useState(true);
+  const assetCoordinates = asset ? resolveAssetCoordinates(asset, { rejectNullIsland: true }) : null;
 
   useEffect(() => {
     fetchAssetDetails();
@@ -355,11 +357,11 @@ export default function MobileAssetDetailPage() {
               </div>
             )}
 
-            {asset.latitude && asset.longitude && (
+            {assetCoordinates && (
               <div>
                 <p className="text-xs text-slate-500 mb-1">Coordinates</p>
                 <p className="text-xs font-mono text-slate-600 dark:text-slate-400">
-                  {asset.latitude.toFixed(6)}, {asset.longitude.toFixed(6)}
+                  {assetCoordinates.lat.toFixed(6)}, {assetCoordinates.lng.toFixed(6)}
                 </p>
                 <div className="flex gap-2 mt-2">
                   <Button
@@ -376,7 +378,7 @@ export default function MobileAssetDetailPage() {
                     variant="outline"
                     onClick={() => {
                       window.open(
-                        `https://www.google.com/maps/dir/?api=1&destination=${asset.latitude},${asset.longitude}`,
+                        `https://www.google.com/maps/dir/?api=1&destination=${assetCoordinates.lat},${assetCoordinates.lng}`,
                         "_blank"
                       );
                     }}
