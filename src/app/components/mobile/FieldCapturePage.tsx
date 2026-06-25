@@ -21,7 +21,7 @@ import {
   WifiOff,
   RefreshCw,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { getCacheEntry, setCacheEntry } from "../../utils/dataCache";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import {
@@ -523,6 +523,16 @@ export default function FieldCapturePage() {
 
   const fetchCaptureLookups = async () => {
     setLoadingAssetTypes(true);
+
+    // Apply cached lookups immediately so UI is instant
+    const cachedLookups = getCacheEntry<any>("field_capture_lookups");
+    if (cachedLookups) {
+      setAssetTypes(cachedLookups.assetTypes || FALLBACK_ASSET_TYPES);
+      setTenantName(cachedLookups.tenantName || FALLBACK_TENANT_NAME);
+      setLookupOptions(cachedLookups.lookupOptions || {});
+      setLoadingAssetTypes(false);
+    }
+
     try {
       // Fetch asset-types, first asset page, tenant info and ward config in parallel
       const [assetTypeData, assetFirstPage, tenantInfo, wardConfig] = await Promise.all([
@@ -553,13 +563,14 @@ export default function FieldCapturePage() {
       [...cleanTypes, ...assetTypesFromAssets, ...FALLBACK_ASSET_TYPES].forEach((type) => {
         if (type?.name) typeMap.set(type.name.toLowerCase(), type);
       });
-      setAssetTypes(Array.from(typeMap.values()).sort((a, b) => a.name.localeCompare(b.name)));
+      const finalAssetTypes = Array.from(typeMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+      setAssetTypes(finalAssetTypes);
 
       const tenant = cleanText(tenantInfo?.tenant?.name) || cleanText(tenantInfo?.name) || cleanText(tenantInfo?.tenant_name) || FALLBACK_TENANT_NAME;
       setTenantName(tenant);
 
       const wardRows = wardConfig?.rows || wardConfig?.data || [];
-      setLookupOptions({
+      const finalLookupOptions = {
         regions: uniqueSorted([...assets.map((a: any) => a.region), ...wardRows.map((w: any) => w.region)]),
         depots: uniqueSorted(assets.map((a: any) => a.depot)),
         wards: uniqueSorted([...assets.map((a: any) => a.ward ?? a.wards), ...wardRows.map((w: any) => w.ward)]),
@@ -567,7 +578,15 @@ export default function FieldCapturePage() {
         responsibleParties: uniqueSorted([tenant, FALLBACK_TENANT_NAME, ...assets.map((a: any) => a.maintenance_responsibility ?? a.responsible_party)]),
         roadNames: uniqueSorted(assets.map((a: any) => a.road_name ?? a.roadName)),
         installers: uniqueSorted(assets.map((a: any) => a.installer_name ?? a.installer)),
-      });
+      };
+      setLookupOptions(finalLookupOptions);
+
+      // Cache results for 10 minutes
+      setCacheEntry("field_capture_lookups", {
+        assetTypes: finalAssetTypes,
+        tenantName: tenant,
+        lookupOptions: finalLookupOptions,
+      }, 10 * 60 * 1000);
     } catch (error) {
       console.error("Error fetching capture lookups:", error);
       setAssetTypes(FALLBACK_ASSET_TYPES);
