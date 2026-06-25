@@ -12,6 +12,7 @@ import ComponentInspectionForm from "./ComponentInspectionForm";
 import { ArrowLeft, Save, CheckCircle, Camera, Upload, X, Image as ImageIcon, MapPin, Navigation2, Loader2, AlertCircle } from "lucide-react";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { toast } from "sonner";
+import { loadWithCache, invalidateCache, getCacheEntry, setCacheEntry } from "../../utils/dataCache";
 import {
   buildGpsOverrideMessage,
   captureBestGpsFix,
@@ -155,44 +156,43 @@ export default function NewInspectionPage() {
   };
 
   const fetchAssets = async () => {
+    // 1. Serve cache instantly
+    const cached = getCacheEntry<{ assets: any[]; total: number }>("assets_list_v2");
+    if (cached?.assets) {
+      setAssets(cached.assets.map(normaliseAsset));
+      return; // dropdown is populated — remaining pages refresh in background below
+    }
+
+    // 2. No cache — fetch page 1 and show immediately
     try {
       const response = await fetch(`${API_URL}/assets?pageSize=500`, {
-        headers: {
-          Authorization: `Bearer ${accessToken || publicAnonKey}`,
-        },
+        headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
       });
+      if (!response.ok) return;
+      const data = await response.json();
+      const extract = (d: any): any[] =>
+        Array.isArray(d) ? d :
+        Array.isArray(d?.assets) ? d.assets :
+        Array.isArray(d?.data) ? d.data : [];
 
-      if (response.ok) {
-        const data = await response.json();
-        let list =
-          Array.isArray(data) ? data :
-          Array.isArray(data.assets) ? data.assets :
-          Array.isArray(data.data) ? data.data :
-          Array.isArray(data.rows) ? data.rows :
-          Array.isArray(data.items) ? data.items :
-          [];
+      const firstPage = extract(data).map(normaliseAsset);
+      setAssets(firstPage); // show immediately
 
-        // Fetch remaining pages in parallel
-        if (data.totalPages > 1) {
-          const remainingPages = Array.from(
-            { length: Math.min(data.totalPages, 10) - 1 },
-            (_, i) => i + 2
-          );
-          const pageResults = await Promise.all(
-            remainingPages.map((page) =>
-              fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
-                headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
-              }).then((r) => (r.ok ? r.json() : null))
-            )
-          );
-          list = [...list, ...pageResults.flatMap((d) =>
-            Array.isArray(d?.assets) ? d.assets :
-            Array.isArray(d?.data) ? d.data :
-            []
-          )];
-        }
-
-        setAssets(list.map(normaliseAsset));
+      // 3. Fetch remaining pages silently
+      if (data.totalPages > 1) {
+        const pages = Array.from({ length: Math.min(data.totalPages, 10) - 1 }, (_, i) => i + 2);
+        const rest = await Promise.all(
+          pages.map((p) =>
+            fetch(`${API_URL}/assets?page=${p}&pageSize=500`, {
+              headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+            }).then((r) => (r.ok ? r.json() : null))
+          )
+        );
+        const all = [...firstPage, ...rest.flatMap((d) => extract(d).map(normaliseAsset))];
+        setAssets(all);
+        setCacheEntry("assets_list_v2", { assets: all, total: data.total || all.length });
+      } else {
+        setCacheEntry("assets_list_v2", { assets: firstPage, total: data.total || firstPage.length });
       }
     } catch (error) {
       console.error("Error fetching assets:", error);

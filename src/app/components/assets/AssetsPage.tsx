@@ -22,6 +22,7 @@ import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import EnhancedAssetForm from "./EnhancedAssetForm";
 import { requiresMigration, handleMigrationRequired } from "../../utils/migrationHelper";
 import { mergePendingOfflineAssets, removePendingOfflineAsset, storeRecentVisibleAsset } from "../../utils/offlineAssets";
+import { loadWithCache, invalidateCache, getCacheEntry, setCacheEntry } from "../../utils/dataCache";
 
 import {
   getCIDisplay,
@@ -156,49 +157,54 @@ export default function AssetsPage() {
   const fetchAssets = async () => {
     if (!accessToken) return;
 
+    const applyAssets = (list: any[], total: number) => {
+      const merged = mergePendingOfflineAssets(list);
+      setAssets(merged.assets);
+      setTotalAssetCount(total + merged.pendingCount);
+      setLoading(false);
+    };
+
+    // 1. Serve cache instantly if available
+    const cached = getCacheEntry<{ assets: any[]; total: number }>("assets_list_v2");
+    if (cached) {
+      applyAssets(cached.assets, cached.total);
+    }
+
+    // 2. Fetch page 1 — show immediately without waiting for all pages
     try {
-      // Fetch first page to get total page count
       const response = await fetch(`${API_URL}/assets?pageSize=500`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
+      if (!response.ok) { if (!cached) setLoading(false); return; }
+      const data = await response.json();
+      const firstPage = (data.assets || []).map(normaliseAssetForDisplay);
 
-      if (response.ok) {
-        const data = await response.json();
-        const firstPageAssets = (data.assets || []).map(normaliseAssetForDisplay);
-        const initialMerged = mergePendingOfflineAssets(firstPageAssets);
+      // Show page 1 right away (fast first paint)
+      applyAssets(firstPage, data.total || firstPage.length);
 
-        // Show first page immediately while remaining pages load
-        setAssets(initialMerged.assets);
-        setTotalAssetCount((data.total || 0) + initialMerged.pendingCount);
-
-        // Fetch remaining pages in parallel (up to page 4 = 2000 assets)
-        if (data.totalPages > 1) {
-          const remainingPages = Array.from(
-            { length: Math.min(data.totalPages, 4) - 1 },
-            (_, i) => i + 2
-          );
-          const pageResponses = await Promise.all(
-            remainingPages.map((page) =>
-              fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
-                headers: { Authorization: `Bearer ${accessToken}` },
-              }).then((r) => (r.ok ? r.json() : null))
-            )
-          );
-          const allAssets = [
-            ...firstPageAssets,
-            ...pageResponses.flatMap((d) => (d?.assets || []).map(normaliseAssetForDisplay)),
-          ];
-          const mergedAllAssets = mergePendingOfflineAssets(allAssets);
-          setAssets(mergedAllAssets.assets);
-          setTotalAssetCount((data.total || allAssets.length) + mergedAllAssets.pendingCount);
-        }
+      // 3. Fetch remaining pages in parallel (background)
+      if (data.totalPages > 1) {
+        const pages = Array.from({ length: Math.min(data.totalPages, 4) - 1 }, (_, i) => i + 2);
+        const rest = await Promise.all(
+          pages.map((p) =>
+            fetch(`${API_URL}/assets?page=${p}&pageSize=500`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }).then((r) => (r.ok ? r.json() : null))
+          )
+        );
+        const allAssets = [
+          ...firstPage,
+          ...rest.flatMap((d) => (d?.assets || []).map(normaliseAssetForDisplay)),
+        ];
+        applyAssets(allAssets, data.total || allAssets.length);
+        // Cache the complete dataset
+        setCacheEntry("assets_list_v2", { assets: allAssets, total: data.total || allAssets.length });
+      } else {
+        setCacheEntry("assets_list_v2", { assets: firstPage, total: data.total || firstPage.length });
       }
     } catch (error) {
       console.error("Error fetching assets:", error);
-    } finally {
-      setLoading(false);
+      if (!cached) setLoading(false);
     }
   };
 
@@ -277,6 +283,7 @@ export default function AssetsPage() {
       if (response.ok) {
         const result = await response.json().catch(() => ({}));
         toast.success("Asset created successfully!");
+        invalidateCache("assets_list_v2");
         setIsAddDialogOpen(false);
         storeRecentVisibleAsset({
           ...newAsset,
@@ -495,6 +502,7 @@ export default function AssetsPage() {
 
       if (response.ok) {
         toast.success("Asset deleted successfully!");
+        invalidateCache("assets_list_v2");
         fetchAssets();
       } else {
         toast.error("Failed to delete asset");
