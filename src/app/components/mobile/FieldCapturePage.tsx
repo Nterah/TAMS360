@@ -21,6 +21,7 @@ import {
   WifiOff,
   RefreshCw,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { getCacheEntry, setCacheEntry } from "../../utils/dataCache";
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
