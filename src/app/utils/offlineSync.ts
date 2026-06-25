@@ -4,6 +4,7 @@
  */
 
 import { projectId } from "../../../utils/supabase/info";
+import { fetchWithSessionAuth } from "./authSession";
 import { storeRecentVisibleAsset, writePendingOfflineAssets } from "./offlineAssets";
 
 export interface OfflineAsset {
@@ -43,7 +44,7 @@ export interface SyncResult {
 /**
  * Sync offline assets to server
  */
-export async function syncOfflineAssets(accessToken: string): Promise<SyncResult> {
+export async function syncOfflineAssets(accessToken?: string | null): Promise<SyncResult> {
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
   const offlineAssets: OfflineAsset[] = JSON.parse(
     localStorage.getItem("offline_assets") || "[]"
@@ -84,12 +85,11 @@ export async function syncOfflineAssets(accessToken: string): Promise<SyncResult
           formData.append("bucket", "tams360-inspection-photos");
           formData.append("folderPath", asset.assetReference || asset.description || "offline-asset");
 
-          const uploadResponse = await fetch(`${API_URL}/storage/upload`, {
+          const uploadResponse = await fetchWithSessionAuth(`${API_URL}/storage/upload`, {
             method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
             body: formData,
+          }, {
+            fallbackToken: accessToken ?? null,
           });
 
           if (uploadResponse.ok) {
@@ -102,11 +102,10 @@ export async function syncOfflineAssets(accessToken: string): Promise<SyncResult
       }
 
       // Create asset on server
-      const assetResponse = await fetch(`${API_URL}/assets`, {
+      const assetResponse = await fetchWithSessionAuth(`${API_URL}/assets`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           asset_ref: asset.assetReference,
@@ -141,6 +140,8 @@ export async function syncOfflineAssets(accessToken: string): Promise<SyncResult
           capturedAt: asset.capturedAt,
           capturedBy: asset.capturedBy,
         }),
+      }, {
+        fallbackToken: accessToken ?? null,
       });
 
       if (assetResponse.ok) {
@@ -191,7 +192,7 @@ export async function syncOfflineAssets(accessToken: string): Promise<SyncResult
 /**
  * Sync offline inspections to server
  */
-export async function syncOfflineInspections(accessToken: string): Promise<SyncResult> {
+export async function syncOfflineInspections(accessToken?: string | null): Promise<SyncResult> {
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
   const offlineInspections = JSON.parse(
     localStorage.getItem("offline_inspections") || "[]"
@@ -212,13 +213,14 @@ export async function syncOfflineInspections(accessToken: string): Promise<SyncR
 
   for (const inspection of offlineInspections) {
     try {
-      const response = await fetch(`${API_URL}/inspections`, {
+      const response = await fetchWithSessionAuth(`${API_URL}/inspections`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify(inspection),
+      }, {
+        fallbackToken: accessToken ?? null,
       });
 
       if (response.ok) {
@@ -247,7 +249,7 @@ export async function syncOfflineInspections(accessToken: string): Promise<SyncR
 /**
  * Sync all offline data
  */
-export async function syncAllOfflineData(accessToken: string): Promise<SyncResult> {
+export async function syncAllOfflineData(accessToken?: string | null): Promise<SyncResult> {
   const assetResult = await syncOfflineAssets(accessToken);
   const inspectionResult = await syncOfflineInspections(accessToken);
 

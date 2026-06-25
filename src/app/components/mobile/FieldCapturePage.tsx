@@ -24,7 +24,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { getCacheEntry, setCacheEntry } from "../../utils/dataCache";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { projectId } from "../../../../utils/supabase/info";
 import {
   addPendingOfflineAsset,
   storeRecentVisibleAsset,
@@ -35,6 +35,7 @@ import {
   classifyGpsAccuracy,
   shouldRequireGpsSaveOverride,
 } from "../../utils/gpsCapture";
+import { fetchWithSessionAuth } from "../../utils/authSession";
 import { resolveAssetCoordinates } from "../../utils/assetDisplay";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
@@ -352,7 +353,7 @@ function DataListInput({
 
 
 export default function FieldCapturePage() {
-  const { user, accessToken } = useContext(AuthContext);
+  const { user } = useContext(AuthContext);
   const { tenantId } = useTenant();
   const navigate = useNavigate();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -444,7 +445,7 @@ export default function FieldCapturePage() {
   useEffect(() => {
     fetchCaptureLookups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!tenantName) return;
@@ -512,12 +513,8 @@ export default function FieldCapturePage() {
     formData.orientationPosition,
   ]);
 
-  const authHeaders = {
-    Authorization: `Bearer ${accessToken || publicAnonKey}`,
-  };
-
   const fetchJson = async (url: string) => {
-    const response = await fetch(url, { headers: authHeaders });
+    const response = await fetchWithSessionAuth(url);
     if (!response.ok) return null;
     return response.json();
   };
@@ -735,6 +732,12 @@ export default function FieldCapturePage() {
       console.error("Save error:", error);
 
       const message = error?.message || "Failed to save asset";
+      if (isOnline && (message === "AUTH_EXPIRED" || message === "AUTH_REQUIRED")) {
+        toast.warning("Session expired while saving. Asset was saved offline. Please sign in again to sync it.");
+        saveOffline(assetData);
+        return;
+      }
+
       if (isOnline && (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("aborted"))) {
         toast.warning("Connection dropped while saving. Saving offline instead.");
         saveOffline(assetData);
@@ -754,9 +757,8 @@ export default function FieldCapturePage() {
       uploadFormData.append("bucket", "tams360-inspection-photos");
       uploadFormData.append("folderPath", assetData.assetReference);
 
-      const uploadResponse = await fetch(`${API_URL}/storage/upload`, {
+      const uploadResponse = await fetchWithSessionAuth(`${API_URL}/storage/upload`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
         body: uploadFormData,
       });
 
@@ -771,11 +773,10 @@ export default function FieldCapturePage() {
     const endLat = assetData.endLatitude ? Number(assetData.endLatitude) : null;
     const endLng = assetData.endLongitude ? Number(assetData.endLongitude) : null;
 
-    const response = await fetch(`${API_URL}/assets`, {
+    const response = await fetchWithSessionAuth(`${API_URL}/assets`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken || publicAnonKey}`,
       },
       body: JSON.stringify({
         referenceNumber: assetData.assetReference,

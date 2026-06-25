@@ -902,6 +902,7 @@ app.post("/make-server-c894a9ff/auth/login", async (c) => {
     return c.json({
       success: true,
       accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
       user: {
         id: userProfile.id,
         tenantId: userProfile.tenant_id,

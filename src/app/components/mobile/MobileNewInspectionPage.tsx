@@ -28,6 +28,7 @@ import {
 import { projectId } from "../../../../utils/supabase/info";
 import { toast } from "sonner";
 import { getCacheEntry, setCacheEntry } from "../../utils/dataCache";
+import { fetchWithSessionAuth } from "../../utils/authSession";
 import {
   buildGpsOverrideMessage,
   captureBestGpsFix,
@@ -39,7 +40,7 @@ export default function MobileNewInspectionPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const assetFromUrl = searchParams.get("asset");
-  const { user, accessToken } = useContext(AuthContext);
+  const { user } = useContext(AuthContext);
   const { tenantId } = useTenant();
   const [loading, setLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -102,9 +103,7 @@ export default function MobileNewInspectionPage() {
 
   const fetchRepairThreshold = async () => {
     try {
-      const response = await fetch(`${API_URL}/tenant/settings`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const response = await fetchWithSessionAuth(`${API_URL}/tenant/settings`);
       if (response.ok) {
         const data = await response.json();
         const threshold =
@@ -248,9 +247,7 @@ export default function MobileNewInspectionPage() {
         }
 
         // Fetch the single asset immediately — much faster than full list
-        fetch(`${API_URL}/assets/${assetParam}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        })
+        fetchWithSessionAuth(`${API_URL}/assets/${assetParam}`)
           .then((r) => (r.ok ? r.json() : null))
           .then((d) => {
             if (!d) return;
@@ -278,9 +275,7 @@ export default function MobileNewInspectionPage() {
     extractAssetList: (r: any) => any[]
   ) => {
     try {
-      const response = await fetch(`${API_URL}/assets?pageSize=500`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const response = await fetchWithSessionAuth(`${API_URL}/assets?pageSize=500`);
       if (!response.ok) return;
 
       const result = await response.json();
@@ -292,9 +287,7 @@ export default function MobileNewInspectionPage() {
         const pages = Array.from({ length: Math.min(totalPages, 10) - 1 }, (_, i) => i + 2);
         const rest = await Promise.all(
           pages.map((p) =>
-            fetch(`${API_URL}/assets?page=${p}&pageSize=500`, {
-              headers: { Authorization: `Bearer ${accessToken}` },
-            }).then((r) => (r.ok ? r.json() : null))
+            fetchWithSessionAuth(`${API_URL}/assets?page=${p}&pageSize=500`).then((r) => (r.ok ? r.json() : null))
           )
         );
         const all = [...firstPage, ...rest.flatMap((d) => extractAssetList(d).map(normaliseAsset))];
@@ -310,17 +303,12 @@ export default function MobileNewInspectionPage() {
 
   const fetchComponentTemplate = async (assetTypeName: string) => {
     try {
-      const response = await fetch(
+      const authenticatedResponse = await fetchWithSessionAuth(
         `${API_URL}/component-templates/${encodeURIComponent(assetTypeName)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
       );
 
-      if (response.ok) {
-        const data = await response.json();
+      if (authenticatedResponse.ok) {
+        const data = await authenticatedResponse.json();
         
         // Check if template is null (missing template)
         if (!data.template) {
@@ -333,9 +321,9 @@ export default function MobileNewInspectionPage() {
         }
         
         setComponentTemplate(data.template);
-      } else if (response.status === 404) {
+      } else if (authenticatedResponse.status === 404) {
         // Template not found
-        const data = await response.json();
+        const data = await authenticatedResponse.json();
         toast.error(
           data.error || "No Inspection Template found for this Asset Type.",
           { duration: 8000 }
@@ -401,42 +389,17 @@ export default function MobileNewInspectionPage() {
     setFormData({ ...formData, component_scores: scores, aggregates });
   };
 
-  const getSupabaseAccessToken = () => {
-    const projectRef = "oerrmcvijhowvfqmhzaa";
-    const sessionKey = `sb-${projectRef}-auth-token`;
-
-    const rawSession =
-      localStorage.getItem(sessionKey) ||
-      sessionStorage.getItem(sessionKey);
-
-    if (!rawSession) {
-      console.error("Supabase auth session key not found:", sessionKey);
-      return null;
-    }
-
-    try {
-      const parsed = JSON.parse(rawSession);
-
-      const token =
-        parsed?.access_token ||
-        parsed?.currentSession?.access_token ||
-        parsed?.session?.access_token;
-
-      if (!token) {
-        console.error("Supabase session exists but access_token was not found:", parsed);
-        return null;
-      }
-
-      if (token.split(".").length !== 3) {
-        console.error("Token found, but it is not a valid JWT:", token);
-        return null;
-      }
-
-      return token;
-    } catch (error) {
-      console.error("Failed to parse Supabase auth session:", error);
-      return null;
-    }
+  const saveInspectionOffline = (payload: Record<string, unknown>) => {
+    const offlineInspections = JSON.parse(
+      localStorage.getItem("offline_inspections") || "[]"
+    );
+    offlineInspections.push({
+      ...payload,
+      id: `offline_${Date.now()}`,
+      offline: true,
+      created_at: new Date().toISOString(),
+    });
+    localStorage.setItem("offline_inspections", JSON.stringify(offlineInspections));
   };
 
   const handleSubmit = async () => {
@@ -492,20 +455,10 @@ export default function MobileNewInspectionPage() {
     try {
 
       if (isOnline) {
-        const inspectionAccessToken = accessToken;
-
-        if (!inspectionAccessToken) {
-          console.error("No AuthContext accessToken available for inspection save.");
-          toast.error("Login session is not available. Please refresh and log in again.");
-          setLoading(false);
-          return;
-        }
-
-        const response = await fetch(`${API_URL}/inspections`, {
+        const response = await fetchWithSessionAuth(`${API_URL}/inspections`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${inspectionAccessToken}`,
           },
           body: JSON.stringify(payload),
         });
@@ -548,16 +501,7 @@ export default function MobileNewInspectionPage() {
         }
       } else {
         // Save offline
-        const offlineInspections = JSON.parse(
-          localStorage.getItem("offline_inspections") || "[]"
-        );
-        offlineInspections.push({
-          ...payload,
-          id: `offline_${Date.now()}`,
-          offline: true,
-          created_at: new Date().toISOString(),
-        });
-        localStorage.setItem("offline_inspections", JSON.stringify(offlineInspections));
+        saveInspectionOffline(payload);
         toast.success("Inspection saved offline. Will sync when online.");
         navigate("/mobile/inspections");
       }
@@ -565,17 +509,15 @@ export default function MobileNewInspectionPage() {
       console.error("Error saving inspection:", error);
 
       const message = error?.message || "Failed to save inspection";
+      if (isOnline && (message === "AUTH_EXPIRED" || message === "AUTH_REQUIRED")) {
+        saveInspectionOffline(payload);
+        toast.warning("Session expired while saving. Inspection was saved offline. Please sign in again to sync it.");
+        navigate("/mobile/inspections");
+        return;
+      }
+
       if (isOnline && (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("aborted"))) {
-        const offlineInspections = JSON.parse(
-          localStorage.getItem("offline_inspections") || "[]"
-        );
-        offlineInspections.push({
-          ...payload,
-          id: `offline_${Date.now()}`,
-          offline: true,
-          created_at: new Date().toISOString(),
-        });
-        localStorage.setItem("offline_inspections", JSON.stringify(offlineInspections));
+        saveInspectionOffline(payload);
         toast.warning("Connection dropped while saving. Inspection was saved offline.");
         navigate("/mobile/inspections");
         return;

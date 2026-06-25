@@ -4,6 +4,8 @@ import { toast, Toaster } from "sonner";
 import { projectId, publicAnonKey } from "/utils/supabase/info";
 import { OfflineProvider } from "./components/offline/OfflineContext";
 import { TenantProvider } from "./contexts/TenantContext";
+import { supabase } from "../lib/supabaseClient";
+import { clearStoredAuth, persistAuthSession } from "./utils/authSession";
 
 // Debug utilities
 import './utils/checkDatabase';
@@ -118,21 +120,51 @@ function App() {
 
   // Check for existing session on mount
   useEffect(() => {
-    const storedToken = localStorage.getItem("tams360_token");
-    const storedUser = localStorage.getItem("tams360_user");
+    let isMounted = true;
 
-    if (storedToken && storedUser) {
-      // Validate the stored token
-      validateStoredToken(storedToken, storedUser);
-    } else {
-      setLoading(false);
-    }
+    const initializeAuth = async () => {
+      const { data } = await supabase.auth.getSession();
+      const sessionToken = data.session?.access_token ?? null;
+      const storedToken = localStorage.getItem("tams360_token");
+      const tokenToValidate = sessionToken ?? storedToken;
+
+      if (tokenToValidate) {
+       await validateStoredToken(tokenToValidate);
+       return;
+      }
+
+      if (isMounted) {
+       setLoading(false);
+      }
+    };
+
+    void initializeAuth();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
+
+      const nextToken = session?.access_token ?? null;
+      setAccessToken(nextToken);
+
+      if (nextToken) {
+       localStorage.setItem("tams360_token", nextToken);
+      } else {
+       localStorage.removeItem("tams360_token");
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const validateStoredToken = async (token: string, userJson: string) => {
+  const validateStoredToken = async (token: string) => {
     try {
       const response = await fetch(`${API_URL}/auth/session`, {
-        method: "GET",
+       method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -142,16 +174,17 @@ function App() {
         const data = await response.json();
         setAccessToken(token);
         setUser(data.user);
+        localStorage.setItem("tams360_token", token);
+        localStorage.setItem("tams360_user", JSON.stringify(data.user));
       } else {
         // Token is invalid or expired, clear it
         console.log("Stored token is invalid, clearing session");
-        localStorage.removeItem("tams360_token");
-        localStorage.removeItem("tams360_user");
+        clearStoredAuth();
+        void supabase.auth.signOut();
       }
     } catch (error) {
       console.error("Error validating token:", error);
-      localStorage.removeItem("tams360_token");
-      localStorage.removeItem("tams360_user");
+      clearStoredAuth();
     } finally {
       setLoading(false);
     }
@@ -177,13 +210,14 @@ function App() {
         throw new Error(data.error || "Login failed");
       }
 
-      setAccessToken(data.accessToken);
+      await persistAuthSession(data.accessToken, data.refreshToken);
+
+      setAccessToken(localStorage.getItem("tams360_token") || data.accessToken);
       setUser(data.user);
 
       // Clear asset cache on login so users always get fresh cross-user data
       localStorage.removeItem("cache_assets_list_v2");
 
-      localStorage.setItem("tams360_token", data.accessToken);
       localStorage.setItem("tams360_user", JSON.stringify(data.user));
 
       toast.success("Login successful!");
@@ -199,8 +233,8 @@ function App() {
   const logout = () => {
     setUser(null);
     setAccessToken(null);
-    localStorage.removeItem("tams360_token");
-    localStorage.removeItem("tams360_user");
+    clearStoredAuth();
+    void supabase.auth.signOut();
     toast.success("Logged out successfully");
   };
 
