@@ -414,7 +414,18 @@ export default function MobileAssetDetailPage() {
         <div className="flex gap-3">
           <Button
             className="flex-1 gap-2"
-            onClick={() => navigate(`/mobile/inspections/new?asset=${asset.id}`)}
+            onClick={() => {
+              const assetId = (asset as any).asset_id || asset.id;
+              // Store asset in localStorage so NewInspectionPage can pre-populate instantly
+              try {
+                localStorage.setItem("pending_inspection_asset", JSON.stringify({
+                  ...asset,
+                  asset_id: assetId,
+                  id: assetId,
+                }));
+              } catch { /* ignore */ }
+              navigate(`/mobile/inspections/new?asset=${assetId}`);
+            }}
           >
             <ClipboardCheck className="w-4 h-4" />
             New Inspection

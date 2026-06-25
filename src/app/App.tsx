@@ -180,6 +180,9 @@ function App() {
       setAccessToken(data.accessToken);
       setUser(data.user);
 
+      // Clear asset cache on login so users always get fresh cross-user data
+      localStorage.removeItem("cache_assets_list_v2");
+
       localStorage.setItem("tams360_token", data.accessToken);
       localStorage.setItem("tams360_user", JSON.stringify(data.user));
 

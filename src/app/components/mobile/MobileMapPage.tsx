@@ -231,7 +231,10 @@ export default function MobileMapPage() {
     setTrackingLocation(true);
 
     try {
-      const fix = await captureBestGpsFix();
+      const fix = await captureBestGpsFix({
+        targetAccuracyMeters: 50,
+        sampleWindowMs: 25000,
+      });
       const userPos: [number, number] = [fix.latitude, fix.longitude];
       setUserLocation(userPos);
 

@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { projectId } from "../../../../utils/supabase/info";
 import { toast } from "sonner";
+import { getCacheEntry, setCacheEntry } from "../../utils/dataCache";
 import {
   buildGpsOverrideMessage,
   captureBestGpsFix,
@@ -131,6 +132,8 @@ export default function MobileNewInspectionPage() {
       toast.info("Waiting for an accurate GPS fix...", { id: "mobile-inspection-gps" });
 
       const fix = await captureBestGpsFix({
+        targetAccuracyMeters: 50,
+        sampleWindowMs: 25000,
         onProgress: (candidate) => setLocationAccuracy(candidate.accuracy),
       });
 
@@ -196,52 +199,7 @@ export default function MobileNewInspectionPage() {
   const fetchAssets = async () => {
     try {
       const assetParam = searchParams.get("asset");
-
-      let pendingAsset: any = null;
-
-      try {
-        const stored = localStorage.getItem("pending_inspection_asset");
-        if (stored) {
-          pendingAsset = JSON.parse(stored);
-        }
-      } catch (storageError) {
-        console.warn("Could not read pending inspection asset:", storageError);
-      }
-
-      if (assetParam && pendingAsset) {
-        const pendingId = pendingAsset.asset_id || pendingAsset.id;
-
-        if (String(pendingId) === String(assetParam)) {
-          applySelectedAsset({
-            ...pendingAsset,
-            asset_id: pendingId,
-            id: pendingId,
-          });
-        }
-      }
-
-      const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        console.error("Failed to fetch assets for inspection:", response.status);
-        return;
-      }
-
-      const result = await response.json();
-
-      const list =
-        Array.isArray(result) ? result :
-        Array.isArray(result.assets) ? result.assets :
-        Array.isArray(result.data) ? result.data :
-        Array.isArray(result.rows) ? result.rows :
-        Array.isArray(result.items) ? result.items :
-        [];
-
-      const safeList = list.map((asset: any) => ({
+      const normaliseAsset = (asset: any) => ({
         ...asset,
         id: asset.id || asset.asset_id,
         asset_id: asset.asset_id || asset.id,
@@ -250,62 +208,102 @@ export default function MobileNewInspectionPage() {
         description: asset.description || asset.metadata?.description || "",
         latitude: asset.latitude ?? asset.gps_lat ?? null,
         longitude: asset.longitude ?? asset.gps_lng ?? null,
-      }));
+      });
+      const extractAssetList = (result: any) =>
+        Array.isArray(result) ? result :
+        Array.isArray(result?.assets) ? result.assets :
+        Array.isArray(result?.data) ? result.data :
+        Array.isArray(result?.rows) ? result.rows :
+        Array.isArray(result?.items) ? result.items :
+        [];
 
-      setAssets(safeList);
-
+      // === FAST PATH 1: fetch specific asset directly — no waiting for full list ===
       if (assetParam) {
-        let matchedAsset = safeList.find((asset: any) =>
-          String(asset.asset_id || asset.id) === String(assetParam)
-        );
+        // Check pending_inspection_asset in localStorage first
+        try {
+          const stored = localStorage.getItem("pending_inspection_asset");
+          if (stored) {
+            const pendingAsset = JSON.parse(stored);
+            const pendingId = pendingAsset.asset_id || pendingAsset.id;
+            if (String(pendingId) === String(assetParam)) {
+              applySelectedAsset({ ...pendingAsset, asset_id: pendingId, id: pendingId });
+            }
+          }
+        } catch { /* ignore */ }
 
-        if (!matchedAsset && pendingAsset) {
-          const pendingId = pendingAsset.asset_id || pendingAsset.id;
-
-          if (String(pendingId) === String(assetParam)) {
-            matchedAsset = {
-              ...pendingAsset,
-              asset_id: pendingId,
-              id: pendingId,
-            };
+        // Check cache first
+        const cached = getCacheEntry<{ assets: any[]; total: number }>("assets_list_v2");
+        if (cached?.assets) {
+          const cachedAssets = cached.assets.map(normaliseAsset);
+          setAssets(cachedAssets);
+          const match = cachedAssets.find((a: any) =>
+            String(a.asset_id || a.id) === String(assetParam)
+          );
+          if (match) {
+            applySelectedAsset(match);
+            // Still refresh list in background but asset is already selected
+            _refreshAssetListInBackground(normaliseAsset, extractAssetList);
+            return;
           }
         }
 
-        if (!matchedAsset) {
-          const detailResponse = await fetch(`${API_URL}/assets/${assetParam}`, {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          });
-
-          if (detailResponse.ok) {
-            const detailData = await detailResponse.json();
-            const detailAsset = detailData.asset || detailData.data || detailData;
-
-            const detailId = detailAsset.asset_id || detailAsset.id || assetParam;
-
-            matchedAsset = {
-              ...detailAsset,
-              asset_id: detailId,
-              id: detailId,
-              asset_ref: detailAsset.asset_ref || detailAsset.asset_number || detailAsset.reference_number || "",
-              asset_type_name: detailAsset.asset_type_name || detailAsset.asset_type || detailAsset.type_name || detailAsset.type || "",
-              description: detailAsset.description || detailAsset.metadata?.description || "",
-              latitude: detailAsset.latitude ?? detailAsset.gps_lat ?? null,
-              longitude: detailAsset.longitude ?? detailAsset.gps_lng ?? null,
-            };
-          }
-        }
-
-        if (matchedAsset) {
-          applySelectedAsset(matchedAsset);
-        } else {
-          console.warn("Asset from URL was not found after list, localStorage, and detail fetch:", assetParam);
+        // Fetch the single asset immediately — much faster than full list
+        fetch(`${API_URL}/assets/${assetParam}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => {
+            if (!d) return;
+            const a = d.asset || d.data || d;
+            applySelectedAsset(normaliseAsset(a));
+          })
+          .catch(() => {});
+      } else {
+        // No asset param — serve cache immediately
+        const cached = getCacheEntry<{ assets: any[]; total: number }>("assets_list_v2");
+        if (cached?.assets) {
+          setAssets(cached.assets.map(normaliseAsset));
         }
       }
+
+      // === BACKGROUND: load full list so dropdown is populated ===
+      await _refreshAssetListInBackground(normaliseAsset, extractAssetList);
     } catch (error) {
       console.error("Error fetching assets:", error);
     }
+  };
+
+  const _refreshAssetListInBackground = async (
+    normaliseAsset: (a: any) => any,
+    extractAssetList: (r: any) => any[]
+  ) => {
+    try {
+      const response = await fetch(`${API_URL}/assets?pageSize=500`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) return;
+
+      const result = await response.json();
+      const firstPage = extractAssetList(result).map(normaliseAsset);
+      setAssets(firstPage);
+
+      const totalPages = Math.max(Number(result?.totalPages ?? result?.total_pages ?? 1) || 1, 1);
+      if (totalPages > 1) {
+        const pages = Array.from({ length: Math.min(totalPages, 10) - 1 }, (_, i) => i + 2);
+        const rest = await Promise.all(
+          pages.map((p) =>
+            fetch(`${API_URL}/assets?page=${p}&pageSize=500`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }).then((r) => (r.ok ? r.json() : null))
+          )
+        );
+        const all = [...firstPage, ...rest.flatMap((d) => extractAssetList(d).map(normaliseAsset))];
+        setAssets(all);
+        setCacheEntry("assets_list_v2", { assets: all, total: Number(result?.total) || all.length });
+      } else {
+        setCacheEntry("assets_list_v2", { assets: firstPage, total: Number(result?.total) || firstPage.length });
+      }
+    } catch { /* ignore background errors */ }
   };
 
 
@@ -686,45 +684,72 @@ export default function MobileNewInspectionPage() {
           <div className="space-y-2">
             <Label className="text-sm">Asset *</Label>
 
-            <Input
-              value={assetSearch}
-              onChange={(e) => setAssetSearch(e.target.value)}
-              placeholder="Type asset ref, road, asset type, or description..."
-              className="h-11 mb-2"
-            />
+            {/* Show selected asset badge when pre-populated */}
+            {selectedAsset && (
+              <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded-md">
+                <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                <span className="text-sm font-medium text-green-800 truncate">
+                  {selectedAsset.asset_ref || selectedAsset.asset_number || selectedAsset.reference_number || "Asset selected"}
+                  {(selectedAsset.asset_type_name || selectedAsset.asset_type) && (
+                    <span className="text-green-600 font-normal"> · {selectedAsset.asset_type_name || selectedAsset.asset_type}</span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="ml-auto text-green-600 hover:text-red-500"
+                  onClick={() => {
+                    setSelectedAsset(null);
+                    setFormData((prev: any) => ({ ...prev, asset_id: "", asset_ref: "", asset_type: "" }));
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
-            <Select
-              value={formData.asset_id || ""}
-              onValueChange={handleAssetChange}
-            >
-              <SelectTrigger className="h-11">
-                <SelectValue placeholder="Select asset to inspect" />
-              </SelectTrigger>
+            {!selectedAsset && (
+              <>
+                <Input
+                  value={assetSearch}
+                  onChange={(e) => setAssetSearch(e.target.value)}
+                  placeholder="Type asset ref, road, asset type, or description..."
+                  className="h-11 mb-2"
+                />
 
-              <SelectContent>
-                {filteredAssetOptions.map((asset: any) => {
-                  const assetId = String(asset.asset_id || asset.id || "");
-                  const assetRef =
-                    asset.asset_ref ||
-                    asset.reference_number ||
-                    asset.asset_number ||
-                    asset.code ||
-                    "Unnamed asset";
+                <Select
+                  value={formData.asset_id || ""}
+                  onValueChange={handleAssetChange}
+                >
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Select asset to inspect" />
+                  </SelectTrigger>
 
-                  const assetType =
-                    asset.asset_type_name ||
-                    asset.asset_type ||
-                    asset.type_name ||
-                    "";
+                  <SelectContent>
+                    {filteredAssetOptions.map((asset: any) => {
+                      const assetId = String(asset.asset_id || asset.id || "");
+                      const assetRef =
+                        asset.asset_ref ||
+                        asset.reference_number ||
+                        asset.asset_number ||
+                        asset.code ||
+                        "Unnamed asset";
 
-                  return (
-                    <SelectItem key={assetId} value={assetId}>
-                      {assetType ? `${assetRef} - ${assetType}` : assetRef}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
+                      const assetType =
+                        asset.asset_type_name ||
+                        asset.asset_type ||
+                        asset.type_name ||
+                        "";
+
+                      return (
+                        <SelectItem key={assetId} value={assetId}>
+                          {assetType ? `${assetRef} - ${assetType}` : assetRef}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
           </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -739,13 +764,6 @@ export default function MobileNewInspectionPage() {
               </div>
               <div className="space-y-2">
                 <Label className="text-sm">Weather</Label>
-                <Input
-                  value={assetSearch}
-                  onChange={(e) => setAssetSearch(e.target.value)}
-                  placeholder="Type asset reference, road, type, or description..."
-                  className="mb-2"
-                />                
-                
                 <Select
                   value={formData.weather_conditions}
                   onValueChange={(value) => setFormData({ ...formData, weather_conditions: value })}

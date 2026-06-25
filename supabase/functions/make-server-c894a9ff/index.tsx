@@ -2848,20 +2848,10 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     
     // Wrap database query with retry logic for network resilience
     const { data: assets, error, count } = await retryWithBackoff(async () => {
-      // Query from tams360_assets_v which has km_marker field
+      // Query from tams360_assets_v — all users see all assets
       let query = supabase
         .from("tams360_assets_v")
-        .select("*", { count: includeCount ? 'exact' : undefined })
-        .eq("tenant_id", userProfile.tenant_id);
-
-      // NOTE: All users within a tenant can see all tenant assets
-      // Field users need visibility to all assets for inspection and maintenance workflows
-      // Tenant filtering provides sufficient data isolation
-      
-      // Removed restrictive field_user filtering - all users see all tenant assets
-      // if (userProfile.role === "field_user") {
-      //   query = query.eq("created_by", userData.user.id);
-      // }
+        .select("*", { count: includeCount ? 'exact' : undefined });
 
       const result = await query
         .order("asset_id", { ascending: false })

@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import { getCacheEntry, setCacheEntry } from "../../utils/dataCache";
 
 interface Asset {
   id: string;
@@ -166,6 +167,7 @@ export default function MobileAssetsPage() {
     if (!accessToken) return;
 
     const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+    let hasSharedCache = false;
 
     try {
       setLoading(true);
@@ -176,7 +178,26 @@ export default function MobileAssetsPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
+      const extractAssetList = (result: any) =>
+        Array.isArray(result) ? result :
+        Array.isArray(result?.assets) ? result.assets :
+        Array.isArray(result?.data) ? result.data :
+        Array.isArray(result?.rows) ? result.rows :
+        Array.isArray(result?.items) ? result.items :
+        [];
+
+      const cached = getCacheEntry<{ assets: any[]; total: number }>("assets_list_v2");
+      hasSharedCache = Boolean(cached?.assets?.length);
+      if (cached?.assets) {
+        const normalisedCached = normaliseAssets(cached.assets);
+        const mergedCached = mergePendingOfflineAssets(normalisedCached).assets;
+        setAssets(mergedCached);
+        setFilteredAssets(mergedCached);
+        setLoadedFromCache(false);
+        setLoading(false);
+      }
+
+      const response = await fetch(`${API_URL}/assets?pageSize=500`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -192,24 +213,55 @@ export default function MobileAssetsPage() {
         );
       }
 
-      const list =
-        Array.isArray(result) ? result :
-        Array.isArray(result.assets) ? result.assets :
-        Array.isArray(result.data) ? result.data :
-        Array.isArray(result.rows) ? result.rows :
-        Array.isArray(result.items) ? result.items :
-        [];
+      const firstPageAssets = normaliseAssets(extractAssetList(result));
+      const mergedFirstPage = mergePendingOfflineAssets(firstPageAssets).assets;
 
-      const normalised = normaliseAssets(list);
-      const merged = mergePendingOfflineAssets(normalised).assets;
-
-      setAssets(merged);
-      setFilteredAssets(merged);
+      setAssets(mergedFirstPage);
+      setFilteredAssets(mergedFirstPage);
       setLoadedFromCache(false);
-      await AssetsCacheService.setAll(normalised);
+      setLoading(false);
+
+      const totalPages = Math.max(
+        Number(result?.totalPages ?? result?.total_pages ?? 1) || 1,
+        1
+      );
+      const remainingPages = Array.from({ length: totalPages - 1 }, (_, index) => index + 2);
+
+      const remainingResults = await Promise.all(
+        remainingPages.map((page) =>
+          fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }).then(async (pageResponse) => {
+            if (!pageResponse.ok) {
+              throw new Error(`Failed to fetch assets page ${page}: ${pageResponse.status}`);
+            }
+            return pageResponse.json();
+          })
+        )
+      );
+
+      const allAssets = [
+        ...firstPageAssets,
+        ...remainingResults.flatMap((pageResult) => normaliseAssets(extractAssetList(pageResult))),
+      ];
+      const mergedAllAssets = mergePendingOfflineAssets(allAssets).assets;
+      const total = Number(result?.total) || allAssets.length;
+
+      setAssets(mergedAllAssets);
+      setFilteredAssets(mergedAllAssets);
+      setLoadedFromCache(false);
+      setCacheEntry("assets_list_v2", { assets: allAssets, total });
+      await AssetsCacheService.setAll(allAssets);
     } catch (error) {
       console.error("Failed to fetch assets:", error);
       const message = error instanceof Error ? error.message : "Failed to load assets";
+      if (hasSharedCache) {
+        setLoadError(message);
+        return;
+      }
+
       const loadedCached = await loadCachedAssets(message);
       if (!loadedCached) {
         setLoadError(message);
