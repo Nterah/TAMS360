@@ -524,16 +524,30 @@ export default function FieldCapturePage() {
   const fetchCaptureLookups = async () => {
     setLoadingAssetTypes(true);
     try {
-      const [assetTypeData, assetData, tenantInfo, wardConfig] = await Promise.all([
+      // Fetch asset-types, first asset page, tenant info and ward config in parallel
+      const [assetTypeData, assetFirstPage, tenantInfo, wardConfig] = await Promise.all([
         fetchJson(`${API_URL}/asset-types`),
-        fetchJson(`${API_URL}/assets?pageSize=5000`),
+        fetchJson(`${API_URL}/assets?pageSize=500`),
         fetchJson(`${API_URL}/admin/tenant-info`),
         fetchJson(`${API_URL}/admin/tenant-config/wards`),
       ]);
 
+      let assets = assetFirstPage?.assets || assetFirstPage?.data || [];
+
+      // Fetch remaining asset pages in parallel to populate lookup dropdowns
+      if (assetFirstPage?.totalPages > 1) {
+        const remainingPages = Array.from(
+          { length: Math.min(assetFirstPage.totalPages, 4) - 1 },
+          (_, i) => i + 2
+        );
+        const pageResults = await Promise.all(
+          remainingPages.map((page) => fetchJson(`${API_URL}/assets?page=${page}&pageSize=500`))
+        );
+        assets = [...assets, ...pageResults.flatMap((d) => d?.assets || d?.data || [])];
+      }
+
       const rawTypes = assetTypeData?.assetTypes || assetTypeData?.asset_types || assetTypeData?.types || assetTypeData?.data || [];
       const cleanTypes = rawTypes.map(normaliseAssetType).filter(Boolean) as Option[];
-      const assets = assetData?.assets || assetData?.data || [];
       const assetTypesFromAssets = assets.map((asset: any) => normaliseAssetType(asset)).filter(Boolean) as Option[];
       const typeMap = new Map<string, Option>();
       [...cleanTypes, ...assetTypesFromAssets, ...FALLBACK_ASSET_TYPES].forEach((type) => {

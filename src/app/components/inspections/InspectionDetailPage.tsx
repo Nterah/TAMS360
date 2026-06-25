@@ -187,7 +187,51 @@ export default function InspectionDetailPage() {
       if (response.ok) {
         const data = await response.json();
         setInspection(data.inspection);
-        setPhotos(data.inspection.photos || []);
+
+        // Convert any signed/expiring URL to a permanent public URL
+        const toPublicUrl = (url: string): string => {
+          if (!url) return url;
+          if (url.includes("/object/sign/")) {
+            const match = url.match(/\/object\/sign\/([^?]+)/);
+            if (match) return `https://${projectId}.supabase.co/storage/v1/object/public/${match[1]}`;
+          }
+          if (url.includes("/object/public/")) return url.split("?")[0];
+          return url;
+        };
+
+        const storedUrls: any[] = [];
+
+        // Try all field names the backend may use for inspection-level photos
+        const rawUrls =
+          data.inspection.photo_urls ??
+          data.inspection.photos_urls ??
+          data.inspection.photoUrls ??
+          data.inspection.image_urls ??
+          null;
+
+        if (Array.isArray(rawUrls)) {
+          rawUrls.forEach((u: string, i: number) => {
+            const url = toPublicUrl(u);
+            if (url) storedUrls.push({ url, signedUrl: url, photo_number: i, caption: `Photo ${i + 1}` });
+          });
+        }
+
+        // Parse photo URLs embedded in comments as ::photos::["url1","url2"]
+        const commentsText = data.inspection.comments || "";
+        const photosEmbedMatch = commentsText.match(/::photos::(\[[\s\S]*?\])$/);
+        if (photosEmbedMatch) {
+          try {
+            const embeddedUrls: string[] = JSON.parse(photosEmbedMatch[1]);
+            embeddedUrls.forEach((u, i) => {
+              const url = toPublicUrl(u);
+              if (url) storedUrls.push({ url, signedUrl: url, photo_number: storedUrls.length + i, caption: `Photo ${storedUrls.length + i + 1}` });
+            });
+          } catch { /* malformed */ }
+        }
+
+        // Also check top-level photos array from backend
+        const apiPhotos = Array.isArray(data.inspection.photos) ? data.inspection.photos : [];
+        setPhotos([...apiPhotos, ...storedUrls]);
       } else {
         toast.error("Failed to load inspection");
         navigate("/inspections");
@@ -871,18 +915,25 @@ const worstUrgency = String(
                         ) : null;
                       })()}
 
-                      {/* Legacy photo URL support */}
+                      {/* Component photo — from storage URL or base64 data URI */}
                       {comp.photo_url && getComponentPhotos(comp.component_order).length === 0 && (
-                        <div className="flex items-center gap-2 p-3 bg-background rounded border">
-                          <ImageIcon className="w-4 h-4 text-muted-foreground" />
-                          <a 
-                            href={comp.photo_url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-sm text-primary hover:underline"
+                        <div className="mb-4">
+                          <p className="text-xs text-muted-foreground mb-2">Component Photo</p>
+                          <div
+                            className="relative group cursor-pointer rounded-lg overflow-hidden border hover:border-primary transition-colors w-40"
+                            onClick={() => window.open(comp.photo_url, '_blank')}
                           >
-                            View Photo
-                          </a>
+                            <div className="aspect-square relative">
+                              <img
+                                src={comp.photo_url}
+                                alt={`${comp.component_name} photo`}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E';
+                                }}
+                              />
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

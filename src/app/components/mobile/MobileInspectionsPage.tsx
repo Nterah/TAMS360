@@ -140,7 +140,7 @@ export default function MobileInspectionsPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/inspections?pageSize=5000`, {
+      const response = await fetch(`${API_URL}/inspections?pageSize=500`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -148,7 +148,24 @@ export default function MobileInspectionsPage() {
 
       if (response.ok) {
         const data = await response.json();
-        const list = data.inspections || data.rows || data.data || [];
+        let list = data.inspections || data.rows || data.data || [];
+
+        // Fetch remaining pages in parallel if needed
+        if (data.totalPages > 1) {
+          const remainingPages = Array.from(
+            { length: Math.min(data.totalPages, 4) - 1 },
+            (_, i) => i + 2
+          );
+          const pageResults = await Promise.all(
+            remainingPages.map((page) =>
+              fetch(`${API_URL}/inspections?page=${page}&pageSize=500`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+              }).then((r) => (r.ok ? r.json() : null))
+            )
+          );
+          list = [...list, ...pageResults.flatMap((d) => d?.inspections || d?.data || [])];
+        }
+
         const normalised = normaliseInspections(Array.isArray(list) ? list : []);
         setInspections(normalised);
         setFilteredInspections(normalised);

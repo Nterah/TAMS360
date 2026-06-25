@@ -156,7 +156,7 @@ export default function NewInspectionPage() {
 
   const fetchAssets = async () => {
     try {
-      const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
+      const response = await fetch(`${API_URL}/assets?pageSize=500`, {
         headers: {
           Authorization: `Bearer ${accessToken || publicAnonKey}`,
         },
@@ -164,13 +164,33 @@ export default function NewInspectionPage() {
 
       if (response.ok) {
         const data = await response.json();
-        const list =
+        let list =
           Array.isArray(data) ? data :
           Array.isArray(data.assets) ? data.assets :
           Array.isArray(data.data) ? data.data :
           Array.isArray(data.rows) ? data.rows :
           Array.isArray(data.items) ? data.items :
           [];
+
+        // Fetch remaining pages in parallel
+        if (data.totalPages > 1) {
+          const remainingPages = Array.from(
+            { length: Math.min(data.totalPages, 10) - 1 },
+            (_, i) => i + 2
+          );
+          const pageResults = await Promise.all(
+            remainingPages.map((page) =>
+              fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
+                headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+              }).then((r) => (r.ok ? r.json() : null))
+            )
+          );
+          list = [...list, ...pageResults.flatMap((d) =>
+            Array.isArray(d?.assets) ? d.assets :
+            Array.isArray(d?.data) ? d.data :
+            []
+          )];
+        }
 
         setAssets(list.map(normaliseAsset));
       }
@@ -271,10 +291,10 @@ export default function NewInspectionPage() {
       return;
     }
     
-    // Check template exists
+    // Warn if no template, but still allow saving (inspector may just be recording photos/notes)
     if (!componentTemplate || !componentTemplate.items || componentTemplate.items.length === 0) {
-      toast.error("Cannot save inspection - no template loaded. Please select a different asset or contact an administrator.");
-      return;
+      const proceed = confirm("No component template is configured for this asset type. The inspection will be saved without component scores. Continue?");
+      if (!proceed) return;
     }
 
     if (
@@ -289,13 +309,133 @@ export default function NewInspectionPage() {
     setLoading(true);
 
     try {
+      const assetRef = selectedAsset?.asset_ref || "";
+      const folderPath = assetRef || formData.asset_id;
+
+      // Upload via edge function (always works). Returns the signed URL from the response.
+      const uploadViaEdgeFunction = async (file: File, fileName: string): Promise<string | null> => {
+        try {
+          const fd = new FormData();
+          fd.append("file", file);
+          fd.append("bucket", "tams360-inspection-photos");
+          fd.append("folderPath", folderPath);
+          const r = await fetch(`${API_URL}/storage/upload`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${accessToken || publicAnonKey}` },
+            body: fd,
+          });
+          if (r.ok) {
+            const responseData = await r.json();
+            console.log('[Upload] Edge function response:', JSON.stringify(responseData));
+            const { url, path, signedUrl, publicUrl } = responseData;
+
+            // Convert signed URL → permanent public URL
+            // Signed format: .../object/sign/{bucket}/{path}?token=...
+            // Public format: .../object/public/{bucket}/{path}
+            const rawUrl = publicUrl || url || signedUrl || "";
+            let permanentUrl: string | null = null;
+            if (rawUrl.includes("/object/sign/")) {
+              const match = rawUrl.match(/\/object\/sign\/([^?]+)/);
+              if (match) {
+                permanentUrl = `https://${projectId}.supabase.co/storage/v1/object/public/${match[1]}`;
+              }
+            } else if (rawUrl.includes("/object/public/")) {
+              permanentUrl = rawUrl.split("?")[0]; // strip any expiry token
+            } else if (path) {
+              // Derive bucket from signed URL path segment
+              const bucketMatch = rawUrl.match(/\/sign\/([^/]+)\//);
+              const bucket = bucketMatch?.[1];
+              if (bucket) {
+                permanentUrl = `https://${projectId}.supabase.co/storage/v1/object/public/${bucket}/${path}`;
+              }
+            }
+            const returnedUrl = permanentUrl || rawUrl || path || null;
+            console.log('[Upload] Using URL:', returnedUrl);
+            return returnedUrl;
+          } else {
+            const errText = await r.text().catch(() => `HTTP ${r.status}`);
+            toast.error(`Photo upload failed (${r.status}): ${errText.slice(0, 120)}`);
+          }
+        } catch (e: any) {
+          toast.error(`Photo upload error: ${e?.message || "Unknown error"}`);
+        }
+        return null;
+      };
+
+      // Convert base64 data URI to File
+      const dataUriToFile = async (dataUri: string, fileName: string): Promise<File | null> => {
+        try {
+          const res = await fetch(dataUri);
+          const blob = await res.blob();
+          return new File([blob], fileName, { type: blob.type });
+        } catch { return null; }
+      };
+
+      // Upload component photos
+      const componentScoresWithUrls = await Promise.all(
+        formData.component_scores.map(async (score: any, idx: number) => {
+          let photoUrl = score.photo_url || null;
+          if (photoUrl && photoUrl.startsWith("data:")) {
+            const ext = photoUrl.split(";")[0].split("/")[1] || "jpg";
+            const file = await dataUriToFile(photoUrl, `comp_${idx + 1}.${ext}`);
+            if (file) {
+              const uploaded = await uploadViaEdgeFunction(file, `comp_${idx + 1}.${ext}`);
+              photoUrl = uploaded || null; // null strips base64 from payload
+            }
+          }
+          return {
+            component_name: score.component_name,
+            degree: score.degree,
+            extent: score.extent,
+            relevancy: score.relevancy,
+            urgency: score.urgency,
+            conditional_index: score.ci,
+            quantity: score.quantity,
+            unit: score.unit,
+            remedial_work: score.remedial_work,
+            rate: score.rate,
+            cost: score.cost,
+            comments: score.comments,
+            photo_url: photoUrl,
+          };
+        })
+      );
+
+      // Upload top-level inspection photos
+      const topPhotoUrls: string[] = [];
+      for (let i = 0; i < photos.length; i++) {
+        const uploaded = await uploadViaEdgeFunction(photos[i], `inspection_${i + 1}_${photos[i].name}`);
+        if (uploaded) topPhotoUrls.push(uploaded);
+      }
+
+      // Persist photo URLs to localStorage keyed by asset_id so AssetDetailPage
+      // can display them even if the backend list endpoint omits the comments field
+      if (topPhotoUrls.length > 0 && formData.asset_id) {
+        try {
+          const storageKey = `asset_photos_${formData.asset_id}`;
+          const existing: string[] = JSON.parse(localStorage.getItem(storageKey) || "[]");
+          const merged = Array.from(new Set([...existing, ...topPhotoUrls]));
+          localStorage.setItem(storageKey, JSON.stringify(merged));
+          console.log('[Photos] Saved to localStorage key', storageKey, merged);
+        } catch { /* storage quota exceeded */ }
+      }
+
+      // Embed photo URLs in comments so they are guaranteed to be persisted and retrievable
+      // Format: regular comments + \n\n::photos::["url1","url2"]
+      const regularComments = [formData.aggregates.overall_remedial, formData.overall_comments]
+        .filter((c) => c)
+        .join("\n\n");
+      console.log('[Photos] Top photo URLs to embed:', topPhotoUrls);
+      const commentsWithPhotos = topPhotoUrls.length > 0
+        ? `${regularComments}\n\n::photos::${JSON.stringify(topPhotoUrls)}`.trim()
+        : regularComments;
+      console.log('[Photos] Final comments value:', commentsWithPhotos);
+
       const payload = {
         asset_id: formData.asset_id,
         inspection_date: formData.inspection_date,
         inspector_name: formData.inspector_name,
         weather_conditions: formData.weather_conditions,
-        // Overall fields from aggregates
-        // IMPORTANT: conditional_index must store the final CI shown to users/reports
         conditional_index: formData.aggregates.ci_final,
         ci_health: formData.aggregates.ci_health,
         ci_safety: formData.aggregates.ci_safety,
@@ -306,26 +446,9 @@ export default function NewInspectionPage() {
         relevancy: formData.aggregates.overall_relevancy,
         total_remedial_cost: formData.aggregates.total_cost || 0,
         remedial_notes: formData.aggregates.overall_remedial || "",
-        // Combined comments
-        comments: [formData.aggregates.overall_remedial, formData.overall_comments]
-          .filter((c) => c)
-          .join("\n\n"),
-        // Component scores
-        component_scores: formData.component_scores.map((score: any) => ({
-          component_name: score.component_name,
-          degree: score.degree,
-          extent: score.extent,
-          relevancy: score.relevancy,
-          urgency: score.urgency,
-          conditional_index: score.ci,
-          quantity: score.quantity,
-          unit: score.unit,
-          remedial_work: score.remedial_work,
-          rate: score.rate,
-          cost: score.cost,
-          comments: score.comments,
-          photo_url: score.photo_url,
-        })),
+        comments: commentsWithPhotos,
+        component_scores: componentScoresWithUrls,
+        photo_urls: topPhotoUrls,
         latitude: formData.latitude,
         longitude: formData.longitude,
       };
@@ -340,15 +463,15 @@ export default function NewInspectionPage() {
       });
 
       if (response.ok) {
-        alert("Inspection saved successfully!");
+        toast.success("Inspection saved successfully!");
         navigate("/inspections");
       } else {
         const error = await response.json();
-        alert(`Error saving inspection: ${error.error}`);
+        toast.error(`Error saving inspection: ${error.error}`);
       }
     } catch (error) {
       console.error("Error saving inspection:", error);
-      alert("Failed to save inspection");
+      toast.error("Failed to save inspection");
     } finally {
       setLoading(false);
     }

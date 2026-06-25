@@ -57,6 +57,104 @@ export default function AssetDetailPage() {
     }
   }, [assetId]);
 
+  // After asset loads, extract any photo URLs stored directly on the asset record
+  // (saved by FieldCapturePage as photo_urls / photo_url)
+  useEffect(() => {
+    if (!asset) return;
+
+    const toPublicUrl = (pathOrUrl: string): string => {
+      if (!pathOrUrl) return "";
+      if (pathOrUrl.startsWith("http")) return pathOrUrl;
+      return `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${pathOrUrl}`;
+    };
+
+    const assetPhotoUrls: string[] = [];
+    if (asset.photo_urls && Array.isArray(asset.photo_urls)) {
+      asset.photo_urls.forEach((p: string) => { if (p) assetPhotoUrls.push(toPublicUrl(p)); });
+    } else if (typeof asset.photo_urls === "string" && asset.photo_urls) {
+      assetPhotoUrls.push(toPublicUrl(asset.photo_urls));
+    }
+    if (asset.photo_url && typeof asset.photo_url === "string") {
+      assetPhotoUrls.push(toPublicUrl(asset.photo_url));
+    }
+
+    if (assetPhotoUrls.length === 0) return;
+
+    // Merge with photos from the storage API endpoint (avoid duplicates by URL)
+    setPhotos((prev) => {
+      const existingUrls = new Set(prev.map((p: any) => p.signedUrl || p.url || ""));
+      const merged = [...prev];
+      assetPhotoUrls.forEach((url, idx) => {
+        if (!existingUrls.has(url)) {
+          merged.push({ url, signedUrl: url, photo_number: idx, caption: `Photo ${idx + 1}` });
+        }
+      });
+      return merged;
+    });
+  }, [asset]);
+
+  // Also pull photo URLs from all inspections for this asset
+  useEffect(() => {
+    if (!assetId) return;
+
+    // Convert any signed/expiring URL to a permanent public URL
+    const toPublicUrl = (url: string): string => {
+      if (!url) return url;
+      if (url.includes("/object/sign/")) {
+        const match = url.match(/\/object\/sign\/([^?]+)/);
+        if (match) return `https://${projectId}.supabase.co/storage/v1/object/public/${match[1]}`;
+      }
+      // Strip expiry token from public URLs just in case
+      if (url.includes("/object/public/")) return url.split("?")[0];
+      return url;
+    };
+
+    const allUrls: string[] = [];
+
+    // 1. Read from localStorage, converting any expired signed URLs to public
+    try {
+      const stored: string[] = JSON.parse(localStorage.getItem(`asset_photos_${assetId}`) || "[]");
+      const converted = stored.map(toPublicUrl);
+      // Re-save converted URLs so they don't need converting next time
+      if (converted.some((u, i) => u !== stored[i])) {
+        localStorage.setItem(`asset_photos_${assetId}`, JSON.stringify(converted));
+      }
+      converted.forEach((u) => { if (u) allUrls.push(u); });
+      console.log('[Photos] From localStorage:', converted.length, 'photos');
+    } catch { /* ignore */ }
+
+    // 2. Read from inspection records returned by API
+    if (inspections && inspections.length > 0) {
+      inspections.forEach((insp: any) => {
+        const raw = insp.photo_urls ?? insp.photos_urls ?? insp.photoUrls ?? null;
+        if (Array.isArray(raw)) {
+          raw.forEach((u: string) => { if (u) allUrls.push(toPublicUrl(u)); });
+        }
+        const commentsText = insp.comments || "";
+        const embeddedMatch = commentsText.match(/::photos::(\[[\s\S]*?\])(?:\s*$|$)/);
+        if (embeddedMatch) {
+          try {
+            const embeddedUrls: string[] = JSON.parse(embeddedMatch[1]);
+            embeddedUrls.forEach((u: string) => { if (u) allUrls.push(toPublicUrl(u)); });
+          } catch { /* malformed JSON */ }
+        }
+      });
+    }
+
+    if (allUrls.length === 0) return;
+
+    setPhotos((prev) => {
+      const existingUrls = new Set(prev.map((p: any) => p.signedUrl || p.url || ""));
+      const merged = [...prev];
+      allUrls.forEach((url, idx) => {
+        if (!existingUrls.has(url)) {
+          merged.push({ url, signedUrl: url, photo_number: prev.length + idx, caption: `Inspection photo ${prev.length + idx + 1}` });
+        }
+      });
+      return merged;
+    });
+  }, [inspections, assetId]);
+
   const fetchAssetDetails = async () => {
     try {
       // Validate assetId is a UUID before making the request
@@ -108,6 +206,7 @@ export default function AssetDetailPage() {
 
       if (response.ok) {
         const data = await response.json();
+        console.log('[Inspections] Fetched inspections:', data.inspections?.length, 'Sample comments field:', data.inspections?.[0]?.comments);
         setInspections(data.inspections || []);
       }
     } catch (error) {
@@ -167,9 +266,15 @@ export default function AssetDetailPage() {
       
       if (response.ok) {
         const data = await response.json();
-        console.log(`[Photos] Response data:`, data);
-        console.log(`[Photos] Found ${data.photos?.length || 0} photos`);
-        setPhotos(data.photos || []);
+        console.log(`[Photos] Found ${data.photos?.length || 0} photos from API`);
+        // Merge API photos with locally-stored photos (don't overwrite)
+        if (data.photos && data.photos.length > 0) {
+          setPhotos((prev) => {
+            const existingUrls = new Set(prev.map((p: any) => p.signedUrl || p.url || ""));
+            const newPhotos = data.photos.filter((p: any) => !existingUrls.has(p.signedUrl || p.url || ""));
+            return [...prev, ...newPhotos];
+          });
+        }
       } else {
         const error = await response.json();
         console.error(`[Photos] Error response:`, error);
@@ -625,21 +730,18 @@ export default function AssetDetailPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Main Asset Photo</CardTitle>
+              <CardTitle>Asset Photos</CardTitle>
               <CardDescription>
-                {photos.filter(p => p.photo_number === '0' || p.photo_number === 0).length} main photo{photos.filter(p => p.photo_number === '0' || p.photo_number === 0).length !== 1 ? 's' : ''} from Supabase Storage
+                {photos.length} photo{photos.length !== 1 ? "s" : ""} from Supabase Storage
               </CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {(() => {
-            // Filter for main photos only (photo_number = 0)
-            const mainPhotos = photos.filter(p => p.photo_number === '0' || p.photo_number === 0);
-            
-            return mainPhotos.length > 0 ? (
+            return photos.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {mainPhotos.map((photo, index) => (
+                {photos.map((photo, index) => (
                   <div
                     key={`${photo.photo_id}-${photo.path || index}`}
                     className="relative group cursor-pointer rounded-lg overflow-hidden border hover:border-primary transition-colors"

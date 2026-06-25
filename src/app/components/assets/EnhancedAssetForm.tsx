@@ -1,5 +1,4 @@
-import { useState, useEffect, useContext } from "react";
-import { AuthContext } from "../../App";
+import { useState, useEffect, useRef } from "react";
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -7,9 +6,8 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
-import { LocateFixed, RefreshCw, Info, MapPin } from "lucide-react";
+import { LocateFixed, RefreshCw, Info, MapPin, Camera, X, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import {
   buildGpsOverrideMessage,
   captureBestGpsFix,
@@ -52,11 +50,10 @@ const STATUSES = ["Active", "Inactive", "Needs Maintenance", "Scheduled for Repl
 interface EnhancedAssetFormProps {
   onSubmit: (assetData: any) => void;
   onCancel: () => void;
+  existingAssets?: any[];
 }
 
-export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetFormProps) {
-  const { accessToken } = useContext(AuthContext);
-  const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets = [] }: EnhancedAssetFormProps) {
 
   // Auto-numbering fields
   const [assetType, setAssetType] = useState("");
@@ -77,6 +74,10 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
   const gpsAccuracyStatus = classifyGpsAccuracy(locationAccuracy);
   const isLinearAsset = LINEAR_ASSET_TYPES.has(assetType);
 
+  // Tracks whether the user manually typed a sequential number (suppresses auto-fetch)
+  const seqNumManuallyEdited = useRef(false);
+  const [fetchingSeqNum, setFetchingSeqNum] = useState(false);
+
   // Other asset fields
   const [assetName, setAssetName] = useState("");
   const [installer, setInstaller] = useState("");
@@ -93,6 +94,10 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
   const [replacementValue, setReplacementValue] = useState("");
   const [installationCost, setInstallationCost] = useState("");
 
+  // Photo upload (laptop/tablet)
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+
   // Auto-detect location on component mount
   useEffect(() => {
     try {
@@ -107,8 +112,13 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
     generateAssetReference();
   }, [assetType, roadName, roadSubsection, direction, roadSide, sequentialNumber]);
 
-  // Don't auto-fetch sequential number - only fetch when user clicks refresh button
-  // This prevents backend timeout errors on component mount
+  // Auto-compute sequential number when prefix fields change,
+  // unless the user has manually typed a number.
+  useEffect(() => {
+    if (!assetType || !roadName || !direction) return;
+    if (seqNumManuallyEdited.current) return;
+    fetchNextSequentialNumber();
+  }, [assetType, roadName, roadSubsection, direction, roadSide, existingAssets]);
 
   const detectLocation = async () => {
     if (!navigator.geolocation) {
@@ -158,69 +168,30 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
     }
   };
 
-  const fetchNextSequentialNumber = async () => {
+  const fetchNextSequentialNumber = () => {
+    if (!assetType || !roadName || !direction) return;
+
+    const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
+    const fullRoadName = roadName + roadSubsection;
+    const prefix = roadSide
+      ? `${typeAbbr}-${fullRoadName}-${direction}-${roadSide}-`
+      : `${typeAbbr}-${fullRoadName}-${direction}-`;
+
+    setFetchingSeqNum(true);
     try {
-      // Build the prefix: {TYPE}-{ROAD}{SUBSECTION}-{DIRECTION}[-{SIDE}]-
-      const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
-      const fullRoadName = roadName + roadSubsection;
-      const prefix = roadSide
-        ? `${typeAbbr}-${fullRoadName}-${direction}-${roadSide}-`
-        : `${typeAbbr}-${fullRoadName}-${direction}-`;
+      const matchingNumbers = existingAssets
+        .map((asset: any) => asset.asset_ref || "")
+        .filter((ref: string) => ref.startsWith(prefix))
+        .map((ref: string) => {
+          const match = ref.match(/-(\d{3})$/);
+          return match ? parseInt(match[1], 10) : 0;
+        })
+        .filter((n: number) => !isNaN(n));
 
-      // Show loading toast
-      toast.loading("Fetching next available number...", { id: "fetch-seq" });
-
-      // Query backend for existing assets with this prefix (with timeout)
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-
-      const response = await fetch(
-        `${API_URL}/assets?pageSize=1000`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken || publicAnonKey}`,
-          },
-          signal: controller.signal,
-        }
-      );
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const data = await response.json();
-        const matchingAssets = (data.assets || []).filter((asset: any) =>
-          asset.asset_ref?.startsWith(prefix)
-        );
-
-        // Extract existing numbers
-        const existingNumbers = matchingAssets
-          .map((asset: any) => {
-            const ref = asset.asset_ref || "";
-            const match = ref.match(/-(\d{3})$/);
-            return match ? parseInt(match[1], 10) : 0;
-          })
-          .filter((num: number) => !isNaN(num));
-
-        // Get next number
-        const nextNum = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
-        setSequentialNumber(String(nextNum).padStart(3, "0"));
-        toast.success(`Next available number: ${String(nextNum).padStart(3, "0")}`, { id: "fetch-seq" });
-      } else {
-        // Default to 001 if fetch fails
-        console.warn("Failed to fetch assets for sequential numbering, defaulting to 001");
-        setSequentialNumber("001");
-        toast.warning("Couldn't fetch existing assets. Defaulting to 001. Please verify manually.", { id: "fetch-seq" });
-      }
-    } catch (error: any) {
-      console.error("Error fetching sequential number:", error);
-      // Default to 001 on any error
-      setSequentialNumber("001");
-      
-      if (error.name === 'AbortError') {
-        toast.warning("Request timed out. Defaulting to 001. Please verify manually.", { id: "fetch-seq" });
-      } else {
-        toast.warning("Couldn't fetch existing assets. Defaulting to 001. Please verify manually.", { id: "fetch-seq" });
-      }
+      const nextNum = matchingNumbers.length > 0 ? Math.max(...matchingNumbers) + 1 : 1;
+      setSequentialNumber(String(nextNum).padStart(3, "0"));
+    } finally {
+      setFetchingSeqNum(false);
     }
   };
 
@@ -239,6 +210,25 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
       : `${typeAbbr}-${fullRoadName}-${direction}-${sequentialNumber}`;
 
     setGeneratedAssetRef(ref);
+  };
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    imageFiles.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setPhotoPreviews((prev) => [...prev, ev.target?.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+    setPhotoFiles((prev) => [...prev, ...imageFiles]);
+    e.target.value = "";
+  };
+
+  const removePhoto = (index: number) => {
+    setPhotoFiles((prev) => prev.filter((_, i) => i !== index));
+    setPhotoPreviews((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = () => {
@@ -285,6 +275,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
       responsibleParty,
       replacementValue,
       installationCost,
+      photos: photoFiles,
     };
 
     onSubmit(assetData);
@@ -408,26 +399,38 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
               Sequential Number <span className="text-destructive">*</span>
             </Label>
             <div className="flex gap-2">
-              <Input
-                id="sequential-number"
-                value={sequentialNumber}
-                onChange={(e) => setSequentialNumber(e.target.value.padStart(3, "0"))}
-                placeholder="001"
-                maxLength={3}
-              />
+              <div className="relative flex-1">
+                <Input
+                  id="sequential-number"
+                  value={sequentialNumber}
+                  onChange={(e) => {
+                    seqNumManuallyEdited.current = true;
+                    setSequentialNumber(e.target.value.padStart(3, "0"));
+                  }}
+                  placeholder={fetchingSeqNum ? "Fetching..." : "001"}
+                  maxLength={3}
+                  disabled={fetchingSeqNum}
+                />
+                {fetchingSeqNum && (
+                  <RefreshCw className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />
+                )}
+              </div>
               <Button
                 type="button"
                 variant="outline"
                 size="icon"
-                onClick={fetchNextSequentialNumber}
-                disabled={!assetType || !roadName || !direction}
-                title="Fetch next available number"
+                onClick={() => {
+                  seqNumManuallyEdited.current = false;
+                  fetchNextSequentialNumber();
+                }}
+                disabled={fetchingSeqNum || !assetType || !roadName || !direction}
+                title="Re-fetch next available number"
               >
                 <RefreshCw className="w-4 h-4" />
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Click <RefreshCw className="w-3 h-3 inline" /> to fetch next available number or enter manually
+              Auto-generated when type, road and direction are filled. Click <RefreshCw className="w-3 h-3 inline" /> to refresh.
             </p>
           </div>
         </div>
@@ -711,6 +714,44 @@ export default function EnhancedAssetForm({ onSubmit, onCancel }: EnhancedAssetF
             />
           </div>
         </div>
+      </div>
+
+      {/* Photos */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold border-b pb-2 flex items-center gap-2">
+          <ImageIcon className="w-4 h-4" /> Photos (Optional)
+        </h3>
+        <div className="flex gap-2">
+          <label className="flex-1">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handlePhotoSelect}
+            />
+            <Button type="button" variant="outline" className="w-full" asChild>
+              <span><Camera className="w-4 h-4 mr-2" />Upload Photos</span>
+            </Button>
+          </label>
+        </div>
+        {photoPreviews.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            {photoPreviews.map((src, idx) => (
+              <div key={idx} className="relative group rounded overflow-hidden border aspect-square">
+                <img src={src} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => removePhoto(idx)}
+                  className="absolute top-1 right-1 bg-black/60 rounded-full p-0.5 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">Photos will be uploaded when the asset is saved.</p>
       </div>
 
       {/* Notes */}

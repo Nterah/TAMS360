@@ -90,6 +90,10 @@ export default function AssetsPage() {
   const [filterUrgency, setFilterUrgency] = useState<string>("all");
   const [filterDataQuality, setFilterDataQuality] = useState<boolean>(false);
 
+  // Pagination
+  const PAGE_SIZE = 50;
+  const [currentPage, setCurrentPage] = useState(1);
+
   // Extract unique regions and depots from assets
   const uniqueRegions = Array.from(new Set(assets.map(a => a.region).filter(Boolean)));
   const uniqueDepots = Array.from(new Set(assets.map(a => a.depot).filter(Boolean)));
@@ -153,7 +157,7 @@ export default function AssetsPage() {
     if (!accessToken) return;
 
     try {
-      // Fetch first page with count
+      // Fetch first page to get total page count
       const response = await fetch(`${API_URL}/assets?pageSize=500`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -165,23 +169,27 @@ export default function AssetsPage() {
         const firstPageAssets = (data.assets || []).map(normaliseAssetForDisplay);
         const initialMerged = mergePendingOfflineAssets(firstPageAssets);
 
+        // Show first page immediately while remaining pages load
         setAssets(initialMerged.assets);
         setTotalAssetCount((data.total || 0) + initialMerged.pendingCount);
-        
-        // Load more pages if needed (up to 2000 assets for table display)
+
+        // Fetch remaining pages in parallel (up to page 4 = 2000 assets)
         if (data.totalPages > 1) {
-          const allAssets = [...firstPageAssets];
-          for (let page = 2; page <= Math.min(data.totalPages, 4); page++) {
-            const pageResponse = await fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-              },
-            });
-            if (pageResponse.ok) {
-              const pageData = await pageResponse.json();
-              allAssets.push(...(pageData.assets || []).map(normaliseAssetForDisplay));
-            }
-          }
+          const remainingPages = Array.from(
+            { length: Math.min(data.totalPages, 4) - 1 },
+            (_, i) => i + 2
+          );
+          const pageResponses = await Promise.all(
+            remainingPages.map((page) =>
+              fetch(`${API_URL}/assets?page=${page}&pageSize=500`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+              }).then((r) => (r.ok ? r.json() : null))
+            )
+          );
+          const allAssets = [
+            ...firstPageAssets,
+            ...pageResponses.flatMap((d) => (d?.assets || []).map(normaliseAssetForDisplay)),
+          ];
           const mergedAllAssets = mergePendingOfflineAssets(allAssets);
           setAssets(mergedAllAssets.assets);
           setTotalAssetCount((data.total || allAssets.length) + mergedAllAssets.pendingCount);
@@ -320,114 +328,106 @@ export default function AssetsPage() {
     }
   };
 
-  const filteredAssets = assets.filter((asset) => {
-    // Search term filter
-    const matchesSearch =
-      asset.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.asset_type_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.asset_ref?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.road_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.road_number?.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredAssets = assets
+    .filter((asset) => {
+      // Search term filter
+      const matchesSearch =
+        asset.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        asset.asset_type_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        asset.asset_ref?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        asset.road_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        asset.road_number?.toLowerCase().includes(searchTerm.toLowerCase());
 
-    // Asset type filter
-    const matchesAssetType =
-      filterAssetType === "all" || asset.asset_type_name === filterAssetType;
+      // Asset type filter
+      const matchesAssetType =
+        filterAssetType === "all" || asset.asset_type_name === filterAssetType;
 
-    // Region filter
-    const matchesRegion = filterRegion === "all" || asset.region === filterRegion;
+      // Region filter
+      const matchesRegion = filterRegion === "all" || asset.region === filterRegion;
 
-    // Depot filter
-    const matchesDepot = filterDepot === "all" || asset.depot === filterDepot;
+      // Depot filter
+      const matchesDepot = filterDepot === "all" || asset.depot === filterDepot;
 
-    // Status filter
-    const matchesStatus = filterStatus === "all" || asset.status === filterStatus;
+      // Status filter
+      const matchesStatus = filterStatus === "all" || asset.status === filterStatus;
 
-    // CI Range filter
-    const matchesCIRange = (() => {
-      if (filterCIRange === "all") return true;
-      const ci = resolveCI(asset);
-      if (ci === null || ci === undefined) return filterCIRange === "not-inspected";
-      const normalizedCI = Math.min(Math.max(ci, 0), 100);
-      if (filterCIRange === "excellent") return normalizedCI >= 80;
-      if (filterCIRange === "good") return normalizedCI >= 60 && normalizedCI < 80;
-      if (filterCIRange === "fair") return normalizedCI >= 40 && normalizedCI < 60;
-      if (filterCIRange === "poor") return normalizedCI < 40;
-      return true;
-    })();
+      // CI Range filter
+      const matchesCIRange = (() => {
+        if (filterCIRange === "all") return true;
+        const ci = resolveCI(asset);
+        if (ci === null || ci === undefined) return filterCIRange === "not-inspected";
+        const normalizedCI = Math.min(Math.max(ci, 0), 100);
+        if (filterCIRange === "excellent") return normalizedCI >= 80;
+        if (filterCIRange === "good") return normalizedCI >= 60 && normalizedCI < 80;
+        if (filterCIRange === "fair") return normalizedCI >= 40 && normalizedCI < 60;
+        if (filterCIRange === "poor") return normalizedCI < 40;
+        return true;
+      })();
 
-    // Urgency filter
-    const matchesUrgency = (() => {
-      if (filterUrgency === "all") return true;
-      const urgency = resolveUrgency(asset);
-      if (!urgency) return filterUrgency === "none";
-      if (filterUrgency === "immediate") return urgency === "4" || urgency === "Immediate";
-      if (filterUrgency === "high") return urgency === "3" || urgency === "High";
-      if (filterUrgency === "medium") return urgency === "2" || urgency === "Medium";
-      if (filterUrgency === "low") return urgency === "1" || urgency === "Low" || urgency === "0";
-      return true;
-    })();
+      // Urgency filter
+      const matchesUrgency = (() => {
+        if (filterUrgency === "all") return true;
+        const urgency = resolveUrgency(asset);
+        if (!urgency) return filterUrgency === "none";
+        if (filterUrgency === "immediate") return urgency === "4" || urgency === "Immediate";
+        if (filterUrgency === "high") return urgency === "3" || urgency === "High";
+        if (filterUrgency === "medium") return urgency === "2" || urgency === "Medium";
+        if (filterUrgency === "low") return urgency === "1" || urgency === "Low" || urgency === "0";
+        return true;
+      })();
 
-    // Data Quality filter - check for missing critical fields
-    const matchesDataQuality = (() => {
-      if (!filterDataQuality) return true;
-      // Return true if asset has ANY data quality issues
+      // Data Quality filter - check for missing critical fields
+      const matchesDataQuality = (() => {
+        if (!filterDataQuality) return true;
+        return (
+          !asset.gps_lat ||
+          !asset.gps_lng ||
+          !asset.asset_type_name ||
+          !asset.depot_name ||
+          !asset.region_name ||
+          !asset.road_name ||
+          !asset.owner_name ||
+          !asset.responsible_party_name
+        );
+      })();
+
       return (
-        !asset.gps_lat || 
-        !asset.gps_lng || 
-        !asset.asset_type_name || 
-        !asset.depot_name || 
-        !asset.region_name || 
-        !asset.road_name || 
-        !asset.owner_name || 
-        !asset.responsible_party_name
+        matchesSearch &&
+        matchesAssetType &&
+        matchesRegion &&
+        matchesDepot &&
+        matchesStatus &&
+        matchesCIRange &&
+        matchesUrgency &&
+        matchesDataQuality
       );
-    })();
+    })
+    // Newest first: offline-pending at top, then by created_at desc
+    .sort((a, b) => {
+      if (a.is_offline_pending && !b.is_offline_pending) return -1;
+      if (!a.is_offline_pending && b.is_offline_pending) return 1;
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return dateB - dateA;
+    });
 
-    return (
-      matchesSearch &&
-      matchesAssetType &&
-      matchesRegion &&
-      matchesDepot &&
-      matchesStatus &&
-      matchesCIRange &&
-      matchesUrgency &&
-      matchesDataQuality
-    );
-  });
+  const totalPages = Math.max(1, Math.ceil(filteredAssets.length / PAGE_SIZE));
+  const pagedAssets = filteredAssets.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
 
   useEffect(() => {
     if (loading) return;
-    if (filteredAssets.length === 0) return;
+    if (assets.length === 0) return;
 
-    // Only enrich the currently relevant/visible subset.
-    // This prevents 1718 inspection API calls on initial load.
-    const visibleAssets = filteredAssets.slice(0, 50);
-    fetchLatestInspectionsForAssets(visibleAssets);
-  }, [
-    loading,
-    accessToken,
-    filteredAssets
-      .slice(0, 50)
-      .map((asset) => asset.asset_id)
-      .join("|"),
-  ]);
+    // Enrich only the first 50 assets once after initial load.
+    // `assets` is stable after fetch; this avoids re-firing on every filter change.
+    fetchLatestInspectionsForAssets(assets.slice(0, 50));
+  }, [loading, accessToken]);
   
-  // Log filtering results when filters change
+  // Reset to page 1 whenever filters or search change
   useEffect(() => {
-    if (filterCIRange !== "all" || filterUrgency !== "all") {
-      console.log('[AssetsPage] Filtering -', {
-        totalAssets: assets.length,
-        filteredAssets: filteredAssets.length,
-        filterCIRange,
-        filterUrgency,
-        sampleAssets: assets.slice(0, 3).map(a => ({
-          ref: a.asset_ref,
-          ci: a.latest_ci,
-          urgency: a.latest_urgency
-        }))
-      });
-    }
-  }, [assets.length, filteredAssets.length, filterCIRange, filterUrgency]);
+    setCurrentPage(1);
+  }, [searchTerm, filterAssetType, filterRegion, filterDepot, filterStatus, filterCIRange, filterUrgency, filterDataQuality]);
 
   const clearAllFilters = () => {
     setFilterAssetType("all");
@@ -593,6 +593,39 @@ export default function AssetsPage() {
 
                     if (response.ok) {
                       const result = await response.json();
+                      const createdAsset = result?.asset || result?.data || result || {};
+                      const createdAssetId = createdAsset.asset_id || createdAsset.id;
+
+                      // Upload photos directly to Supabase Storage (correct bucket, permanent public URLs)
+                      if (assetData.photos?.length > 0) {
+                        const bucket = "tams360-inspection-photos";
+                        const folder = assetData.referenceNumber;
+                        for (let i = 0; i < assetData.photos.length; i++) {
+                          try {
+                            const file = assetData.photos[i];
+                            const filePath = `${folder}/${file.name}`;
+                            const uploadRes = await fetch(
+                              `https://${projectId}.supabase.co/storage/v1/object/${bucket}/${filePath}`,
+                              {
+                                method: "POST",
+                                headers: {
+                                  Authorization: `Bearer ${accessToken}`,
+                                  "Content-Type": file.type || "image/jpeg",
+                                  "x-upsert": "true",
+                                },
+                                body: file,
+                              }
+                            );
+                            if (!uploadRes.ok) {
+                              const errText = await uploadRes.text().catch(() => `HTTP ${uploadRes.status}`);
+                              toast.error(`Photo upload failed (${uploadRes.status}): ${errText.slice(0, 120)}`);
+                            }
+                          } catch (e) {
+                            console.error("Photo upload failed:", e);
+                          }
+                        }
+                      }
+
                       toast.success("Asset created successfully!", { id: "create-asset" });
                       setIsAddDialogOpen(false);
                       storeRecentVisibleAsset({
@@ -639,6 +672,7 @@ export default function AssetsPage() {
                   }
                 }}
                 onCancel={() => setIsAddDialogOpen(false)}
+                existingAssets={assets}
               />
             </DialogContent>
           </Dialog>
@@ -927,7 +961,7 @@ export default function AssetsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredAssets.map((asset, index) => {
+                {pagedAssets.map((asset, index) => {
 
                   const displayAsset = getAssetDisplaySource(asset);
                   const resolvedCI = resolveCI(displayAsset);
@@ -1085,7 +1119,7 @@ export default function AssetsPage() {
           ) : (
             // CARD VIEW
             <div className="space-y-4">
-              {filteredAssets.slice(0, 50).map((asset, index) => {
+              {pagedAssets.map((asset, index) => {
                 const displayAsset = getAssetDisplaySource(asset);
                 const ciDisplay = getCIDisplay(displayAsset);
                 const urgencyDisplay = getUrgencyDisplay(displayAsset);
@@ -1167,6 +1201,36 @@ export default function AssetsPage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Pagination controls */}
+          {!loading && filteredAssets.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between pt-4 border-t mt-4">
+              <p className="text-sm text-muted-foreground">
+                Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredAssets.length)} of {filteredAssets.length} assets
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Previous
+                </Button>
+                <span className="text-sm font-medium px-2">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>

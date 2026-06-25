@@ -101,20 +101,23 @@ export default function InspectionsPage() {
         setTotalInspectionCount(data.total || 0);
         setLoadedFromCache(false);
         
-        // Load more pages if needed (up to 2000 inspections)
+        // Load more pages in parallel (up to 2000 inspections)
         if (data.totalPages > 1) {
-          const allInspections = [...inspectionsList];
-          for (let page = 2; page <= Math.min(data.totalPages, 4); page++) {
-            const pageResponse = await fetch(`${API_URL}/inspections?page=${page}&pageSize=500`, {
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-              },
-            });
-            if (pageResponse.ok) {
-              const pageData = await pageResponse.json();
-              allInspections.push(...(pageData.inspections || []));
-            }
-          }
+          const remainingPages = Array.from(
+            { length: Math.min(data.totalPages, 4) - 1 },
+            (_, i) => i + 2
+          );
+          const pageResults = await Promise.all(
+            remainingPages.map((page) =>
+              fetch(`${API_URL}/inspections?page=${page}&pageSize=500`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+              }).then((r) => (r.ok ? r.json() : null))
+            )
+          );
+          const allInspections = [
+            ...inspectionsList,
+            ...pageResults.flatMap((d) => d?.inspections || []),
+          ];
           setInspections(allInspections);
           if (isOnline) {
             await InspectionsCacheService.setAll(allInspections);
