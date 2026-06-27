@@ -5,6 +5,7 @@
 
 import { toast } from "sonner";
 import { projectId, publicAnonKey } from "/utils/supabase/info";
+import { supabase } from "../../lib/supabaseClient";
 
 const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
@@ -14,8 +15,36 @@ interface ApiOptions extends RequestInit {
 }
 
 /**
- * Makes an authenticated API request
- * Automatically handles token expiration and logout
+ * Get a fresh access token from the Supabase session.
+ * Falls back to the stored localStorage token only as a last resort.
+ * Returns null if no valid session exists.
+ */
+async function getAccessToken(): Promise<string | null> {
+  // Always prefer the live Supabase session (handles auto-refresh internally)
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token ?? null;
+
+  if (token) {
+    // Keep the localStorage copy in sync for legacy code paths
+    localStorage.setItem("tams360_token", token);
+    return token;
+  }
+
+  // Fall back to the stored token (handles cases where the session hasn't loaded yet)
+  return localStorage.getItem("tams360_token");
+}
+
+function redirectToLogin(delay = 100) {
+  localStorage.removeItem("tams360_token");
+  localStorage.removeItem("tams360_user");
+  setTimeout(() => {
+    window.location.href = "/login";
+  }, delay);
+}
+
+/**
+ * Makes an authenticated API request.
+ * Automatically refreshes an expired JWT once before giving up.
  */
 export async function apiRequest<T = any>(
   endpoint: string,
@@ -33,67 +62,50 @@ export async function apiRequest<T = any>(
     ...fetchOptions.headers,
   };
 
-  // Add authentication token if needed
   if (useAuth) {
-    const token = localStorage.getItem("tams360_token");
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    } else {
-      // No token available - user needs to log in
+    const token = await getAccessToken();
+    if (!token) {
       console.warn("⚠️ No authentication token found. Redirecting to login...");
-      localStorage.removeItem("tams360_token");
-      localStorage.removeItem("tams360_user");
-      
-      // Redirect to login after a brief delay
-      setTimeout(() => {
-        window.location.href = "/login";
-      }, 100);
-      
+      redirectToLogin();
       throw new Error("No authentication token");
     }
+    headers["Authorization"] = `Bearer ${token}`;
   } else {
     headers["Authorization"] = `Bearer ${publicAnonKey}`;
   }
 
   try {
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    let response = await fetch(`${API_URL}${endpoint}`, {
       ...fetchOptions,
       headers,
     });
 
-    // Handle authentication errors
+    // On 401, attempt a token refresh and retry once before bailing out
+    if (response.status === 401 && useAuth) {
+      console.warn("⚠️ Got 401 – attempting token refresh...");
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+
+      if (!refreshError && refreshData?.session?.access_token) {
+        const refreshedToken = refreshData.session.access_token;
+        localStorage.setItem("tams360_token", refreshedToken);
+
+        response = await fetch(`${API_URL}${endpoint}`, {
+          ...fetchOptions,
+          headers: {
+            ...headers,
+            Authorization: `Bearer ${refreshedToken}`,
+          },
+        });
+      }
+    }
+
+    // Handle authentication errors after retry
     if (response.status === 401) {
       const errorData = await response.json().catch(() => ({}));
-      
-      // Check if it's a token expiration error
-      if (
-        errorData.error === "Invalid JWT" ||
-        errorData.error === "Invalid session" ||
-        errorData.message === "Invalid JWT" ||
-        errorData.message === "Invalid session"
-      ) {
-        console.log("🔒 Session expired, logging out...");
-        
-        // Clear stored credentials
-        localStorage.removeItem("tams360_token");
-        localStorage.removeItem("tams360_user");
-        
-        // Show toast
-        toast.error("Your session has expired. Please log in again.");
-        
-        // Redirect to login
-        setTimeout(() => {
-          window.location.href = "/login";
-        }, 1000);
-        
-        throw new Error("Session expired");
-      }
-      
-      // Other 401 errors
-      if (!skipErrorToast) {
-        toast.error(errorData.error || "Unauthorized");
-      }
-      throw new Error(errorData.error || "Unauthorized");
+      console.log("🔒 Session expired after refresh attempt, logging out...");
+      toast.error("Your session has expired. Please log in again.");
+      redirectToLogin(1000);
+      throw new Error("Session expired");
     }
 
     // Handle other HTTP errors
@@ -101,26 +113,25 @@ export async function apiRequest<T = any>(
       const errorData = await response.json().catch(() => ({
         error: `HTTP ${response.status}: ${response.statusText}`,
       }));
-      
+
       if (!skipErrorToast) {
         toast.error(errorData.error || errorData.message || "Request failed");
       }
-      
+
       throw new Error(errorData.error || errorData.message || "Request failed");
     }
 
     // Parse and return JSON response
     return await response.json();
   } catch (error: any) {
-    // Network errors or other issues
     if (error.message !== "Session expired") {
       console.error("API request failed:", error);
-      
+
       if (!skipErrorToast && !error.message?.includes("Failed to fetch")) {
         toast.error(error.message || "Network error");
       }
     }
-    
+
     throw error;
   }
 }
