@@ -387,10 +387,8 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
     columnStyles: colStyles,
     didParseCell: (hookData) => {
       if (imageColIndex >= 0 && hookData.column.index === imageColIndex && hookData.section === 'body') {
-        const url = hookData.cell.raw as string;
-        if (url && url !== '-' && imgCache[url]) {
-          hookData.cell.text = [];
-        }
+        // Always blank image cells — show the photo if loaded, empty if not
+        hookData.cell.text = [];
       }
     },
     didDrawCell: (hookData) => {
@@ -433,10 +431,10 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
  */
 export function generateExcelReport(options: ReportOptions): void {
   const { title, data, columns, tenant, fileName } = options;
-  
+
   // Create workbook
   const wb = XLSX.utils.book_new();
-  
+
   // Prepare data with headers
   const wsData = [
     // Header rows
@@ -447,7 +445,7 @@ export function generateExcelReport(options: ReportOptions): void {
     // Column headers
     columns.map(col => col.header),
     // Data rows
-    ...data.map(row => 
+    ...data.map(row =>
       columns.map(col => {
         const value = row[col.key];
         // Format currency values
@@ -462,18 +460,18 @@ export function generateExcelReport(options: ReportOptions): void {
       })
     )
   ];
-  
+
   // Create worksheet
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  
+
   // Set column widths
   const colWidths = columns.map(col => ({ wch: col.width || 15 }));
   ws['!cols'] = colWidths;
-  
+
   // Style header rows (Excel styling is limited in XLSX library)
   // Add worksheet to workbook
   XLSX.utils.book_append_sheet(wb, ws, title.substring(0, 31)); // Excel sheet name limit
-  
+
   // Generate Excel file
   XLSX.writeFile(wb, `${fileName}.xlsx`);
 }

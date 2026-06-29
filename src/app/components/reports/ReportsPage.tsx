@@ -511,6 +511,7 @@ export default function ReportsPage() {
           getAssetValue(asset, ["DERU_DEGREE", "DERU DEGREE"]),
           getInspectionValue(latestInspection, ["OVERALL DEGREE", "OVERALL_DEGREE", "DERU_DEGREE", "DEGREE"]),
           metadata.overall_degree,
+          metadata.degree,
           latestInspection?.overall_degree,
           latestInspection?.deru_degree,
           asset.deru_degree
@@ -519,6 +520,7 @@ export default function ReportsPage() {
           getAssetValue(asset, ["DERU_EXTENT", "DERU EXTENT"]),
           getInspectionValue(latestInspection, ["OVERALL EXTENT", "OVERALL_EXTENT", "DERU_EXTENT", "EXTENT"]),
           metadata.overall_extent,
+          metadata.extent,
           latestInspection?.overall_extent,
           latestInspection?.deru_extent,
           asset.deru_extent
@@ -528,6 +530,7 @@ export default function ReportsPage() {
           getInspectionValue(latestInspection, ["OVERALL RELEVANCY", "OVERALL_RELEVANCY", "OVERALL RELEVANCE", "DERU_RELEVANCE", "RELEVANCY"]),
           metadata.overall_relevancy,
           metadata.overall_relevance,
+          metadata.relevancy,
           latestInspection?.overall_relevancy,
           latestInspection?.deru_relevance,
           asset.deru_relevance
@@ -668,6 +671,37 @@ export default function ReportsPage() {
     console.log(`[Reports] Asset export total rows after paging: ${deduped.length}`);
 
     return deduped;
+  };
+
+  // Fetch the first photo URL for each asset, 10 at a time so we don't hammer the server.
+  const fetchPhotosForAssets = async (assets: any[]): Promise<Map<string, string>> => {
+    const photoMap = new Map<string, string>();
+    const CONCURRENCY = 10;
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const validAssets = assets.filter((a: any) => a.asset_id && uuidRe.test(a.asset_id));
+
+    for (let i = 0; i < validAssets.length; i += CONCURRENCY) {
+      const batch = validAssets.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(
+        batch.map(async (asset: any) => {
+          try {
+            const res = await fetch(`${API_URL}/assets/${asset.asset_id}/photos`, {
+              headers: getAuthHeaders(),
+              signal: AbortSignal.timeout(8000),
+            });
+            if (res.ok) {
+              const json = await res.json();
+              const photos: any[] = json.photos || json || [];
+              const firstUrl = photos[0]?.signedUrl || photos[0]?.url;
+              if (firstUrl) photoMap.set(asset.asset_id, firstUrl);
+            }
+          } catch {
+            // skip — network timeout or auth failure for this asset
+          }
+        })
+      );
+    }
+    return photoMap;
   };
 
   const fetchTenantConfigRows = async (configKey: string) => {
@@ -1105,17 +1139,24 @@ export default function ReportsPage() {
             fetchTenantConfigRows("values"),
           ]);
 
-          // Use photo URLs already present in the asset data — no extra API calls
+          // Fetch photos — use any URL already on the record, then fall back to the
+          // per-asset Storage API. We fetch 10 at a time to avoid flooding the server.
+          toast.loading(`Loading photos (0 / ${assets.length})…`, { id: "export-report" });
+          const photoMap = await fetchPhotosForAssets(assets);
+          toast.loading(`Building report (${photoMap.size} photos loaded)…`, { id: "export-report" });
+
           const assetsWithPhotos = assets.map((a: any) => {
             const metaPhotos = a.metadata?.photo_urls;
-            const firstPhotoUrl =
+            const inlineUrl =
               a.photo_url ||
               a.main_photo_url ||
               (Array.isArray(a.photo_urls) && a.photo_urls[0]) ||
               (Array.isArray(metaPhotos) && metaPhotos[0]) ||
               (typeof metaPhotos === "string" && metaPhotos) ||
+              a.image ||
+              a.image_url ||
               null;
-            return { ...a, image: firstPhotoUrl || a.image || a.image_url || null };
+            return { ...a, image: inlineUrl || photoMap.get(a.asset_id) || null };
           });
 
           const assetRegisterRows = buildAssetRegisterRows(
@@ -1643,16 +1684,24 @@ export default function ReportsPage() {
             await Promise.allSettled(
               imageUrls.map(async (url: string) => {
                 try {
-                  const res = await fetch(url);
-                  const blob = await res.blob();
+                  // Use Image element with crossOrigin — works better with Supabase Storage CORS
                   const dataUrl = await new Promise<string>((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(reader.result as string);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(blob);
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                      const canvas = document.createElement('canvas');
+                      canvas.width = img.naturalWidth;
+                      canvas.height = img.naturalHeight;
+                      const ctx = canvas.getContext('2d');
+                      if (!ctx) { reject(new Error('no ctx')); return; }
+                      ctx.drawImage(img, 0, 0);
+                      resolve(canvas.toDataURL('image/jpeg', 0.8));
+                    };
+                    img.onerror = () => reject(new Error(`failed: ${url}`));
+                    img.src = url;
                   });
                   preloadedImages[url] = dataUrl;
-                } catch { /* skip */ }
+                } catch { /* skip — cell will be empty */ }
               })
             );
           }

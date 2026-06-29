@@ -435,11 +435,10 @@ export default function MobileNewInspectionPage() {
       weather_condition: formData.weather_condition,
       condition: formData.condition,
 
-      // Do NOT calculate CI / DERU / final scores here.
-      // These are calculated centrally before/database storage.
-      degree: formData.degree || null,
-      extent: formData.extent || null,
-      relevancy: formData.relevancy || null,
+      // Use aggregated worst-component D/E/R from ComponentInspectionForm
+      degree: (formData.aggregates as any)?.overall_degree || null,
+      extent: (formData.aggregates as any)?.overall_extent || null,
+      relevancy: (formData.aggregates as any)?.overall_relevancy || null,
 
       remedial_notes: formData.remedial_notes || "",
       comments: formData.comments || "",
