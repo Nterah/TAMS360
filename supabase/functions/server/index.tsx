@@ -6748,6 +6748,10 @@ app.post("/make-server-c894a9ff/inspections", async (c) => {
         ci_band: ciBand,
         calculation_metadata: calculationMetadata,
         inspector_id: userData.user.id,
+        comments: inspection.comments || null,
+        photo_urls: Array.isArray(inspection.photo_urls) && inspection.photo_urls.length > 0
+          ? inspection.photo_urls
+          : null,
       })
       .select()
       .single();

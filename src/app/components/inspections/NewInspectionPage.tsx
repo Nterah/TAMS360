@@ -463,6 +463,21 @@ export default function NewInspectionPage() {
       });
 
       if (response.ok) {
+        const result = await response.json();
+        const savedInspectionId =
+          result?.inspection?.inspection_id || result?.inspection?.id;
+
+        // Persist uploaded photo URLs keyed by the inspection ID so
+        // InspectionDetailPage can display them immediately.
+        if (topPhotoUrls.length > 0 && savedInspectionId) {
+          try {
+            const key = `inspection_photos_${savedInspectionId}`;
+            const existing: string[] = JSON.parse(localStorage.getItem(key) || "[]");
+            const merged = Array.from(new Set([...existing, ...topPhotoUrls]));
+            localStorage.setItem(key, JSON.stringify(merged));
+          } catch { /* storage quota exceeded */ }
+        }
+
         toast.success("Inspection saved successfully!");
         navigate("/inspections");
       } else {

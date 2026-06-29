@@ -118,12 +118,31 @@ export default function InspectionDetailPage() {
     if (id && id !== 'undefined') {
       fetchInspection();
       fetchMaintenanceRecords();
+      // Load any photos saved to localStorage during inspection creation
+      loadLocalPhotos(id);
     } else {
       console.error('Invalid inspection ID:', id);
       toast.error('Invalid inspection ID');
       navigate('/mobile/inspections');
     }
   }, [id]);
+
+  const loadLocalPhotos = (inspectionId: string) => {
+    try {
+      const stored: string[] = JSON.parse(localStorage.getItem(`inspection_photos_${inspectionId}`) || "[]");
+      if (stored.length === 0) return;
+      const localPhotos = stored.map((urlOrPath, i) => {
+        const url = urlOrPath.startsWith("http")
+          ? urlOrPath
+          : `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${urlOrPath}`;
+        return { url, signedUrl: url, photo_number: i, caption: `Photo ${i + 1}` };
+      });
+      setPhotos((prev) => {
+        const existingUrls = new Set(prev.map((p: any) => p.signedUrl || p.url || ""));
+        return [...prev, ...localPhotos.filter((p) => !existingUrls.has(p.url))];
+      });
+    } catch { /* ignore */ }
+  };
 
   // Fetch photos when inspection is loaded
   useEffect(() => {
@@ -167,7 +186,16 @@ export default function InspectionDetailPage() {
       if (response.ok) {
         const data = await response.json();
         console.log(`[Photos] Found ${data.photos?.length || 0} photos`);
-        setPhotos(data.photos || []);
+        // Merge with existing photos (from inspection record / localStorage) instead of overwriting
+        if (data.photos && data.photos.length > 0) {
+          setPhotos((prev) => {
+            const existingUrls = new Set(prev.map((p: any) => p.signedUrl || p.url || ""));
+            const newPhotos = (data.photos as any[]).filter(
+              (p) => !existingUrls.has(p.signedUrl || p.url || "")
+            );
+            return [...prev, ...newPhotos];
+          });
+        }
       } else {
         console.error(`[Photos] Failed to fetch photos`);
       }
@@ -188,7 +216,7 @@ export default function InspectionDetailPage() {
         const data = await response.json();
         setInspection(data.inspection);
 
-        // Convert any signed/expiring URL to a permanent public URL
+        // Convert any signed/expiring URL or bare storage path to a permanent public URL
         const toPublicUrl = (url: string): string => {
           if (!url) return url;
           if (url.includes("/object/sign/")) {
@@ -196,6 +224,9 @@ export default function InspectionDetailPage() {
             if (match) return `https://${projectId}.supabase.co/storage/v1/object/public/${match[1]}`;
           }
           if (url.includes("/object/public/")) return url.split("?")[0];
+          if (!url.startsWith("http")) {
+            return `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${url}`;
+          }
           return url;
         };
 
