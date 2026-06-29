@@ -120,7 +120,8 @@ SELECT
   a.ownership_notes,
   a.tenant_id,
   a.location_id,
-  a.description
+  a.description,
+  a.asset_name
 FROM tams360.assets a
 LEFT JOIN tams360.asset_types at ON a.asset_type_id = at.asset_type_id
 LEFT JOIN tams360.asset_status ast ON a.status_id = ast.status_id

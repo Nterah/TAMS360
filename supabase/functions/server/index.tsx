@@ -2848,6 +2848,7 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
       tenant_id: userProfile.tenantId,
       asset_ref: asset.referenceNumber || asset.asset_ref,
       asset_type_id: assetType.asset_type_id,
+      asset_name: asset.name || asset.description,
       description: asset.name || asset.description,
       region: asset.region,
       depot: asset.depot,
@@ -3525,7 +3526,10 @@ app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
 
     // Build update object with only the fields that are present
     const dbUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
-    if (updates.description != null)       dbUpdate.description       = updates.description;
+    if (updates.description != null) {
+      dbUpdate.description = updates.description;
+      dbUpdate.asset_name  = updates.description; // DB may use asset_name column
+    }
     if (updates.region != null)             dbUpdate.region             = updates.region;
     if (updates.depot != null)              dbUpdate.depot              = updates.depot;
     if (updates.road_number != null)        dbUpdate.road_number        = updates.road_number;
@@ -3538,7 +3542,10 @@ app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
     if (updates.gps_lng != null)            dbUpdate.gps_lng            = updates.gps_lng;
     if (updates.end_latitude != null)       dbUpdate.end_latitude       = updates.end_latitude;
     if (updates.end_longitude != null)      dbUpdate.end_longitude      = updates.end_longitude;
-    if (updates.owned_by != null)           dbUpdate.owned_by           = updates.owned_by;
+    if (updates.owned_by != null) {
+      dbUpdate.owned_by = updates.owned_by;
+      dbUpdate.owner    = updates.owned_by; // DB may use owner column
+    }
     if (updates.responsible_party != null)  dbUpdate.responsible_party  = updates.responsible_party;
     if (updates.replacement_value != null)  dbUpdate.replacement_value  = updates.replacement_value;
     if (updates.purchase_price != null)     dbUpdate.purchase_price     = updates.purchase_price;

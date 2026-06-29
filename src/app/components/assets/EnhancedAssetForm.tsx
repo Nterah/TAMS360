@@ -114,7 +114,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   useEffect(() => {
     if (mode !== "edit" || !initialValues) return;
     setAssetType(initialValues.asset_type_name || initialValues.type || "");
-    setAssetName(initialValues.description || initialValues.name || "");
+    setAssetName(initialValues.asset_name || initialValues.description || initialValues.name || "");
     setInstaller(initialValues.installer_name || initialValues.installer || "");
     setRegion(initialValues.region || initialValues.region_name || "");
     setDepot(initialValues.depot || initialValues.depot_name || "");

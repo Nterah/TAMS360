@@ -252,9 +252,19 @@ export default function MobileAssetDetailPage() {
               <p className="text-xs text-slate-500">{asset.asset_type_name}</p>
             </div>
           </div>
-          <Badge className={getConditionColor(asset.condition)}>
-            {asset.condition}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge className={getConditionColor(asset.condition)}>
+              {asset.condition}
+            </Badge>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => navigate(`/assets/${assetId}/edit`)}
+              title="Edit Asset"
+            >
+              <Edit className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
