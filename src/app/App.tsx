@@ -486,6 +486,7 @@ function App() {
                         <Route path="/mobile/field-capture" element={<FieldCapturePage />} />
                         <Route path="/mobile/assets" element={<MobileLayout><MobileAssetsPage /></MobileLayout>} />
                         <Route path="/mobile/assets/:assetId" element={<MobileLayout><MobileAssetDetailPage /></MobileLayout>} />
+                        <Route path="/mobile/assets/:assetId/edit" element={<MobileLayout><EditAssetPage /></MobileLayout>} />
                         <Route path="/mobile/inspections" element={<MobileLayout><MobileInspectionsPage /></MobileLayout>} />
                         <Route path="/mobile/inspections/new" element={<MobileLayout><MobileNewInspectionPage /></MobileLayout>} />
                         <Route path="/mobile/inspections/:id" element={<MobileLayout><InspectionDetailPage /></MobileLayout>} />

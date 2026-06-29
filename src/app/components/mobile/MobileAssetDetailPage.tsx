@@ -259,7 +259,7 @@ export default function MobileAssetDetailPage() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => navigate(`/assets/${assetId}/edit`)}
+              onClick={() => navigate(`/mobile/assets/${assetId}/edit`)}
               title="Edit Asset"
             >
               <Edit className="w-4 h-4" />

@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { AuthContext } from "../../App";
 import { toast } from "sonner";
 import { Loader2, ArrowLeft, AlertCircle } from "lucide-react";
@@ -12,6 +12,11 @@ export default function EditAssetPage() {
   const { assetId } = useParams<{ assetId: string }>();
   const { accessToken } = useContext(AuthContext);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Detect if opened from mobile route
+  const isMobile = location.pathname.startsWith("/mobile/");
+  const detailPath = isMobile ? `/mobile/assets/${assetId}` : `/assets/${assetId}`;
 
   const [asset, setAsset] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -32,11 +37,11 @@ export default function EditAssetPage() {
         setAsset(data.asset);
       } else {
         toast.error("Asset not found");
-        navigate("/assets");
+        navigate(isMobile ? "/mobile/assets" : "/assets");
       }
     } catch {
       toast.error("Failed to load asset");
-      navigate("/assets");
+      navigate(isMobile ? "/mobile/assets" : "/assets");
     } finally {
       setLoading(false);
     }
@@ -112,7 +117,7 @@ export default function EditAssetPage() {
         }
 
         toast.success("Asset updated successfully!", { id: "edit-asset" });
-        navigate(`/assets/${assetId}`);
+        navigate(detailPath);
       } else {
         const error = await response.json().catch(() => ({ error: "Unknown error" }));
         toast.error(`Failed to update asset: ${error.error || "Unknown error"}`, { id: "edit-asset" });
@@ -140,7 +145,7 @@ export default function EditAssetPage() {
           <CardContent className="pt-6 text-center">
             <AlertCircle className="w-12 h-12 mx-auto mb-4 text-destructive" />
             <h3 className="text-lg font-semibold mb-2">Asset Not Found</h3>
-            <Button onClick={() => navigate("/assets")}>
+            <Button onClick={() => navigate(isMobile ? "/mobile/assets" : "/assets")}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Assets
             </Button>
@@ -154,8 +159,7 @@ export default function EditAssetPage() {
     <div className="space-y-6 pb-8">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/assets/${assetId}`)}>
-          <ArrowLeft className="w-4 h-4 mr-2" />
+        <Button variant="ghost" size="sm" onClick={() => navigate(detailPath)}>          <ArrowLeft className="w-4 h-4 mr-2" />
           Back
         </Button>
         <div>
@@ -172,7 +176,7 @@ export default function EditAssetPage() {
             mode="edit"
             initialValues={asset}
             onSubmit={handleSubmit}
-            onCancel={() => navigate(`/assets/${assetId}`)}
+            onCancel={() => navigate(detailPath)}
           />
         </CardContent>
       </Card>
