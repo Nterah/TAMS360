@@ -92,7 +92,26 @@ export default function MobileAssetDetailPage() {
   };
 
   const fetchResolvedPhotos = async (apiUrl: string) => {
-    if (!assetId || !accessToken) return;
+    // Load photos from localStorage first (set during asset creation)
+    const localPhotos: AssetPhoto[] = [];
+    if (assetId) {
+      try {
+        const stored: string[] = JSON.parse(localStorage.getItem(`asset_photos_${assetId}`) || "[]");
+        stored.forEach((urlOrPath) => {
+          const url = urlOrPath.startsWith("http")
+            ? urlOrPath
+            : `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${urlOrPath}`;
+          localPhotos.push({ url, signedUrl: url, caption: "Asset Photo" });
+        });
+      } catch { /* ignore */ }
+    }
+
+    if (!assetId || !accessToken) {
+      if (localPhotos.length > 0) {
+        setAssetPhotos((prev) => normalisePhotoList([...prev, ...localPhotos], []));
+      }
+      return;
+    }
 
     try {
       const response = await fetch(`${apiUrl}/assets/${assetId}/photos`, {
@@ -103,14 +122,22 @@ export default function MobileAssetDetailPage() {
 
       if (!response.ok) {
         console.warn("Failed to fetch resolved asset photos", await response.text());
+        // Still show locally-stored photos if API fails
+        if (localPhotos.length > 0) {
+          setAssetPhotos((prev) => normalisePhotoList([...prev, ...localPhotos], []));
+        }
         return;
       }
 
       const data = await response.json();
-      const photos = normalisePhotoList(data.photos || [], []);
-      setAssetPhotos(photos);
+      const apiPhotos = normalisePhotoList(data.photos || [], []);
+      // Merge API photos with locally-stored ones (API signs URLs, local is the fallback)
+      setAssetPhotos(normalisePhotoList([...apiPhotos, ...localPhotos], []));
     } catch (error) {
       console.error("Error fetching resolved photos:", error);
+      if (localPhotos.length > 0) {
+        setAssetPhotos((prev) => normalisePhotoList([...prev, ...localPhotos], []));
+      }
     }
   };
 
@@ -128,7 +155,17 @@ export default function MobileAssetDetailPage() {
         const data = await response.json();
         const nextAsset = data.asset;
         setAsset(nextAsset);
-        setAssetPhotos(normalisePhotoList(nextAsset?.photos || [], nextAsset?.photo_objects || []));
+        // Convert photo_urls paths to full public URLs so they display immediately
+        const photoUrlsAsObjects = (nextAsset?.photo_urls || []).map((p: string) => {
+          const url = p.startsWith("http")
+            ? p
+            : `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${p}`;
+          return { url, signedUrl: url, caption: "Asset Photo" };
+        });
+        setAssetPhotos(normalisePhotoList(
+          [...(nextAsset?.photos || []), ...photoUrlsAsObjects],
+          nextAsset?.photo_objects || []
+        ));
         await fetchResolvedPhotos(API_URL);
       } else {
         console.error("Failed to fetch asset details");

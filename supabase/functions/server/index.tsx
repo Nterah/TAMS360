@@ -2864,6 +2864,7 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
       responsible_party: asset.responsibleParty || asset.responsible_party,
       replacement_value: asset.replacementValue ? parseFloat(asset.replacementValue) : null,
       purchase_price: asset.installationCost ? parseFloat(asset.installationCost) : null,
+      photo_urls: Array.isArray(asset.photo_urls) && asset.photo_urls.length > 0 ? asset.photo_urls : null,
       created_by: userData.user.id,
     };
 
@@ -3641,7 +3642,7 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
     // Verify asset exists and belongs to the user's tenant
     const { data: asset, error: assetError } = await supabase
       .from("tams360_assets_v")
-      .select("asset_id, asset_ref")
+      .select("asset_id, asset_ref, photo_urls")
       .eq("asset_id", assetId)
       .eq("tenant_id", userProfile.tenant_id)
       .maybeSingle();

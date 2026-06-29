@@ -563,9 +563,37 @@ export default function AssetsPage() {
                     // Show loading state
                     toast.loading("Creating asset...", { id: "create-asset" });
 
-                    // Create abort controller with timeout
+                    // Step 1: Upload photos via server endpoint BEFORE creating the asset.
+                    // Using the server-side upload avoids storage RLS issues.
+                    const photoUrls: string[] = [];
+                    if (assetData.photos?.length > 0) {
+                      for (const file of assetData.photos) {
+                        try {
+                          const formData = new FormData();
+                          formData.append("file", file);
+                          formData.append("bucket", "tams360-inspection-photos");
+                          formData.append("folderPath", assetData.referenceNumber);
+                          const uploadRes = await fetch(`${API_URL}/storage/upload`, {
+                            method: "POST",
+                            headers: { Authorization: `Bearer ${accessToken}` },
+                            body: formData,
+                          });
+                          if (uploadRes.ok) {
+                            const { path, url } = await uploadRes.json();
+                            photoUrls.push(path || url);
+                          } else {
+                            const errText = await uploadRes.text().catch(() => `HTTP ${uploadRes.status}`);
+                            toast.error(`Photo upload failed (${uploadRes.status}): ${errText.slice(0, 120)}`);
+                          }
+                        } catch (e) {
+                          console.error("Photo upload failed:", e);
+                        }
+                      }
+                    }
+
+                    // Step 2: Create the asset, including any uploaded photo paths.
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
                     const response = await fetch(`${API_URL}/assets`, {
                       method: "POST",
@@ -593,6 +621,7 @@ export default function AssetsPage() {
                         installation_cost: assetData.installationCost,
                         responsible_party: assetData.responsibleParty,
                         installer_name: assetData.installer,
+                        photo_urls: photoUrls,
                       }),
                       signal: controller.signal,
                     });
@@ -601,37 +630,20 @@ export default function AssetsPage() {
 
                     if (response.ok) {
                       const result = await response.json();
-                      const createdAsset = result?.asset || result?.data || result || {};
-                      const createdAssetId = createdAsset.asset_id || createdAsset.id;
+                      const createdAssetId =
+                        result?.asset?.asset_id || result?.asset?.id ||
+                        result?.data?.asset_id  || result?.data?.id;
 
-                      // Upload photos directly to Supabase Storage (correct bucket, permanent public URLs)
-                      if (assetData.photos?.length > 0) {
-                        const bucket = "tams360-inspection-photos";
-                        const folder = assetData.referenceNumber;
-                        for (let i = 0; i < assetData.photos.length; i++) {
-                          try {
-                            const file = assetData.photos[i];
-                            const filePath = `${folder}/${file.name}`;
-                            const uploadRes = await fetch(
-                              `https://${projectId}.supabase.co/storage/v1/object/${bucket}/${filePath}`,
-                              {
-                                method: "POST",
-                                headers: {
-                                  Authorization: `Bearer ${accessToken}`,
-                                  "Content-Type": file.type || "image/jpeg",
-                                  "x-upsert": "true",
-                                },
-                                body: file,
-                              }
-                            );
-                            if (!uploadRes.ok) {
-                              const errText = await uploadRes.text().catch(() => `HTTP ${uploadRes.status}`);
-                              toast.error(`Photo upload failed (${uploadRes.status}): ${errText.slice(0, 120)}`);
-                            }
-                          } catch (e) {
-                            console.error("Photo upload failed:", e);
-                          }
-                        }
+                      // Persist signed URLs to localStorage so both desktop and mobile
+                      // detail pages can display them immediately without a server deployment.
+                      if (photoUrls.length > 0 && createdAssetId) {
+                        try {
+                          const existing: string[] = JSON.parse(
+                            localStorage.getItem(`asset_photos_${createdAssetId}`) || "[]"
+                          );
+                          const merged = Array.from(new Set([...existing, ...photoUrls]));
+                          localStorage.setItem(`asset_photos_${createdAssetId}`, JSON.stringify(merged));
+                        } catch { /* ignore localStorage errors */ }
                       }
 
                       toast.success("Asset created successfully!", { id: "create-asset" });

@@ -97,7 +97,7 @@ export default function AssetDetailPage() {
   useEffect(() => {
     if (!assetId) return;
 
-    // Convert any signed/expiring URL to a permanent public URL
+    // Convert any signed/expiring URL or bare storage path to a permanent public URL
     const toPublicUrl = (url: string): string => {
       if (!url) return url;
       if (url.includes("/object/sign/")) {
@@ -106,6 +106,10 @@ export default function AssetDetailPage() {
       }
       // Strip expiry token from public URLs just in case
       if (url.includes("/object/public/")) return url.split("?")[0];
+      // Bare storage path (no http prefix) — convert to public URL
+      if (!url.startsWith("http")) {
+        return `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${url}`;
+      }
       return url;
     };
 
