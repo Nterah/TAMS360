@@ -3546,7 +3546,10 @@ app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
       dbUpdate.owned_by = updates.owned_by;
       dbUpdate.owner    = updates.owned_by; // DB may use owner column
     }
-    if (updates.responsible_party != null)  dbUpdate.responsible_party  = updates.responsible_party;
+    if (updates.owner_entity != null)           dbUpdate.owner_entity           = updates.owner_entity;
+    if (updates.responsible_party != null)      dbUpdate.responsible_party      = updates.responsible_party;
+    if (updates.maintenance_responsibility != null) dbUpdate.maintenance_responsibility = updates.maintenance_responsibility;
+    if (updates.condition != null)              dbUpdate.condition              = updates.condition;
     if (updates.replacement_value != null)  dbUpdate.replacement_value  = updates.replacement_value;
     if (updates.purchase_price != null)     dbUpdate.purchase_price     = updates.purchase_price;
     if (updates.installer_name != null)     dbUpdate.installer_name     = updates.installer_name;

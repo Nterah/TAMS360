@@ -118,19 +118,24 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     setInstaller(initialValues.installer_name || initialValues.installer || "");
     setRegion(initialValues.region || initialValues.region_name || "");
     setDepot(initialValues.depot || initialValues.depot_name || "");
+    setRoadName(initialValues.road_name || initialValues.road_number || initialValues.roadName || "");
     setKilometer(String(initialValues.km_marker ?? initialValues.kilometer ?? ""));
     setInstallDate(
       initialValues.install_date
         ? initialValues.install_date.substring(0, 10)
         : initialValues.installDate?.substring(0, 10) ?? ""
     );
-    setCondition(initialValues.latest_condition || initialValues.condition || "Good");
+    // condition_name from view lookup, fallback to raw condition text
+    setCondition(initialValues.condition_name || initialValues.latest_condition || initialValues.condition || "Good");
+    // status_name from view lookup
     setStatus(initialValues.status_name || initialValues.status || "Active");
     setExpectedLife(String(initialValues.useful_life_years ?? initialValues.expectedLife ?? ""));
     setNotes(initialValues.notes || "");
-    setOwner(initialValues.owned_by || initialValues.owner_name || initialValues.owner || "");
+    // owner_entity from enhanced view, fallback to older column names
+    setOwner(initialValues.owner_entity || initialValues.owned_by || initialValues.owner_name || initialValues.owner || "");
+    // maintenance_responsibility from enhanced view, fallback to older column names
     setResponsibleParty(
-      initialValues.responsible_party || initialValues.responsibleParty || ""
+      initialValues.maintenance_responsibility || initialValues.responsible_party || initialValues.responsibleParty || ""
     );
     setReplacementValue(String(initialValues.replacement_value ?? initialValues.replacementValue ?? ""));
     setInstallationCost(String(initialValues.purchase_price ?? initialValues.installationCost ?? ""));
@@ -483,6 +488,36 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
         </div>
       </div>
       )} {/* end create-mode auto-numbering section */}
+
+      {/* Edit-mode only: Asset Type and Road Name fields */}
+      {mode === "edit" && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="edit-asset-type">Asset Type</Label>
+            <Select value={assetType} onValueChange={setAssetType}>
+              <SelectTrigger id="edit-asset-type">
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                {ASSET_TYPES.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {type} ({ASSET_TYPE_ABBREVIATIONS[type]})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-road-name">Road Name</Label>
+            <Input
+              id="edit-road-name"
+              value={roadName}
+              onChange={(e) => setRoadName(e.target.value.trim())}
+              placeholder="e.g., M1, N2, R104"
+            />
+          </div>
+        </div>
+      )}
 
       {/* GPS Location Section */}
       <div className="space-y-4 p-4 border rounded-lg bg-[#39AEDF]/5">
