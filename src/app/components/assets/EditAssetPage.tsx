@@ -6,7 +6,7 @@ import { Loader2, ArrowLeft, AlertCircle } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import EnhancedAssetForm from "./EnhancedAssetForm";
-import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { supabase, API_URL } from "../../../lib/supabaseClient";
 
 export default function EditAssetPage() {
   const { assetId } = useParams<{ assetId: string }>();
@@ -20,8 +20,6 @@ export default function EditAssetPage() {
 
   const [asset, setAsset] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-
-  const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
   useEffect(() => {
     if (assetId) fetchAsset();
@@ -51,79 +49,93 @@ export default function EditAssetPage() {
     try {
       toast.loading("Saving changes...", { id: "edit-asset" });
 
-      const response = await fetch(`${API_URL}/assets/${assetId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          asset_type: assetData.type,
-          asset_type_name: assetData.type,
-          description: assetData.name,
-          region: assetData.region,
-          depot: assetData.depot,
-          road_number: assetData.roadNumber,
-          road_name: assetData.roadName,
-          km_marker: assetData.kilometer ? parseFloat(assetData.kilometer) : null,
-          install_date: assetData.installDate || null,
-          useful_life_years: assetData.expectedLife ? parseInt(assetData.expectedLife) : null,
-          status: assetData.status,
-          condition: assetData.condition,
-          notes: assetData.notes,
-          gps_lat: assetData.latitude ? parseFloat(assetData.latitude) : null,
-          gps_lng: assetData.longitude ? parseFloat(assetData.longitude) : null,
-          end_latitude: assetData.endLatitude ? parseFloat(assetData.endLatitude) : null,
-          end_longitude: assetData.endLongitude ? parseFloat(assetData.endLongitude) : null,
-          owned_by: assetData.owner,
-          owner_entity: assetData.owner,
-          responsible_party: assetData.responsibleParty,
-          maintenance_responsibility: assetData.responsibleParty,
-          replacement_value: assetData.replacementValue ? parseFloat(assetData.replacementValue) : null,
-          purchase_price: assetData.installationCost ? parseFloat(assetData.installationCost) : null,
-          installer_name: assetData.installer,
-        }),
-      });
+      // Build update object — only include fields with non-null values
+      const updates: Record<string, any> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (assetData.name)             { updates.asset_name = assetData.name; updates.description = assetData.name; }
+      if (assetData.type)             { updates.asset_type_name = assetData.type; }
+      if (assetData.roadNumber)         updates.road_number = assetData.roadNumber;
+      if (assetData.roadName)           updates.road_name   = assetData.roadName;
+      if (assetData.region)             updates.region      = assetData.region;
+      if (assetData.depot)              updates.depot       = assetData.depot;
+      if (assetData.kilometer)          updates.km_marker   = parseFloat(assetData.kilometer);
+      if (assetData.installDate)        updates.install_date = assetData.installDate;
+      if (assetData.expectedLife)       updates.useful_life_years = parseInt(assetData.expectedLife);
+      if (assetData.status)           { updates.status = assetData.status; }
+      if (assetData.condition)        { updates.condition = assetData.condition; }
+      if (assetData.notes != null)      updates.notes = assetData.notes;
+      if (assetData.latitude)           updates.gps_lat = parseFloat(assetData.latitude);
+      if (assetData.longitude)          updates.gps_lng = parseFloat(assetData.longitude);
+      if (assetData.endLatitude)        updates.end_latitude  = parseFloat(assetData.endLatitude);
+      if (assetData.endLongitude)       updates.end_longitude = parseFloat(assetData.endLongitude);
+      if (assetData.owner)            { updates.owner = assetData.owner; updates.owner_entity = assetData.owner; }
+      if (assetData.responsibleParty) { updates.responsible_party = assetData.responsibleParty; updates.maintenance_responsibility = assetData.responsibleParty; }
+      if (assetData.replacementValue)   updates.replacement_value = parseFloat(assetData.replacementValue);
+      if (assetData.installationCost)   updates.purchase_price    = parseFloat(assetData.installationCost);
+      if (assetData.installer)          updates.installer_name    = assetData.installer;
 
-      if (response.ok) {
-        // Upload new photos if any were added
-        if (assetData.photos?.length > 0) {
-          for (const file of assetData.photos) {
-            try {
-              const formData = new FormData();
-              formData.append("file", file);
-              formData.append("bucket", "tams360-inspection-photos");
-              formData.append("folderPath", asset?.asset_ref || assetId!);
-              const uploadRes = await fetch(`${API_URL}/storage/upload`, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${accessToken}` },
-                body: formData,
-              });
-              if (uploadRes.ok) {
-                const { path, url } = await uploadRes.json();
-                const photoUrl = path || url;
-                if (photoUrl && assetId) {
-                  try {
-                    const existing: string[] = JSON.parse(
-                      localStorage.getItem(`asset_photos_${assetId}`) || "[]"
-                    );
-                    const merged = Array.from(new Set([...existing, photoUrl]));
-                    localStorage.setItem(`asset_photos_${assetId}`, JSON.stringify(merged));
-                  } catch { /* ignore */ }
-                }
+      // Try direct Supabase update (works for authenticated users via RLS)
+      // Try tams360 schema first, fall back to public schema
+      let updateError: any = null;
+
+      const { error: err1 } = await supabase
+        .schema("tams360" as any)
+        .from("assets")
+        .update(updates)
+        .eq("asset_id", assetId!);
+
+      updateError = err1;
+
+      if (updateError) {
+        // Fallback: try public schema (in case tables were migrated)
+        const { error: err2 } = await supabase
+          .from("assets")
+          .update(updates)
+          .eq("asset_id", assetId!);
+        updateError = err2;
+      }
+
+      if (updateError) {
+        console.error("Asset update error:", updateError);
+        toast.error(`Failed to update asset: ${updateError.message}`, { id: "edit-asset" });
+        return;
+      }
+
+      // Upload new photos if any were added
+      if (assetData.photos?.length > 0) {
+        for (const file of assetData.photos) {
+          try {
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("bucket", "tams360-inspection-photos");
+            formData.append("folderPath", asset?.asset_ref || assetId!);
+            const uploadRes = await fetch(`${API_URL}/storage/upload`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${accessToken}` },
+              body: formData,
+            });
+            if (uploadRes.ok) {
+              const { path, url } = await uploadRes.json();
+              const photoUrl = path || url;
+              if (photoUrl && assetId) {
+                try {
+                  const existing: string[] = JSON.parse(
+                    localStorage.getItem(`asset_photos_${assetId}`) || "[]"
+                  );
+                  const merged = Array.from(new Set([...existing, photoUrl]));
+                  localStorage.setItem(`asset_photos_${assetId}`, JSON.stringify(merged));
+                } catch { /* ignore */ }
               }
-            } catch (e) {
-              console.error("Photo upload failed:", e);
             }
+          } catch (e) {
+            console.error("Photo upload failed:", e);
           }
         }
-
-        toast.success("Asset updated successfully!", { id: "edit-asset" });
-        navigate(detailPath);
-      } else {
-        const error = await response.json().catch(() => ({ error: "Unknown error" }));
-        toast.error(`Failed to update asset: ${error.error || "Unknown error"}`, { id: "edit-asset" });
       }
+
+      toast.success("Asset updated successfully!", { id: "edit-asset" });
+      navigate(detailPath);
     } catch (error: any) {
       toast.error(`Error updating asset: ${error.message || "Unknown error"}`, { id: "edit-asset" });
     }
@@ -161,7 +173,8 @@ export default function EditAssetPage() {
     <div className="space-y-6 pb-8">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate(detailPath)}>          <ArrowLeft className="w-4 h-4 mr-2" />
+        <Button variant="ghost" size="sm" onClick={() => navigate(detailPath)}>
+          <ArrowLeft className="w-4 h-4 mr-2" />
           Back
         </Button>
         <div>
