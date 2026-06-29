@@ -6,7 +6,7 @@ import { Loader2, ArrowLeft, AlertCircle } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import EnhancedAssetForm from "./EnhancedAssetForm";
-import { API_URL } from "../../../lib/supabaseClient";
+import { supabase, API_URL } from "../../../lib/supabaseClient";
 
 export default function EditAssetPage() {
   const { assetId } = useParams<{ assetId: string }>();
@@ -48,42 +48,72 @@ export default function EditAssetPage() {
     try {
       toast.loading("Saving changes...", { id: "edit-asset" });
 
-      const body: Record<string, any> = {
-        asset_name:        assetData.name        || undefined,
-        asset_type_name:   assetData.type        || undefined,
-        road_number:       assetData.roadNumber  || undefined,
-        road_name:         assetData.roadName    || undefined,
-        region:            assetData.region      || undefined,
-        depot:             assetData.depot       || undefined,
-        km_marker:         assetData.kilometer   ? parseFloat(assetData.kilometer)    : undefined,
-        install_date:      assetData.installDate || undefined,
-        useful_life_years: assetData.expectedLife ? parseInt(assetData.expectedLife)  : undefined,
-        status:            assetData.status      || undefined,
-        condition:         assetData.condition   || undefined,
-        notes:             assetData.notes,
-        gps_lat:           assetData.latitude    ? parseFloat(assetData.latitude)     : undefined,
-        gps_lng:           assetData.longitude   ? parseFloat(assetData.longitude)    : undefined,
-        owner:             assetData.owner       || undefined,
-        responsible_party: assetData.responsibleParty || undefined,
-        replacement_value: assetData.replacementValue ? parseFloat(assetData.replacementValue) : undefined,
-        purchase_price:    assetData.installationCost ? parseFloat(assetData.installationCost) : undefined,
-      };
+      // Build update payload using real tams360_assets column names
+      const updates: Record<string, any> = {};
 
-      // Strip undefined values
-      Object.keys(body).forEach((k) => body[k] === undefined && delete body[k]);
+      if (assetData.roadNumber  !== undefined) updates.road_number   = assetData.roadNumber  || null;
+      if (assetData.roadName    !== undefined) updates.road_name     = assetData.roadName    || null;
+      if (assetData.region      !== undefined) updates.region        = assetData.region      || null;
+      if (assetData.depot       !== undefined) updates.depot         = assetData.depot       || null;
+      if (assetData.installDate !== undefined) updates.install_date  = assetData.installDate || null;
+      if (assetData.notes       !== undefined) updates.notes         = assetData.notes       || null;
 
-      const response = await fetch(`${API_URL}/assets/${assetId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(body),
-      });
+      if (assetData.kilometer)
+        updates.km_marker = parseFloat(assetData.kilometer);
+      if (assetData.expectedLife)
+        updates.useful_life_years = parseInt(assetData.expectedLife);
+      if (assetData.latitude)
+        updates.gps_lat = parseFloat(assetData.latitude);
+      if (assetData.longitude)
+        updates.gps_lng = parseFloat(assetData.longitude);
+      if (assetData.replacementValue)
+        updates.replacement_value = parseFloat(assetData.replacementValue);
+      if (assetData.installationCost)
+        updates.purchase_price = parseFloat(assetData.installationCost);
 
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: "Unknown error" }));
-        toast.error(`Failed to update asset: ${err.error || "Unknown error"}`, { id: "edit-asset" });
+      // owner / responsibleParty → actual column names
+      if (assetData.owner !== undefined)
+        updates.owner_entity = assetData.owner || null;
+      if (assetData.responsibleParty !== undefined)
+        updates.maintenance_responsibility = assetData.responsibleParty || null;
+
+      // status → look up status_id
+      if (assetData.status) {
+        const { data: statusRow } = await supabase
+          .from("asset_status")
+          .select("status_id")
+          .ilike("name", assetData.status)
+          .maybeSingle();
+        if (statusRow?.status_id) updates.status_id = statusRow.status_id;
+      }
+
+      // type → look up asset_type_id
+      if (assetData.type) {
+        const { data: typeRow } = await supabase
+          .from("asset_types")
+          .select("asset_type_id")
+          .ilike("name", assetData.type)
+          .maybeSingle();
+        if (typeRow?.asset_type_id) updates.asset_type_id = typeRow.asset_type_id;
+      }
+
+      // condition / asset_name → stored in metadata JSONB
+      if (assetData.name !== undefined || assetData.condition !== undefined) {
+        const existingMeta = asset?.metadata || {};
+        updates.metadata = {
+          ...existingMeta,
+          ...(assetData.name      !== undefined ? { asset_name: assetData.name }      : {}),
+          ...(assetData.condition !== undefined ? { condition:  assetData.condition }  : {}),
+        };
+      }
+
+      const { error: updateError } = await supabase
+        .from("tams360_assets")
+        .update(updates)
+        .eq("asset_id", assetId!);
+
+      if (updateError) {
+        toast.error(`Failed to update asset: ${updateError.message}`, { id: "edit-asset" });
         return;
       }
 
@@ -184,4 +214,3 @@ export default function EditAssetPage() {
     </div>
   );
 }
-

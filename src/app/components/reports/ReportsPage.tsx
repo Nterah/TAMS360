@@ -51,6 +51,7 @@ export default function ReportsPage() {
   const { settings: tenant } = useTenant();
 
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [reportData, setReportData] = useState<any>(null);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [customReportType, setCustomReportType] = useState("assets");
@@ -380,7 +381,7 @@ export default function ReportsPage() {
           : "Missing geometry";
 
       return {
-        unique_id: firstDefined(asset.unique_id, asset.uniqueId, asset.asset_unique_id, asset.asset_id),
+        unique_id: firstDefined(asset.unique_id, asset.uniqueId, asset.asset_unique_id, asset.asset_ref),
         asset_ref: firstDefined(asset.asset_ref, asset.reference_number, asset.referenceNumber),
         asset_type_name: firstDefined(asset.asset_type_name, asset.type, asset.asset_type),
 
@@ -407,13 +408,62 @@ export default function ReportsPage() {
         end_longitude: endLongitude,
 
         name_code: firstDefined(asset.name_code, asset.name, asset.code, asset.sign_code, asset.asset_ref),
-        mounting_type: firstDefined(getAssetValue(asset, ["MOUNTNG TYPE", "MOUNTING TYPE", "MOUNT TYPE", "MOUNT_TYPE"]), asset.mounting_type, asset.mountng_type, asset.mount_type),
-        posts_supports: firstDefined(getAssetValue(asset, ["# POSTS/SUPPORTS", "# POSTS / SUPPORTS", "POSTS/SUPPORTS", "NUMBER OF POSTS", "NUM POSTS", "SUPPORTS"]), asset.posts_supports, asset.number_of_posts, asset.num_posts, asset.supports),
-        beams: firstDefined(getAssetValue(asset, ["# BEAMS", "BEAMS", "NUMBER OF BEAMS", "NUM BEAMS"]), asset.beams, asset.number_of_beams, asset.num_beams),
-        width_m: firstDefined(getAssetValue(asset, ["WIDTH (m)", "WIDTH M", "WIDTH"]), asset.width_m, asset.width),
-        length_m: firstDefined(getAssetValue(asset, ["LENGTH (m)", "LENGTH M", "LENGTH"]), asset.length_m, asset.length),
-        height_m: firstDefined(getAssetValue(asset, ["HEIGHT (m)", "HEIGHT M", "HEIGHT"]), asset.height_m, asset.height),
-        orientation_position: firstDefined(getAssetValue(asset, ["ORIENTATION/POSITION", "ORIENTATION / POSITION", "ORIENTATION", "POSITION", "SIDE OF ROAD"]), asset.orientation_position, asset.orientation, asset.position, asset.side_of_road),
+        mounting_type: firstDefined(
+          getAssetValue(asset, ["MOUNTNG TYPE", "MOUNTING TYPE", "MOUNT TYPE", "MOUNT_TYPE"]),
+          asset.mounting_type, asset.mountng_type, asset.mount_type,
+          getInspectionValue(latestInspection, ["MOUNTING TYPE", "MOUNTNG TYPE", "MOUNT TYPE", "mounting_type"]),
+          latestInspection?.mounting_type,
+          latestInspection?.components?.[0]?.mounting_type,
+          latestInspection?.calculation_metadata?.mounting_type,
+        ),
+        posts_supports: firstDefined(
+          getAssetValue(asset, ["# POSTS/SUPPORTS", "# POSTS / SUPPORTS", "POSTS/SUPPORTS", "NUMBER OF POSTS", "NUM POSTS", "SUPPORTS"]),
+          asset.posts_supports, asset.number_of_posts, asset.num_posts, asset.supports,
+          getInspectionValue(latestInspection, ["# POSTS/SUPPORTS", "POSTS/SUPPORTS", "NUMBER OF POSTS", "NUM POSTS", "posts_supports", "number_of_posts"]),
+          latestInspection?.posts_supports, latestInspection?.number_of_posts,
+          latestInspection?.components?.[0]?.posts_supports, latestInspection?.components?.[0]?.number_of_posts,
+          latestInspection?.calculation_metadata?.posts_supports,
+        ),
+        beams: firstDefined(
+          getAssetValue(asset, ["# BEAMS", "BEAMS", "NUMBER OF BEAMS", "NUM BEAMS"]),
+          asset.beams, asset.number_of_beams, asset.num_beams,
+          getInspectionValue(latestInspection, ["# BEAMS", "BEAMS", "NUMBER OF BEAMS", "beams", "number_of_beams"]),
+          latestInspection?.beams, latestInspection?.number_of_beams,
+          latestInspection?.components?.[0]?.beams, latestInspection?.components?.[0]?.number_of_beams,
+          latestInspection?.calculation_metadata?.beams,
+        ),
+        width_m: firstDefined(
+          getAssetValue(asset, ["WIDTH (m)", "WIDTH M", "WIDTH"]),
+          asset.width_m, asset.width,
+          getInspectionValue(latestInspection, ["WIDTH (m)", "WIDTH M", "WIDTH", "width_m", "width"]),
+          latestInspection?.width_m, latestInspection?.width,
+          latestInspection?.components?.[0]?.width_m, latestInspection?.components?.[0]?.width,
+          latestInspection?.calculation_metadata?.width_m,
+        ),
+        length_m: firstDefined(
+          getAssetValue(asset, ["LENGTH (m)", "LENGTH M", "LENGTH"]),
+          asset.length_m, asset.length,
+          getInspectionValue(latestInspection, ["LENGTH (m)", "LENGTH M", "LENGTH", "length_m", "length"]),
+          latestInspection?.length_m, latestInspection?.length,
+          latestInspection?.components?.[0]?.length_m, latestInspection?.components?.[0]?.length,
+          latestInspection?.calculation_metadata?.length_m,
+        ),
+        height_m: firstDefined(
+          getAssetValue(asset, ["HEIGHT (m)", "HEIGHT M", "HEIGHT"]),
+          asset.height_m, asset.height,
+          getInspectionValue(latestInspection, ["HEIGHT (m)", "HEIGHT M", "HEIGHT", "height_m", "height"]),
+          latestInspection?.height_m, latestInspection?.height,
+          latestInspection?.components?.[0]?.height_m, latestInspection?.components?.[0]?.height,
+          latestInspection?.calculation_metadata?.height_m,
+        ),
+        orientation_position: firstDefined(
+          getAssetValue(asset, ["ORIENTATION/POSITION", "ORIENTATION / POSITION", "ORIENTATION", "POSITION", "SIDE OF ROAD"]),
+          asset.orientation_position, asset.orientation, asset.position, asset.side_of_road,
+          getInspectionValue(latestInspection, ["ORIENTATION/POSITION", "ORIENTATION", "POSITION", "orientation", "position"]),
+          latestInspection?.orientation_position, latestInspection?.orientation,
+          latestInspection?.components?.[0]?.orientation,
+          latestInspection?.calculation_metadata?.orientation,
+        ),
         
         date_of_purchase: firstDefined(asset.date_of_purchase, asset.purchase_date, asset.procurement_date, asset.install_date),
 
@@ -1038,12 +1088,8 @@ export default function ReportsPage() {
 
   const handleExportReport = async (reportType: string, format: string) => {
     try {
-      setLoading(true);
-
-      console.log("Tenant settings for report:", tenant);
-      console.log("Organization Name:", tenant.organization_name || tenant.organizationName);
-      console.log("Logo URL:", tenant.logo_url || tenant.logoUrl);
-      console.log("Primary Color:", tenant.primary_color || tenant.primaryColor);
+      setExporting(true);
+      toast.loading(`Preparing ${reportType} ${format}…`, { id: "export-report" });
 
       let data: any[] = [];
       let columns: any[] = [];
@@ -1059,8 +1105,21 @@ export default function ReportsPage() {
             fetchTenantConfigRows("values"),
           ]);
 
+          // Use photo URLs already present in the asset data — no extra API calls
+          const assetsWithPhotos = assets.map((a: any) => {
+            const metaPhotos = a.metadata?.photo_urls;
+            const firstPhotoUrl =
+              a.photo_url ||
+              a.main_photo_url ||
+              (Array.isArray(a.photo_urls) && a.photo_urls[0]) ||
+              (Array.isArray(metaPhotos) && metaPhotos[0]) ||
+              (typeof metaPhotos === "string" && metaPhotos) ||
+              null;
+            return { ...a, image: firstPhotoUrl || a.image || a.image_url || null };
+          });
+
           const assetRegisterRows = buildAssetRegisterRows(
-            assets,
+            assetsWithPhotos,
             inspections,
             lifecycleConfigRows,
             assetValueConfigRows
@@ -1538,7 +1597,7 @@ export default function ReportsPage() {
       }
 
       console.log(`[Reports] Exporting ${data.length} rows for ${reportType}`);
-      toast.success(`Preparing ${data.length} rows for ${reportType}`);
+      toast.loading(`Building ${reportType} (${data.length} rows)…`, { id: "export-report" });
 
       if (photoReportTypes.includes(reportType)) {
         if (format === "PDF") {
@@ -1573,6 +1632,32 @@ export default function ReportsPage() {
           });
         }
       } else {
+        // Pre-load images for PDF when the data has an image column
+        let preloadedImages: Record<string, string> = {};
+        if (format.toLowerCase() === 'pdf') {
+          const imageCol = columns.find(c => c.key === 'image' || c.header.toUpperCase() === 'IMAGE');
+          if (imageCol) {
+            const imageUrls = [...new Set(
+              data.map((row: any) => row[imageCol.key]).filter((v: any) => typeof v === 'string' && v.startsWith('http'))
+            )] as string[];
+            await Promise.allSettled(
+              imageUrls.map(async (url: string) => {
+                try {
+                  const res = await fetch(url);
+                  const blob = await res.blob();
+                  const dataUrl = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                  });
+                  preloadedImages[url] = dataUrl;
+                } catch { /* skip */ }
+              })
+            );
+          }
+        }
+
         await downloadReport(format.toLowerCase() as "pdf" | "excel" | "csv", {
           title,
           data,
@@ -1581,15 +1666,16 @@ export default function ReportsPage() {
           fileName: `${fileName}-${new Date().toISOString().split("T")[0]}`,
           includeDate: true,
           includeFooter: true,
+          imageData: preloadedImages,
         });
       }
 
-      toast.success(`${reportType} exported as ${format} successfully!`);
+      toast.success(`${reportType} exported as ${format} successfully!`, { id: "export-report" });
     } catch (error) {
       console.error("Error exporting report:", error);
-      toast.error(`Failed to export report: ${error instanceof Error ? error.message : "Unknown error"}`);
+      toast.error(`Failed to export report: ${error instanceof Error ? error.message : "Unknown error"}`, { id: "export-report" });
     } finally {
-      setLoading(false);
+      setExporting(false);
     }
   };
 
@@ -1729,6 +1815,12 @@ export default function ReportsPage() {
             Generate comprehensive reports for assets, inspections, and maintenance activities
           </p>
         </div>
+        {exporting && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Generating report…
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -1961,10 +2053,6 @@ export default function ReportsPage() {
                             <Download className="w-3 h-3 mr-1" />
                             PDF
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "Excel")}>
-                            <Download className="w-3 h-3 mr-1" />
-                            Excel
-                          </Button>
                           <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "CSV")}>
                             <Download className="w-3 h-3 mr-1" />
                             CSV
@@ -1988,10 +2076,6 @@ export default function ReportsPage() {
                           <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "PDF")}>
                             <Download className="w-3 h-3 mr-1" />
                             PDF
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "Excel")}>
-                            <Download className="w-3 h-3 mr-1" />
-                            Excel
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "CSV")}>
                             <Download className="w-3 h-3 mr-1" />
@@ -2017,10 +2101,6 @@ export default function ReportsPage() {
                             <Download className="w-3 h-3 mr-1" />
                             PDF
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "Excel")}>
-                            <Download className="w-3 h-3 mr-1" />
-                            Excel
-                          </Button>
                           <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "CSV")}>
                             <Download className="w-3 h-3 mr-1" />
                             CSV
@@ -2045,10 +2125,6 @@ export default function ReportsPage() {
                           <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "PDF")}>
                             <Download className="w-3 h-3 mr-1" />
                             PDF
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleExportReport(report, "Excel")}>
-                            <Download className="w-3 h-3 mr-1" />
-                            Excel
                           </Button>
                         </div>
                       </div>

@@ -147,7 +147,7 @@ app.use(
   cors({
     origin: "*",
     allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
   }),
@@ -3714,6 +3714,116 @@ app.put("/make-server-c894a9ff/assets/:id", async (c) => {
 
     return c.json({ success: true, asset: updatedAsset });
   } catch (error) {
+    return c.json({ error: "Failed to update asset" }, 500);
+  }
+});
+
+// Patch (partial update) asset
+app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) return c.json({ error: "Unauthorized" }, 401);
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+    if (authError || !userData.user) return c.json({ error: "Invalid session" }, 401);
+
+    const { data: userProfile, error: profileError } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, tenant_id, role")
+      .eq("id", userData.user.id)
+      .single();
+
+    if (profileError || !userProfile?.tenant_id) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
+    const assetId = c.req.param("id");
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(assetId)) return c.json({ error: "Invalid asset ID format" }, 400);
+
+    // Verify asset belongs to tenant
+    const { data: existingAsset, error: fetchError } = await supabase
+      .from("tams360_assets_v")
+      .select("asset_id, metadata")
+      .eq("asset_id", assetId)
+      .eq("tenant_id", userProfile.tenant_id)
+      .maybeSingle();
+
+    if (fetchError || !existingAsset) return c.json({ error: "Asset not found" }, 404);
+
+    const body = await c.req.json();
+
+    // Build update payload — only include fields that were sent
+    const updates: Record<string, any> = { updated_by: userData.user.id };
+
+    if (body.road_number   !== undefined) updates.road_number   = body.road_number;
+    if (body.road_name     !== undefined) updates.road_name     = body.road_name;
+    if (body.region        !== undefined) updates.region        = body.region;
+    if (body.depot         !== undefined) updates.depot         = body.depot;
+    if (body.km_marker     !== undefined) updates.km_marker     = body.km_marker;
+    if (body.install_date  !== undefined) updates.install_date  = body.install_date;
+    if (body.useful_life_years !== undefined) updates.useful_life_years = body.useful_life_years;
+    if (body.gps_lat       !== undefined) updates.gps_lat       = body.gps_lat;
+    if (body.gps_lng       !== undefined) updates.gps_lng       = body.gps_lng;
+    if (body.notes         !== undefined) updates.notes         = body.notes;
+    if (body.replacement_value !== undefined) updates.replacement_value = body.replacement_value;
+    if (body.purchase_price    !== undefined) updates.purchase_price    = body.purchase_price;
+
+    // owner / responsible_party → stored as owner_entity / maintenance_responsibility
+    if (body.owner             !== undefined) updates.owner_entity              = body.owner;
+    if (body.responsible_party !== undefined) updates.maintenance_responsibility = body.responsible_party;
+
+    // asset_type_name requires a lookup
+    if (body.asset_type_name) {
+      const { data: assetType } = await supabase
+        .from("asset_types")
+        .select("asset_type_id")
+        .ilike("name", body.asset_type_name)
+        .maybeSingle();
+      if (assetType?.asset_type_id) updates.asset_type_id = assetType.asset_type_id;
+    }
+
+    // status requires a lookup
+    if (body.status) {
+      const { data: statusData } = await supabase
+        .from("asset_status")
+        .select("status_id")
+        .ilike("name", body.status)
+        .maybeSingle();
+      if (statusData?.status_id) updates.status_id = statusData.status_id;
+    }
+
+    // condition and asset_name are stored in metadata JSONB
+    if (body.condition !== undefined || body.asset_name !== undefined) {
+      const existingMeta = (existingAsset as any).metadata || {};
+      updates.metadata = {
+        ...existingMeta,
+        ...(body.asset_name !== undefined ? { asset_name: body.asset_name } : {}),
+        ...(body.condition  !== undefined ? { condition:  body.condition  } : {}),
+      };
+    }
+
+    const { error: updateError } = await supabase
+      .from("tams360_assets")
+      .update(updates)
+      .eq("asset_id", assetId)
+      .eq("tenant_id", userProfile.tenant_id);
+
+    if (updateError) {
+      console.error("Error updating asset:", updateError);
+      return c.json({ error: "Failed to update asset", details: updateError.message }, 500);
+    }
+
+    const { data: updatedAsset } = await supabase
+      .from("tams360_assets_v")
+      .select("*")
+      .eq("asset_id", assetId)
+      .maybeSingle();
+
+    return c.json({ success: true, asset: updatedAsset });
+  } catch (error: any) {
+    console.error("Error in PATCH /assets/:id:", error);
     return c.json({ error: "Failed to update asset" }, 500);
   }
 });

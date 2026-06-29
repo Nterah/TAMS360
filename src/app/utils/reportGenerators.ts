@@ -29,7 +29,8 @@ export interface ReportOptions {
   fileName: string;
   includeDate?: boolean;
   includeFooter?: boolean;
-  includePhotos?: boolean; // New flag for photo reports
+  includePhotos?: boolean;
+  imageData?: Record<string, string>; // pre-loaded base64 images keyed by URL
 }
 
 function formatReportDate(value: any, fallback = ""): string {
@@ -173,14 +174,9 @@ async function loadImageAsDataURL(url: string): Promise<string> {
  * Generate PDF Report with Tenant Branding
  */
 export async function generatePDFReport(options: ReportOptions): Promise<void> {
-  const { title, data, columns, tenant, fileName, includeDate = true, includeFooter = true, includePhotos = false } = options;
-  
-  // Debug logging
+  const { title, data, columns, tenant, fileName, includeDate = true, includeFooter = true, imageData = {} } = options;
+
   console.log('[PDF Generator] Starting PDF generation');
-  console.log('[PDF Generator] Tenant data received:', tenant);
-  console.log('[PDF Generator] Organization Name:', tenant.organizationName);
-  console.log('[PDF Generator] Logo URL:', tenant.logoUrl);
-  console.log('[PDF Generator] Primary Color:', tenant.primaryColor);
 
   const pdfPageSize = getPdfPageSizeForColumns(title, columns);
   const pdfFontSize = getPdfFontSizeForPageSize(pdfPageSize);
@@ -195,8 +191,7 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const primaryColor = tenant.primaryColor || '#010D13';
-  
-  // Convert hex to RGB
+
   const hexToRgb = (hex: string) => {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     return result ? {
@@ -205,15 +200,12 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
       b: parseInt(result[3], 16)
     } : { r: 1, g: 13, b: 19 };
   };
-  
+
   const color = hexToRgb(primaryColor);
-  
   let yPosition = 20;
-  
-  // Add logo if available
+
   if (tenant.logoUrl) {
     try {
-      // Try to load logo
       const img = new Image();
       img.crossOrigin = 'Anonymous';
       await new Promise((resolve, reject) => {
@@ -221,30 +213,22 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
         img.onerror = reject;
         img.src = tenant.logoUrl!;
       });
-      
-      // Calculate dimensions preserving aspect ratio
       const maxWidth = 35;
       const maxHeight = 20;
       const aspectRatio = img.width / img.height;
-      
       let logoWidth = maxWidth;
       let logoHeight = maxWidth / aspectRatio;
-      
-      // If height exceeds max, scale down based on height
       if (logoHeight > maxHeight) {
         logoHeight = maxHeight;
         logoWidth = maxHeight * aspectRatio;
       }
-      
-      console.log(`[PDF Generator] Logo dimensions: ${img.width}x${img.height}, Rendered as: ${logoWidth}x${logoHeight}`);
       doc.addImage(img, 'PNG', 15, yPosition, logoWidth, logoHeight);
       yPosition += logoHeight + 5;
     } catch (error) {
       console.warn('Could not load logo:', error);
     }
   }
-  
-  // Add organization name
+
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(color.r, color.g, color.b);
@@ -252,8 +236,7 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
     doc.text(tenant.organizationName, 15, yPosition);
     yPosition += 7;
   }
-  
-  // Add tagline if available
+
   if (tenant.tagline) {
     doc.setFontSize(10);
     doc.setFont('helvetica', 'italic');
@@ -261,8 +244,7 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
     doc.text(tenant.tagline, 15, yPosition);
     yPosition += 6;
   }
-  
-  // Add address if available
+
   if (tenant.address) {
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
@@ -271,13 +253,11 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
     doc.text(addressLines, 15, yPosition);
     yPosition += (addressLines.length * 4) + 4;
   }
-  
-  // Add contact details if available
+
   const contactParts = [];
   if (tenant.phone) contactParts.push(`Tel: ${tenant.phone}`);
   if (tenant.email) contactParts.push(`Email: ${tenant.email}`);
   if (tenant.website) contactParts.push(`Web: ${tenant.website}`);
-  
   if (contactParts.length > 0) {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
@@ -285,79 +265,110 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
     doc.text(contactParts.join('  |  '), 15, yPosition);
     yPosition += 5;
   }
-  
-  // Add region if available
+
   if (tenant.regionName) {
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
     doc.text(tenant.regionName, 15, yPosition);
     yPosition += 10;
   }
-  
-  // Add divider line
+
   doc.setDrawColor(color.r, color.g, color.b);
   doc.setLineWidth(0.5);
   doc.line(15, yPosition, pageWidth - 15, yPosition);
   yPosition += 8;
-  
-  // Add title
+
   doc.setFontSize(18);
   doc.setTextColor(color.r, color.g, color.b);
   doc.text(title, 15, yPosition);
   yPosition += 10;
-  
-  // Add date
+
   if (includeDate) {
     doc.setFontSize(10);
     doc.setTextColor(100, 100, 100);
-    doc.text(`Generated: ${new Date().toLocaleDateString('en-ZA', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-ZA', {
+      year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
     })}`, 15, yPosition);
     yPosition += 10;
   }
-  
+
+  // --- Image column support ---
+  const imageColIndex = columns.findIndex(
+    col => col.key === 'image' || col.header.toUpperCase() === 'IMAGE'
+  );
+
+  const imgCache: Record<string, string> = { ...imageData };
+
+  if (imageColIndex >= 0) {
+    const urls = [...new Set(
+      data
+        .map(row => row[columns[imageColIndex].key])
+        .filter((v): v is string => typeof v === 'string' && v.startsWith('http') && !imgCache[v])
+    )];
+    await Promise.allSettled(
+      urls.map(async url => {
+        try { imgCache[url] = await loadImageAsDataURL(url); } catch { /* skip */ }
+      })
+    );
+  }
+
   // Prepare table data
-  const tableData = data.map(row => 
+  const tableData = data.map(row =>
     columns.map(col => {
       const value = row[col.key];
-      // Format currency values
       if (col.key.includes('cost') || col.key.includes('value') || col.key.includes('price')) {
-        return typeof value === 'number' ? `R ${value.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : value || '-';
+        return typeof value === 'number'
+          ? `R ${value.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : value || '-';
       }
-      // Format dates
       if (col.key.includes('date') || col.key.includes('Date')) {
-        return formatReportDate(value, "-");
+        return formatReportDate(value, '-');
       }
       return value || '-';
     })
   );
-  
-  // Add table
+
+  const colStyles: any = columns.reduce((acc, col, index) => {
+    const header = String(col.header || '').toUpperCase();
+    if (col.width) {
+      acc[index] = { cellWidth: col.width };
+    } else if (header.includes('UNIQUE ID')) {
+      acc[index] = { cellWidth: 34 };
+    } else if (header.includes('REFERENCE')) {
+      acc[index] = { cellWidth: 34 };
+    } else if (header === 'TYPE') {
+      acc[index] = { cellWidth: 28 };
+    } else if (header.includes('LOCATION') || header.includes('ROAD')) {
+      acc[index] = { cellWidth: 44 };
+    } else if (header.includes('LATITUDE') || header.includes('LONGITUDE')) {
+      acc[index] = { cellWidth: 30 };
+    } else if (header.includes('NAME') || header.includes('CODE')) {
+      acc[index] = { cellWidth: 48 };
+    } else if (header.includes('CONDITION')) {
+      acc[index] = { cellWidth: 30 };
+    } else if (header.includes('DERU')) {
+      acc[index] = { cellWidth: 28 };
+    } else if (header.includes('CI')) {
+      acc[index] = { cellWidth: 26 };
+    } else if (header === 'IMAGE') {
+      acc[index] = { cellWidth: 35, minCellHeight: 28 };
+    }
+    return acc;
+  }, {} as any);
+
   autoTable(doc, {
     head: [columns.map(col => col.header)],
     body: tableData,
     startY: yPosition,
     theme: 'grid',
-
-    margin: {
-      top: 10,
-      right: 8,
-      bottom: 20,
-      left: 8,
-    },
-
+    margin: { top: 10, right: 8, bottom: 20, left: 8 },
     styles: {
       fontSize: pdfFontSize,
       cellPadding: pdfCellPadding,
       overflow: 'linebreak',
       valign: 'middle',
-      minCellHeight: 6,
+      minCellHeight: imageColIndex >= 0 ? 28 : 6,
     },
-
     headStyles: {
       fillColor: [color.r, color.g, color.b],
       textColor: [255, 255, 255],
@@ -366,76 +377,54 @@ export async function generatePDFReport(options: ReportOptions): Promise<void> {
       halign: 'center',
       valign: 'middle',
     },
-
     bodyStyles: {
       fontSize: pdfFontSize,
       valign: 'top',
     },
-
     alternateRowStyles: {
       fillColor: [245, 245, 245],
     },
-
-    columnStyles: columns.reduce((acc, col, index) => {
-      const header = String(col.header || '').toUpperCase();
-
-      if (col.width) {
-        acc[index] = { cellWidth: col.width };
-      } else if (header.includes('UNIQUE ID')) {
-        acc[index] = { cellWidth: 34 };
-      } else if (header.includes('REFERENCE')) {
-        acc[index] = { cellWidth: 34 };
-      } else if (header === 'TYPE') {
-        acc[index] = { cellWidth: 28 };
-      } else if (header.includes('LOCATION') || header.includes('ROAD')) {
-        acc[index] = { cellWidth: 44 };
-      } else if (header.includes('LATITUDE') || header.includes('LONGITUDE')) {
-        acc[index] = { cellWidth: 30 };
-      } else if (header.includes('NAME') || header.includes('CODE')) {
-        acc[index] = { cellWidth: 48 };
-      } else if (header.includes('CONDITION')) {
-        acc[index] = { cellWidth: 30 };
-      } else if (header.includes('DERU')) {
-        acc[index] = { cellWidth: 28 };
-      } else if (header.includes('CI')) {
-        acc[index] = { cellWidth: 26 };
-      } else if (header.includes('IMAGE')) {
-        acc[index] = { cellWidth: 30 };
+    columnStyles: colStyles,
+    didParseCell: (hookData) => {
+      if (imageColIndex >= 0 && hookData.column.index === imageColIndex && hookData.section === 'body') {
+        const url = hookData.cell.raw as string;
+        if (url && url !== '-' && imgCache[url]) {
+          hookData.cell.text = [];
+        }
       }
-
-      return acc;
-    }, {} as any),
+    },
+    didDrawCell: (hookData) => {
+      if (imageColIndex >= 0 && hookData.column.index === imageColIndex && hookData.section === 'body') {
+        const url = hookData.cell.raw as string;
+        const base64 = url && imgCache[url];
+        if (base64) {
+          const pad = 1;
+          doc.addImage(
+            base64, 'JPEG',
+            hookData.cell.x + pad,
+            hookData.cell.y + pad,
+            hookData.cell.width - pad * 2,
+            hookData.cell.height - pad * 2,
+          );
+        }
+      }
+    },
   });
-  
-  // Add footer
+
   if (includeFooter) {
     const pageCount = doc.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
       const pageHeight = doc.internal.pageSize.getHeight();
-      
-      // Left: Tenant name and page number
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(
-        `${tenant.organizationName || 'TAMS360'} | Page ${i} of ${pageCount}`,
-        15,
-        pageHeight - 10
-      );
-      
-      // Right: "Created by TAMS360"
+      doc.text(`${tenant.organizationName || 'TAMS360'} | Page ${i} of ${pageCount}`, 15, pageHeight - 10);
       doc.setFontSize(7);
       doc.setTextColor(180, 180, 180);
-      doc.text(
-        'Created by TAMS360',
-        pageWidth - 15,
-        pageHeight - 10,
-        { align: 'right' }
-      );
+      doc.text('Created by TAMS360', pageWidth - 15, pageHeight - 10, { align: 'right' });
     }
   }
-  
-  // Save PDF
+
   doc.save(`${fileName}.pdf`);
 }
 
