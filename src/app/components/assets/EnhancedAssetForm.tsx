@@ -51,9 +51,11 @@ interface EnhancedAssetFormProps {
   onSubmit: (assetData: any) => void;
   onCancel: () => void;
   existingAssets?: any[];
+  mode?: "create" | "edit";
+  initialValues?: any;
 }
 
-export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets = [] }: EnhancedAssetFormProps) {
+export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets = [], mode = "create", initialValues }: EnhancedAssetFormProps) {
 
   // Auto-numbering fields
   const [assetType, setAssetType] = useState("");
@@ -98,8 +100,9 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
 
-  // Auto-detect location on component mount
+  // Auto-detect location on component mount (create mode only)
   useEffect(() => {
+    if (mode === "edit") return;
     try {
       if (navigator.geolocation) detectLocation();
     } catch {
@@ -107,8 +110,40 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     }
   }, []);
 
-  // Generate asset reference whenever relevant fields change
+  // Pre-populate fields from initialValues when in edit mode
   useEffect(() => {
+    if (mode !== "edit" || !initialValues) return;
+    setAssetType(initialValues.asset_type_name || initialValues.type || "");
+    setAssetName(initialValues.description || initialValues.name || "");
+    setInstaller(initialValues.installer_name || initialValues.installer || "");
+    setRegion(initialValues.region || initialValues.region_name || "");
+    setDepot(initialValues.depot || initialValues.depot_name || "");
+    setKilometer(String(initialValues.km_marker ?? initialValues.kilometer ?? ""));
+    setInstallDate(
+      initialValues.install_date
+        ? initialValues.install_date.substring(0, 10)
+        : initialValues.installDate?.substring(0, 10) ?? ""
+    );
+    setCondition(initialValues.latest_condition || initialValues.condition || "Good");
+    setStatus(initialValues.status_name || initialValues.status || "Active");
+    setExpectedLife(String(initialValues.useful_life_years ?? initialValues.expectedLife ?? ""));
+    setNotes(initialValues.notes || "");
+    setOwner(initialValues.owned_by || initialValues.owner_name || initialValues.owner || "");
+    setResponsibleParty(
+      initialValues.responsible_party || initialValues.responsibleParty || ""
+    );
+    setReplacementValue(String(initialValues.replacement_value ?? initialValues.replacementValue ?? ""));
+    setInstallationCost(String(initialValues.purchase_price ?? initialValues.installationCost ?? ""));
+    setLatitude(String(initialValues.gps_lat ?? initialValues.latitude ?? ""));
+    setLongitude(String(initialValues.gps_lng ?? initialValues.longitude ?? ""));
+    setEndLatitude(String(initialValues.end_latitude ?? initialValues.endLatitude ?? ""));
+    setEndLongitude(String(initialValues.end_longitude ?? initialValues.endLongitude ?? ""));
+    setGeneratedAssetRef(initialValues.asset_ref || initialValues.referenceNumber || "");
+  }, [mode, initialValues]);
+
+  // Generate asset reference whenever relevant fields change (create mode only)
+  useEffect(() => {
+    if (mode === "edit") return;
     generateAssetReference();
   }, [assetType, roadName, roadSubsection, direction, roadSide, sequentialNumber]);
 
@@ -232,15 +267,16 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   };
 
   const handleSubmit = () => {
-    // Validate required fields
-    if (!assetType || !roadName || !direction || !sequentialNumber) {
-      toast.error("Please fill in all required fields for asset numbering");
-      return;
-    }
-
-    if (!generatedAssetRef) {
-      toast.error("Asset reference number is not generated");
-      return;
+    if (mode === "create") {
+      // Validate required fields
+      if (!assetType || !roadName || !direction || !sequentialNumber) {
+        toast.error("Please fill in all required fields for asset numbering");
+        return;
+      }
+      if (!generatedAssetRef) {
+        toast.error("Asset reference number is not generated");
+        return;
+      }
     }
 
     if (
@@ -283,25 +319,36 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
 
   return (
     <div className="space-y-6">
-      {/* Auto-Generated Asset Number Section */}
-      <div className="space-y-4 p-4 border rounded-lg bg-primary/5">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Auto-Generated Asset Number</h3>
-          <Badge variant="default" className="text-base font-mono">
-            {generatedAssetRef || "Not Generated"}
-          </Badge>
+      {/* Asset Reference — editable in create mode, read-only in edit mode */}
+      {mode === "edit" ? (
+        <div className="flex items-center justify-between p-4 border rounded-lg bg-primary/5">
+          <div>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Asset Reference</p>
+            <p className="text-lg font-mono font-bold mt-1">{generatedAssetRef}</p>
+            <p className="text-xs text-muted-foreground mt-1">Asset reference cannot be changed after creation</p>
+          </div>
+          <Badge variant="default" className="text-base font-mono">{generatedAssetRef}</Badge>
         </div>
+      ) : (
+        /* Auto-Generated Asset Number Section */
+        <div className="space-y-4 p-4 border rounded-lg bg-primary/5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Auto-Generated Asset Number</h3>
+            <Badge variant="default" className="text-base font-mono">
+              {generatedAssetRef || "Not Generated"}
+            </Badge>
+          </div>
 
-        <Alert>
-          <Info className="w-4 h-4" />
-          <AlertDescription className="text-xs">
-            Fill in the fields below to automatically generate the asset reference number.
-            <br />
-            <strong>Format:</strong> {"{TYPE}"}-{"{ROAD}"}-{"{DIRECTION}"}[-{"{SIDE}"}]-{"{SEQ}"}
-            <br />
-            <strong>Example:</strong> FNC-M1-SB-003 or GR-M1-NB_OffRamp-LHS-012
-          </AlertDescription>
-        </Alert>
+          <Alert>
+            <Info className="w-4 h-4" />
+            <AlertDescription className="text-xs">
+              Fill in the fields below to automatically generate the asset reference number.
+              <br />
+              <strong>Format:</strong> {"{TYPE}"}-{"{ROAD}"}-{"{DIRECTION}"}[-{"{SIDE}"}]-{"{SEQ}"}
+              <br />
+              <strong>Example:</strong> FNC-M1-SB-003 or GR-M1-NB_OffRamp-LHS-012
+            </AlertDescription>
+          </Alert>
 
         <div className="grid grid-cols-2 gap-4">
           {/* Asset Type */}
@@ -435,6 +482,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
           </div>
         </div>
       </div>
+      )} {/* end create-mode auto-numbering section */}
 
       {/* GPS Location Section */}
       <div className="space-y-4 p-4 border rounded-lg bg-[#39AEDF]/5">
@@ -772,7 +820,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
           Cancel
         </Button>
         <Button type="button" onClick={handleSubmit}>
-          Create Asset
+          {mode === "edit" ? "Save Changes" : "Create Asset"}
         </Button>
       </div>
     </div>

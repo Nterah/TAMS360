@@ -3491,7 +3491,83 @@ app.get("/make-server-c894a9ff/assets/:id", async (c) => {
   }
 });
 
-// Update asset
+// Patch (partial update) asset - persists to Supabase database
+app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) return c.json({ error: "Unauthorized" }, 401);
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+    if (authError || !userData?.user) return c.json({ error: "Invalid session" }, 401);
+
+    const { data: userProfile } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("tenant_id")
+      .eq("id", userData.user.id)
+      .single();
+
+    if (!userProfile?.tenant_id) return c.json({ error: "User not associated with an organization" }, 403);
+
+    const assetId = c.req.param("id");
+    const updates = await c.req.json();
+
+    // Look up status_id if a status name was provided
+    let statusId: string | undefined;
+    if (updates.status) {
+      const { data: statusData } = await supabase
+        .from("asset_status")
+        .select("status_id")
+        .eq("name", updates.status)
+        .maybeSingle();
+      statusId = statusData?.status_id;
+    }
+
+    // Build update object with only the fields that are present
+    const dbUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (updates.description != null)       dbUpdate.description       = updates.description;
+    if (updates.region != null)             dbUpdate.region             = updates.region;
+    if (updates.depot != null)              dbUpdate.depot              = updates.depot;
+    if (updates.road_number != null)        dbUpdate.road_number        = updates.road_number;
+    if (updates.road_name != null)          dbUpdate.road_name          = updates.road_name;
+    if (updates.km_marker != null)          dbUpdate.km_marker          = updates.km_marker;
+    if (updates.install_date != null)       dbUpdate.install_date       = updates.install_date;
+    if (updates.useful_life_years != null)  dbUpdate.useful_life_years  = updates.useful_life_years;
+    if (updates.notes != null)              dbUpdate.notes              = updates.notes;
+    if (updates.gps_lat != null)            dbUpdate.gps_lat            = updates.gps_lat;
+    if (updates.gps_lng != null)            dbUpdate.gps_lng            = updates.gps_lng;
+    if (updates.end_latitude != null)       dbUpdate.end_latitude       = updates.end_latitude;
+    if (updates.end_longitude != null)      dbUpdate.end_longitude      = updates.end_longitude;
+    if (updates.owned_by != null)           dbUpdate.owned_by           = updates.owned_by;
+    if (updates.responsible_party != null)  dbUpdate.responsible_party  = updates.responsible_party;
+    if (updates.replacement_value != null)  dbUpdate.replacement_value  = updates.replacement_value;
+    if (updates.purchase_price != null)     dbUpdate.purchase_price     = updates.purchase_price;
+    if (updates.installer_name != null)     dbUpdate.installer_name     = updates.installer_name;
+    if (statusId)                           dbUpdate.status_id          = statusId;
+
+    const { data: updatedAsset, error: updateError } = await supabase
+      .from("assets")
+      .update(dbUpdate)
+      .eq("asset_id", assetId)
+      .eq("tenant_id", userProfile.tenant_id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error("Error updating asset:", updateError);
+      return c.json({ error: updateError.message }, 500);
+    }
+
+    if (!updatedAsset) return c.json({ error: "Asset not found" }, 404);
+
+    return c.json({ success: true, asset: updatedAsset });
+  } catch (error: any) {
+    console.error("Error patching asset:", error);
+    return c.json({ error: "Failed to update asset" }, 500);
+  }
+});
+
+// Update asset (legacy KV-based, kept for backward compat)
 app.put("/make-server-c894a9ff/assets/:id", async (c) => {
   try {
     const authHeader = c.req.header("Authorization");

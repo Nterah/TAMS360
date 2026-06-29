@@ -29,6 +29,7 @@ import DashboardPage from "./components/dashboard/DashboardPage";
 import GISMapPage from "./components/map/GISMapPage";
 import AssetsPage from "./components/assets/AssetsPage";
 import AssetDetailPage from "./components/assets/AssetDetailPage";
+import EditAssetPage from "./components/assets/EditAssetPage";
 import AssetInventoryLogPage from "./components/assets/AssetInventoryLogPage";
 import AssetsMapPage from "./components/map/AssetsMapPage";
 import InspectionsPage from "./components/inspections/InspectionsPage";
@@ -346,6 +347,11 @@ function App() {
                         <Route path="/assets/:assetId" element={
                           <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
                             <AssetDetailPage />
+                          </RoleGuard>
+                        } />
+                        <Route path="/assets/:assetId/edit" element={
+                          <RoleGuard allowedRoles={["admin", "supervisor"]} redirectTo="/mobile/capture-hub">
+                            <EditAssetPage />
                           </RoleGuard>
                         } />
                         <Route path="/inspections" element={
