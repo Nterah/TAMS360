@@ -278,12 +278,24 @@ export default function AssetDetailPage() {
       if (response.ok) {
         const data = await response.json();
         console.log(`[Photos] Found ${data.photos?.length || 0} photos from API`);
-        // Merge API photos with locally-stored photos (don't overwrite)
         if (data.photos && data.photos.length > 0) {
           setPhotos((prev) => {
-            const existingUrls = new Set(prev.map((p: any) => p.signedUrl || p.url || ""));
-            const newPhotos = data.photos.filter((p: any) => !existingUrls.has(p.signedUrl || p.url || ""));
-            return [...prev, ...newPhotos];
+            // Filenames the API resolved — these are authoritative, remove any
+            // placeholder entries (wrong-bucket URLs from metadata) for the same file.
+            const apiFileNames = new Set(
+              data.photos
+                .map((p: any) => (p.signedUrl || p.url || "").split("/").pop())
+                .filter(Boolean)
+            );
+            const keepExisting = prev.filter((p: any) => {
+              const fileName = (p.signedUrl || p.url || "").split("/").pop() || "";
+              return !fileName || !apiFileNames.has(fileName);
+            });
+            const keepUrls = new Set(keepExisting.map((p: any) => p.signedUrl || p.url || ""));
+            const newPhotos = data.photos.filter(
+              (p: any) => !keepUrls.has(p.signedUrl || p.url || "")
+            );
+            return [...keepExisting, ...newPhotos];
           });
         }
       } else {
