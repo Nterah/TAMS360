@@ -97,14 +97,20 @@ export default function EditAssetPage() {
         if (typeRow?.asset_type_id) updates.asset_type_id = typeRow.asset_type_id;
       }
 
-      // condition / asset_name → stored in metadata JSONB
-      if (assetData.name !== undefined || assetData.condition !== undefined) {
-        const existingMeta = asset?.metadata || {};
-        updates.metadata = {
-          ...existingMeta,
-          ...(assetData.name      !== undefined ? { asset_name: assetData.name }      : {}),
-          ...(assetData.condition !== undefined ? { condition:  assetData.condition }  : {}),
-        };
+      // Fields stored in metadata JSONB (no dedicated columns)
+      const existingMeta = asset?.metadata || {};
+      const metaUpdates: Record<string, any> = {};
+      if (assetData.name      !== undefined) metaUpdates.asset_name             = assetData.name;
+      if (assetData.condition !== undefined) metaUpdates.condition               = assetData.condition;
+      if (assetData.mounting_type             !== undefined) metaUpdates.mounting_type             = assetData.mounting_type;
+      if (assetData.number_of_posts_supports  !== undefined) metaUpdates.number_of_posts_supports  = assetData.number_of_posts_supports;
+      if (assetData.number_of_beams           !== undefined) metaUpdates.number_of_beams           = assetData.number_of_beams;
+      if (assetData.width_m                   !== undefined) metaUpdates.width_m                   = assetData.width_m;
+      if (assetData.length_m                  !== undefined) metaUpdates.length_m                  = assetData.length_m;
+      if (assetData.height_m                  !== undefined) metaUpdates.height_m                  = assetData.height_m;
+      if (assetData.orientation_position      !== undefined) metaUpdates.orientation_position      = assetData.orientation_position;
+      if (Object.keys(metaUpdates).length > 0) {
+        updates.metadata = { ...existingMeta, ...metaUpdates };
       }
 
       const { error: updateError } = await supabase
@@ -132,7 +138,7 @@ export default function EditAssetPage() {
             });
             if (uploadRes.ok) {
               const { path, url } = await uploadRes.json();
-              const photoUrl = path || url;
+              const photoUrl = url || path; // prefer full URL (includes correct bucket)
               if (photoUrl && assetId) {
                 try {
                   const existing: string[] = JSON.parse(

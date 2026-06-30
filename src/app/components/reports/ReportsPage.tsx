@@ -286,6 +286,15 @@ export default function ReportsPage() {
 
       const metadata = latestInspection?.calculation_metadata || asset.calculation_metadata || {};
 
+      // Debug logging for the target asset
+      if (asset.asset_ref === 'RS-Kliprivier-NB-LHS-123') {
+        console.log('[DERU Debug] Asset record:', { asset_id: asset.asset_id, asset_ref: asset.asset_ref });
+        console.log('[DERU Debug] latestInspection:', latestInspection
+          ? { inspection_id: latestInspection.inspection_id, calculation_metadata: latestInspection.calculation_metadata }
+          : 'null (no inspection matched)');
+        console.log('[DERU Debug] metadata (calculation_metadata):', metadata);
+      }
+
       const ciHealth = resolveCIHealth(source);
       const ciSafety = resolveCISafety(source);
 
@@ -409,6 +418,7 @@ export default function ReportsPage() {
 
         name_code: firstDefined(asset.name_code, asset.name, asset.code, asset.sign_code, asset.asset_ref),
         mounting_type: firstDefined(
+          asset.metadata?.mounting_type,
           getAssetValue(asset, ["MOUNTNG TYPE", "MOUNTING TYPE", "MOUNT TYPE", "MOUNT_TYPE"]),
           asset.mounting_type, asset.mountng_type, asset.mount_type,
           getInspectionValue(latestInspection, ["MOUNTING TYPE", "MOUNTNG TYPE", "MOUNT TYPE", "mounting_type"]),
@@ -417,6 +427,8 @@ export default function ReportsPage() {
           latestInspection?.calculation_metadata?.mounting_type,
         ),
         posts_supports: firstDefined(
+          asset.metadata?.number_of_posts_supports,
+          asset.metadata?.posts_supports,
           getAssetValue(asset, ["# POSTS/SUPPORTS", "# POSTS / SUPPORTS", "POSTS/SUPPORTS", "NUMBER OF POSTS", "NUM POSTS", "SUPPORTS"]),
           asset.posts_supports, asset.number_of_posts, asset.num_posts, asset.supports,
           getInspectionValue(latestInspection, ["# POSTS/SUPPORTS", "POSTS/SUPPORTS", "NUMBER OF POSTS", "NUM POSTS", "posts_supports", "number_of_posts"]),
@@ -425,6 +437,8 @@ export default function ReportsPage() {
           latestInspection?.calculation_metadata?.posts_supports,
         ),
         beams: firstDefined(
+          asset.metadata?.number_of_beams,
+          asset.metadata?.beams,
           getAssetValue(asset, ["# BEAMS", "BEAMS", "NUMBER OF BEAMS", "NUM BEAMS"]),
           asset.beams, asset.number_of_beams, asset.num_beams,
           getInspectionValue(latestInspection, ["# BEAMS", "BEAMS", "NUMBER OF BEAMS", "beams", "number_of_beams"]),
@@ -433,6 +447,7 @@ export default function ReportsPage() {
           latestInspection?.calculation_metadata?.beams,
         ),
         width_m: firstDefined(
+          asset.metadata?.width_m,
           getAssetValue(asset, ["WIDTH (m)", "WIDTH M", "WIDTH"]),
           asset.width_m, asset.width,
           getInspectionValue(latestInspection, ["WIDTH (m)", "WIDTH M", "WIDTH", "width_m", "width"]),
@@ -441,6 +456,7 @@ export default function ReportsPage() {
           latestInspection?.calculation_metadata?.width_m,
         ),
         length_m: firstDefined(
+          asset.metadata?.length_m,
           getAssetValue(asset, ["LENGTH (m)", "LENGTH M", "LENGTH"]),
           asset.length_m, asset.length,
           getInspectionValue(latestInspection, ["LENGTH (m)", "LENGTH M", "LENGTH", "length_m", "length"]),
@@ -449,6 +465,7 @@ export default function ReportsPage() {
           latestInspection?.calculation_metadata?.length_m,
         ),
         height_m: firstDefined(
+          asset.metadata?.height_m,
           getAssetValue(asset, ["HEIGHT (m)", "HEIGHT M", "HEIGHT"]),
           asset.height_m, asset.height,
           getInspectionValue(latestInspection, ["HEIGHT (m)", "HEIGHT M", "HEIGHT", "height_m", "height"]),
@@ -702,6 +719,104 @@ export default function ReportsPage() {
       );
     }
     return photoMap;
+  };
+
+  // Enrich inspections with D/E/R from component scores via the API endpoint.
+  // Fetches 10 inspections at a time to avoid flooding the server.
+  const enrichInspectionsWithDERU = async (inspections: any[]): Promise<any[]> => {
+    const DEBUG_REF = 'RS-Kliprivier-NB-LHS-123';
+    const hasValue = (v: any) =>
+      v !== null && v !== undefined && String(v).trim() !== '' && String(v).trim() !== '-';
+
+    const needEnrich = inspections.filter(
+      (i: any) =>
+        !hasValue(i.calculation_metadata?.degree) &&
+        !hasValue(i.calculation_metadata?.overall_degree)
+    );
+
+    // Log the target asset's inspection
+    const debugInsp = inspections.find((i: any) => i.asset_ref === DEBUG_REF);
+    console.log(`[DERU Debug] Total inspections: ${inspections.length}, need enrich: ${needEnrich.length}`);
+    console.log(`[DERU Debug] Inspection for ${DEBUG_REF}:`, debugInsp
+      ? { inspection_id: debugInsp.inspection_id, asset_ref: debugInsp.asset_ref, calculation_metadata: debugInsp.calculation_metadata }
+      : 'NOT FOUND in inspections list');
+
+    if (needEnrich.length === 0) return inspections;
+
+    const CONCURRENCY = 10;
+    const scoreMap = new Map<string, { degree: string; extent: string; relevancy: string }>();
+
+    for (let i = 0; i < needEnrich.length; i += CONCURRENCY) {
+      const batch = needEnrich.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(
+        batch.map(async (insp: any) => {
+          if (!insp.inspection_id) return;
+          const isDebug = insp.asset_ref === DEBUG_REF;
+          try {
+            const res = await fetch(
+              `${API_URL}/inspections/${insp.inspection_id}/component-scores`,
+              { headers: getAuthHeaders(), signal: AbortSignal.timeout(6000) }
+            );
+            if (isDebug) console.log(`[DERU Debug] Component scores HTTP status for ${DEBUG_REF}:`, res.status);
+            if (!res.ok) return;
+            const json = await res.json();
+            const scores: any[] = json.scores || json.component_scores || json || [];
+            if (isDebug) console.log(`[DERU Debug] Raw component scores for ${DEBUG_REF}:`, scores);
+
+            // Skip U/N/X (unable/not-applicable) — prefer a component with all 3 values
+            const isMeaningful = (v: any) =>
+              hasValue(v) && !['U', 'N', 'X'].includes(String(v).toUpperCase().trim());
+
+            const chosen =
+              // Priority 1: all three values meaningful
+              scores.find((s: any) =>
+                isMeaningful(s.degree_value ?? s.degree) &&
+                hasValue(s.extent_value ?? s.extent) &&
+                hasValue(s.relevancy_value ?? s.relevancy)
+              ) ||
+              // Priority 2: at least a meaningful degree
+              scores.find((s: any) => isMeaningful(s.degree_value ?? s.degree)) ||
+              // Priority 3: any value at all
+              scores.find((s: any) => {
+                const d = s.degree_value ?? s.degree;
+                const e = s.extent_value ?? s.extent;
+                const r = s.relevancy_value ?? s.relevancy;
+                return hasValue(d) || hasValue(e) || hasValue(r);
+              });
+
+            if (chosen) {
+              const d = chosen.degree_value ?? chosen.degree;
+              const e = chosen.extent_value ?? chosen.extent;
+              const r = chosen.relevancy_value ?? chosen.relevancy;
+              scoreMap.set(insp.inspection_id, {
+                degree: hasValue(d) ? String(d) : '',
+                extent: hasValue(e) ? String(e) : '',
+                relevancy: hasValue(r) ? String(r) : '',
+              });
+              if (isDebug) console.log(`[DERU Debug] Selected D/E/R for ${DEBUG_REF} (${chosen.component_name}):`, { degree: d, extent: e, relevancy: r });
+            }
+          } catch (err: any) {
+            if (isDebug) console.error(`[DERU Debug] Fetch error for ${DEBUG_REF}:`, err?.message);
+          }
+        })
+      );
+    }
+
+    console.log(`[DERU Debug] scoreMap size after enrichment: ${scoreMap.size}`);
+
+    return inspections.map((insp: any) => {
+      const s = scoreMap.get(insp.inspection_id);
+      if (!s) return insp;
+      return {
+        ...insp,
+        calculation_metadata: {
+          ...(insp.calculation_metadata || {}),
+          degree: s.degree,
+          extent: s.extent,
+          relevancy: s.relevancy,
+        },
+      };
+    });
   };
 
   const fetchTenantConfigRows = async (configKey: string) => {
@@ -1132,12 +1247,17 @@ export default function ReportsPage() {
 
       switch (reportType) {
         case "Asset Inventory": {
-          const [assets, inspections, lifecycleConfigRows, assetValueConfigRows] = await Promise.all([
+          const [assets, rawInspections, lifecycleConfigRows, assetValueConfigRows] = await Promise.all([
             fetchAllAssetRegisterReportAssets(),
             fetchAllInspections(),
             fetchTenantConfigRows("lifecycle"),
             fetchTenantConfigRows("values"),
           ]);
+
+          // Enrich inspections: pull D/E/R from component scores for any inspection
+          // that has null values in calculation_metadata (all historical inspections).
+          toast.loading(`Loading inspection details…`, { id: "export-report" });
+          const inspections = await enrichInspectionsWithDERU(rawInspections);
 
           // Fetch photos — use any URL already on the record, then fall back to the
           // per-asset Storage API. We fetch 10 at a time to avoid flooding the server.

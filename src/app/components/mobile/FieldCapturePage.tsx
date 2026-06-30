@@ -764,7 +764,8 @@ export default function FieldCapturePage() {
 
       if (uploadResponse.ok) {
         const { url, path } = await uploadResponse.json();
-        photoUrls.push(path || url);
+        // Prefer full URL (includes correct bucket name) over bare path
+        photoUrls.push(url || path);
       }
     }
 

@@ -428,6 +428,31 @@ export default function MobileNewInspectionPage() {
       return;
     }
 
+    setLoading(true);
+
+    // Upload photos to storage before saving the inspection
+    const uploadedPhotoUrls: string[] = [];
+    if (photos.length > 0 && isOnline) {
+      const folderPath = selectedAsset?.asset_ref || formData.asset_id || `asset_${Date.now()}`;
+      for (const photo of photos) {
+        try {
+          const uploadForm = new FormData();
+          uploadForm.append("file", photo);
+          uploadForm.append("bucket", "tams360-inspection-photos");
+          uploadForm.append("folderPath", folderPath);
+          const uploadRes = await fetchWithSessionAuth(`${API_URL}/storage/upload`, {
+            method: "POST",
+            body: uploadForm,
+          });
+          if (uploadRes.ok) {
+            const { path, url } = await uploadRes.json();
+            // Prefer full URL (includes correct bucket) over bare path
+            if (url || path) uploadedPhotoUrls.push(url || path);
+          }
+        } catch { /* upload failure — inspection still saves without this photo */ }
+      }
+    }
+
     const payload = {
       asset_id: formData.asset_id,
       inspection_date: formData.inspection_date,
@@ -446,10 +471,8 @@ export default function MobileNewInspectionPage() {
       component_scores: formData.component_scores || [],
       latitude: formData.latitude || null,
       longitude: formData.longitude || null,
-      photo_urls: formData.photo_urls || [],
+      photo_urls: uploadedPhotoUrls,
     };
-
-    setLoading(true);
 
     try {
 
@@ -464,6 +487,18 @@ export default function MobileNewInspectionPage() {
 
         if (response.ok) {
           toast.success("Inspection saved successfully");
+
+          // Persist photo URLs to localStorage so they appear on the detail page immediately
+          if (uploadedPhotoUrls.length > 0) {
+            try {
+              const savedData = await response.clone().json();
+              const inspId = savedData?.inspection?.inspection_id || savedData?.inspection?.id || savedData?.id;
+              if (inspId) {
+                const existing: string[] = JSON.parse(localStorage.getItem(`inspection_photos_${inspId}`) || "[]");
+                localStorage.setItem(`inspection_photos_${inspId}`, JSON.stringify([...new Set([...existing, ...uploadedPhotoUrls])]));
+              }
+            } catch { /* ignore */ }
+          }
 
           const selectedAssetId =
             selectedAsset?.asset_id ||

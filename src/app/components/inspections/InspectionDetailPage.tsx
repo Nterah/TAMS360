@@ -132,6 +132,7 @@ export default function InspectionDetailPage() {
       const stored: string[] = JSON.parse(localStorage.getItem(`inspection_photos_${inspectionId}`) || "[]");
       if (stored.length === 0) return;
       const localPhotos = stored.map((urlOrPath, i) => {
+        // Full URLs are stored as-is (preserves correct bucket name)
         const url = urlOrPath.startsWith("http")
           ? urlOrPath
           : `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${urlOrPath}`;
@@ -216,18 +217,11 @@ export default function InspectionDetailPage() {
         const data = await response.json();
         setInspection(data.inspection);
 
-        // Convert any signed/expiring URL or bare storage path to a permanent public URL
+        // Normalise any URL or bare path — full URLs returned as-is to preserve bucket name
         const toPublicUrl = (url: string): string => {
           if (!url) return url;
-          if (url.includes("/object/sign/")) {
-            const match = url.match(/\/object\/sign\/([^?]+)/);
-            if (match) return `https://${projectId}.supabase.co/storage/v1/object/public/${match[1]}`;
-          }
-          if (url.includes("/object/public/")) return url.split("?")[0];
-          if (!url.startsWith("http")) {
-            return `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${url}`;
-          }
-          return url;
+          if (url.startsWith("http")) return url;
+          return `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${url}`;
         };
 
         const storedUrls: any[] = [];
@@ -238,6 +232,8 @@ export default function InspectionDetailPage() {
           data.inspection.photos_urls ??
           data.inspection.photoUrls ??
           data.inspection.image_urls ??
+          data.inspection.calculation_metadata?.photo_urls ??
+          data.inspection.inspection_data?.photo_urls ??
           null;
 
         if (Array.isArray(rawUrls)) {

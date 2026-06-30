@@ -272,24 +272,15 @@ export default function ComponentInspectionForm({
       .filter((r) => r)
       .join("; ");
 
-    // Overall D/E/R from worst valid urgency component
-    const urgencyRank: Record<string, number> = {
-      "4": 4,
-      "3": 3,
-      "2": 2,
-      "1": 1,
-      "0": 0,
-      R: -1,
-    };
+    // Overall D/E/R: take the component with the highest combined D+E+R total
+    const toNum = (v: string) => { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; };
 
-    const worstComponent = scores.reduce<ComponentScore | null>((worst, curr) => {
-      if (!curr.urgency || curr.urgency === "U") return worst;
-
-      if (!worst) return curr;
-
-      return (urgencyRank[curr.urgency] ?? -99) > (urgencyRank[worst.urgency] ?? -99)
-        ? curr
-        : worst;
+    const highestDERComponent = scores.reduce<ComponentScore | null>((best, curr) => {
+      const currTotal = toNum(curr.degree) + toNum(curr.extent) + toNum(curr.relevancy);
+      if (currTotal === 0) return best;
+      if (!best) return curr;
+      const bestTotal = toNum(best.degree) + toNum(best.extent) + toNum(best.relevancy);
+      return currTotal > bestTotal ? curr : best;
     }, null);
 
     return {
@@ -299,9 +290,9 @@ export default function ComponentInspectionForm({
       worst_urgency: aggregateScores.worst_urgency,
       total_cost,
       overall_remedial,
-      overall_degree: worstComponent?.degree || "",
-      overall_extent: worstComponent?.extent || "",
-      overall_relevancy: worstComponent?.relevancy || "",
+      overall_degree: highestDERComponent?.degree || "",
+      overall_extent: highestDERComponent?.extent || "",
+      overall_relevancy: highestDERComponent?.relevancy || "",
     };
   };
 

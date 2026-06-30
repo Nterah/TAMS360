@@ -65,27 +65,37 @@ export default function AssetDetailPage() {
     const toPublicUrl = (pathOrUrl: string): string => {
       if (!pathOrUrl) return "";
       if (pathOrUrl.startsWith("http")) return pathOrUrl;
+      // Bare path — assume main inspection photos bucket
       return `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${pathOrUrl}`;
+    };
+    const toSafeUrl = (rawUrl: string): string => {
+      if (!rawUrl) return "";
+      // If already a full http URL, return as-is (preserves correct bucket name)
+      if (rawUrl.startsWith("http")) return rawUrl;
+      return toPublicUrl(rawUrl);
     };
 
     const assetPhotoUrls: string[] = [];
-    if (asset.photo_urls && Array.isArray(asset.photo_urls)) {
-      asset.photo_urls.forEach((p: string) => { if (p) assetPhotoUrls.push(toPublicUrl(p)); });
-    } else if (typeof asset.photo_urls === "string" && asset.photo_urls) {
-      assetPhotoUrls.push(toPublicUrl(asset.photo_urls));
-    }
-    if (asset.photo_url && typeof asset.photo_url === "string") {
-      assetPhotoUrls.push(toPublicUrl(asset.photo_url));
+    // photo_urls is stored inside metadata JSONB (not a top-level column)
+    const rawPhotoUrls = asset.photo_urls ?? asset.metadata?.photo_urls ?? asset.photo_url;
+    if (Array.isArray(rawPhotoUrls)) {
+      rawPhotoUrls.forEach((p: string) => { if (p) assetPhotoUrls.push(toSafeUrl(p)); });
+    } else if (typeof rawPhotoUrls === "string" && rawPhotoUrls) {
+      assetPhotoUrls.push(toSafeUrl(rawPhotoUrls));
     }
 
     if (assetPhotoUrls.length === 0) return;
 
-    // Merge with photos from the storage API endpoint (avoid duplicates by URL)
+    // Merge with photos from the storage API endpoint (avoid duplicates by URL or filename)
     setPhotos((prev) => {
       const existingUrls = new Set(prev.map((p: any) => p.signedUrl || p.url || ""));
+      const existingFileNames = new Set(
+        prev.map((p: any) => (p.signedUrl || p.url || "").split("/").pop() || "").filter(Boolean)
+      );
       const merged = [...prev];
       assetPhotoUrls.forEach((url, idx) => {
-        if (!existingUrls.has(url)) {
+        const fileName = url.split("/").pop() || "";
+        if (!existingUrls.has(url) && (!fileName || !existingFileNames.has(fileName))) {
           merged.push({ url, signedUrl: url, photo_number: idx, caption: `Photo ${idx + 1}` });
         }
       });
@@ -97,20 +107,13 @@ export default function AssetDetailPage() {
   useEffect(() => {
     if (!assetId) return;
 
-    // Convert any signed/expiring URL or bare storage path to a permanent public URL
+    // Normalise any URL or bare path to a usable public URL
     const toPublicUrl = (url: string): string => {
       if (!url) return url;
-      if (url.includes("/object/sign/")) {
-        const match = url.match(/\/object\/sign\/([^?]+)/);
-        if (match) return `https://${projectId}.supabase.co/storage/v1/object/public/${match[1]}`;
-      }
-      // Strip expiry token from public URLs just in case
-      if (url.includes("/object/public/")) return url.split("?")[0];
-      // Bare storage path (no http prefix) — convert to public URL
-      if (!url.startsWith("http")) {
-        return `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${url}`;
-      }
-      return url;
+      // Already a full URL — return as-is (preserves the correct bucket name)
+      if (url.startsWith("http")) return url;
+      // Bare storage path — assume main bucket
+      return `https://${projectId}.supabase.co/storage/v1/object/public/tams360-inspection-photos/${url}`;
     };
 
     const allUrls: string[] = [];
@@ -149,9 +152,13 @@ export default function AssetDetailPage() {
 
     setPhotos((prev) => {
       const existingUrls = new Set(prev.map((p: any) => p.signedUrl || p.url || ""));
+      const existingFileNames = new Set(
+        prev.map((p: any) => (p.signedUrl || p.url || "").split("/").pop() || "").filter(Boolean)
+      );
       const merged = [...prev];
       allUrls.forEach((url, idx) => {
-        if (!existingUrls.has(url)) {
+        const fileName = url.split("/").pop() || "";
+        if (!existingUrls.has(url) && (!fileName || !existingFileNames.has(fileName))) {
           merged.push({ url, signedUrl: url, photo_number: prev.length + idx, caption: `Inspection photo ${prev.length + idx + 1}` });
         }
       });

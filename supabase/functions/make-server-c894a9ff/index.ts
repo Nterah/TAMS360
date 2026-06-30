@@ -1840,9 +1840,12 @@ app.post("/make-server-c894a9ff/storage/upload", async (c) => {
       : `make-c894a9ff-${bucketType}`;
     const { data: buckets } = await supabase.storage.listBuckets();
     const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
-    
+
     if (!bucketExists) {
-      await supabase.storage.createBucket(bucketName, { public: false });
+      await supabase.storage.createBucket(bucketName, { public: true });
+    } else {
+      // Ensure photo buckets are public so object/public/ URLs work
+      await supabase.storage.updateBucket(bucketName, { public: true });
     }
 
     // Upload file with either asset_ref folder path or tenant-scoped fallback
@@ -1864,15 +1867,15 @@ app.post("/make-server-c894a9ff/storage/upload", async (c) => {
       return c.json({ error: 'Failed to upload file' }, 500);
     }
 
-    // Get signed URL (valid for 1 year)
-    const { data: urlData } = await supabase.storage
+    // Get permanent public URL (bucket is public)
+    const { data: urlData } = supabase.storage
       .from(bucketName)
-      .createSignedUrl(fileName, 31536000);
+      .getPublicUrl(fileName);
 
-    return c.json({ 
-      success: true, 
+    return c.json({
+      success: true,
       bucket: bucketName,
-      url: urlData?.signedUrl,
+      url: urlData?.publicUrl,
       path: fileName
     });
   } catch (error) {
@@ -2943,6 +2946,14 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
         end_longitude: parseNullableNumber(asset.end_longitude ?? asset.endLongitude),
         captured_at: cleanText(asset.capturedAt || asset.captured_at) || new Date().toISOString(),
         captured_by: userData.user.id,
+        // Dimensional / structural fields captured during field capture
+        mounting_type: cleanText(asset.mounting_type),
+        number_of_posts_supports: parseNullableNumber(asset.number_of_posts_supports),
+        number_of_beams: parseNullableNumber(asset.number_of_beams),
+        width_m: parseNullableNumber(asset.width_m),
+        length_m: parseNullableNumber(asset.length_m),
+        height_m: parseNullableNumber(asset.height_m),
+        orientation_position: cleanText(asset.orientation_position),
       },
     };
 
@@ -3794,14 +3805,20 @@ app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
       if (statusData?.status_id) updates.status_id = statusData.status_id;
     }
 
-    // condition and asset_name are stored in metadata JSONB
-    if (body.condition !== undefined || body.asset_name !== undefined) {
+    // Fields stored in metadata JSONB (no dedicated columns)
+    const metadataFields = [
+      "condition", "asset_name",
+      "mounting_type", "number_of_posts_supports", "number_of_beams",
+      "width_m", "length_m", "height_m", "orientation_position",
+    ];
+    const hasMetaUpdate = metadataFields.some(f => body[f] !== undefined);
+    if (hasMetaUpdate) {
       const existingMeta = (existingAsset as any).metadata || {};
-      updates.metadata = {
-        ...existingMeta,
-        ...(body.asset_name !== undefined ? { asset_name: body.asset_name } : {}),
-        ...(body.condition  !== undefined ? { condition:  body.condition  } : {}),
-      };
+      const metaUpdates: Record<string, any> = {};
+      for (const f of metadataFields) {
+        if (body[f] !== undefined) metaUpdates[f] = body[f];
+      }
+      updates.metadata = { ...existingMeta, ...metaUpdates };
     }
 
     const { error: updateError } = await supabase
@@ -3948,7 +3965,7 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
     // Verify asset exists and belongs to the user's tenant
     const { data: asset, error: assetError } = await supabase
       .from("tams360_assets_v")
-      .select("asset_id, asset_ref")
+      .select("asset_id, asset_ref, metadata")
       .eq("asset_id", assetId)
       .eq("tenant_id", userProfile.tenant_id)
       .maybeSingle();
@@ -3970,42 +3987,62 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
 
     console.log(`[PHOTOS] Asset found with asset_id: ${assetId}, asset_ref: ${asset.asset_ref}`);
 
-    // List files from Supabase Storage bucket using asset_ref as folder name
-    // Photos are stored as: {asset_ref}/0.jpg (main), {asset_ref}/1.jpg, {asset_ref}/1_1.jpg, etc.
+    // List files from storage — check both the new path ({asset_ref}/) and the legacy
+    // path ({tenantId}/assets/{asset_ref}/) used by the old upload flow, in BOTH
+    // the main bucket and the alt bucket (deployment mismatch can send uploads there).
     const folderPath = asset.asset_ref;
-    console.log(`[PHOTOS] Listing files in folder: ${folderPath}`);
-    console.log(`[PHOTOS] Full storage path: ${PHOTO_BUCKET}/${folderPath}`);
-
-    const { data: files, error: listError } = await supabase.storage
-      .from(PHOTO_BUCKET)
-      .list(folderPath, {
-        limit: 100,
-        sortBy: { column: 'name', order: 'asc' }
-      });
-
-    console.log(`[PHOTOS] Storage list result:`, { 
-      filesCount: files?.length || 0, 
-      files: files?.map(f => f.name),
-      error: listError 
-    });
-    
-    if (listError) {
-      console.error("[PHOTOS] Error listing files from storage:", listError);
-      return c.json({ 
-        error: `Storage error: ${listError.message}`, 
-        errorCode: listError.name 
-      }, 500);
-    }
-    
-    // Filter for image files only
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-    const imageFiles = (files || []).filter(file => 
-      imageExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
-    );
+    const tenantId = userProfile.tenant_id;
 
-    console.log(`[PHOTOS] Filtered to ${imageFiles.length} image files`);
+    const listFolder = async (folder: string, bucket = PHOTO_BUCKET) => {
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .list(folder, { limit: 100, sortBy: { column: 'name', order: 'asc' } });
+      if (error) {
+        console.log(`[PHOTOS] List error for folder "${folder}" in "${bucket}":`, error.message);
+        return [];
+      }
+      return (data || [])
+        .filter(f => imageExtensions.some(ext => f.name.toLowerCase().endsWith(ext)))
+        .map(f => ({ ...f, _folder: folder, _bucket: bucket }));
+    };
 
-    const photoUrlsFallback = Array.isArray(asset.photo_urls) ? asset.photo_urls : [];
+    // Also check asset_photos table for DB-tracked photos (legacy upload flow)
+    const { data: dbPhotos } = await supabase
+      .from("asset_photos")
+      .select("file_path, photo_number, photo_type")
+      .eq("asset_id", assetId)
+      .order("photo_number");
+
+    const [newFolderFiles, legacyFolderFiles, altNewFolderFiles, altLegacyFolderFiles] = await Promise.all([
+      listFolder(folderPath, PHOTO_BUCKET),
+      listFolder(`${tenantId}/assets/${folderPath}`, PHOTO_BUCKET),
+      listFolder(folderPath, ALT_PHOTO_BUCKET),
+      listFolder(`${tenantId}/assets/${folderPath}`, ALT_PHOTO_BUCKET),
+    ]);
+
+    const imageFiles = [...newFolderFiles, ...legacyFolderFiles, ...altNewFolderFiles, ...altLegacyFolderFiles];
+
+    // Add any DB-tracked photo paths not already in the file listing
+    if (dbPhotos && dbPhotos.length > 0) {
+      for (const dbPhoto of dbPhotos) {
+        if (!dbPhoto.file_path) continue;
+        const fileName = dbPhoto.file_path.split('/').pop() || dbPhoto.file_path;
+        const alreadyListed = imageFiles.some(f => f.name === fileName || dbPhoto.file_path.endsWith(`/${f.name}`));
+        if (!alreadyListed) {
+          imageFiles.push({ name: fileName, _folder: dbPhoto.file_path.replace(`/${fileName}`, ''), created_at: '', updated_at: '', id: '', _dbPath: dbPhoto.file_path } as any);
+        }
+      }
+    }
+
+    console.log(`[PHOTOS] Total image files found: ${imageFiles.length} (main-new: ${newFolderFiles.length}, main-legacy: ${legacyFolderFiles.length}, alt-new: ${altNewFolderFiles.length}, alt-legacy: ${altLegacyFolderFiles.length}, db: ${dbPhotos?.length || 0})`);
+
+    // photo_urls is stored in metadata JSONB (no dedicated column)
+    const photoUrlsFallback: string[] = Array.isArray((asset as any).metadata?.photo_urls)
+      ? (asset as any).metadata.photo_urls
+      : Array.isArray((asset as any).photo_urls)
+        ? (asset as any).photo_urls
+        : [];
 
     const fallbackPhotos = imageFiles.length === 0
       ? await Promise.all(
@@ -4013,9 +4050,34 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
             if (!rawPath) return null;
 
             if (/^https?:\/\//i.test(rawPath)) {
+              // URL points to main bucket but file may have been uploaded to alt bucket
+              // (deployment mismatch: deployed PHOTO_BUCKET != local PHOTO_BUCKET).
+              // Check the alt bucket and swap the URL if the file is found there.
+              let finalUrl = rawPath;
+              const mainBucketUrl = `/object/public/${PHOTO_BUCKET}/`;
+              const altBucketUrl = `/object/public/${ALT_PHOTO_BUCKET}/`;
+              if ((rawPath.includes(mainBucketUrl) || rawPath.includes('/object/public/tams360-inspection-photos/'))
+                  && !rawPath.includes(altBucketUrl)) {
+                const filePathInBucket = rawPath.match(/\/object\/public\/[^/]+\/(.+)/)?.[1];
+                if (filePathInBucket) {
+                  const folder = filePathInBucket.includes('/')
+                    ? filePathInBucket.replace(/\/[^/]+$/, '')
+                    : '';
+                  const fileName = filePathInBucket.split('/').pop()!;
+                  const { data: altCheck } = await supabase.storage
+                    .from(ALT_PHOTO_BUCKET)
+                    .list(folder || '', { search: fileName, limit: 1 });
+                  if (altCheck && altCheck.some(f => f.name === fileName)) {
+                    const { data: altUrlData } = supabase.storage
+                      .from(ALT_PHOTO_BUCKET)
+                      .getPublicUrl(filePathInBucket);
+                    if (altUrlData?.publicUrl) finalUrl = altUrlData.publicUrl;
+                  }
+                }
+              }
               return {
-                url: rawPath,
-                signedUrl: rawPath,
+                url: finalUrl,
+                signedUrl: finalUrl,
                 file_path: rawPath,
                 file_name: rawPath.split('/').pop() || `photo-${index + 1}`,
                 caption: `Photo ${index + 1}`,
@@ -4024,33 +4086,53 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
               };
             }
 
-            let bucketName = 'make-c894a9ff-asset-photos';
             let filePath = rawPath.replace(/^\/+/, '');
+            let resolvedBucket = PHOTO_BUCKET;
 
-            if (filePath.startsWith(`${PHOTO_BUCKET}/`)) {
-              bucketName = PHOTO_BUCKET;
+            if (filePath.startsWith(`${ALT_PHOTO_BUCKET}/`)) {
+              resolvedBucket = ALT_PHOTO_BUCKET;
+              filePath = filePath.slice(ALT_PHOTO_BUCKET.length + 1);
+            } else if (filePath.startsWith(`${PHOTO_BUCKET}/`)) {
               filePath = filePath.slice(PHOTO_BUCKET.length + 1);
             } else if (filePath.startsWith('make-c894a9ff-asset-photos/')) {
+              resolvedBucket = 'make-c894a9ff-asset-photos';
               filePath = filePath.slice('make-c894a9ff-asset-photos/'.length);
+            } else {
+              // Bare path with no bucket prefix — check which bucket holds the file
+              const bareFolder = filePath.includes('/')
+                ? filePath.replace(/\/[^/]+$/, '')
+                : '';
+              const bareFileName = filePath.split('/').pop()!;
+              const { data: mainCheck } = await supabase.storage
+                .from(PHOTO_BUCKET)
+                .list(bareFolder || '', { search: bareFileName, limit: 1 });
+              if (!mainCheck || !mainCheck.some((f: any) => f.name === bareFileName)) {
+                const { data: altCheck } = await supabase.storage
+                  .from(ALT_PHOTO_BUCKET)
+                  .list(bareFolder || '', { search: bareFileName, limit: 1 });
+                if (altCheck && altCheck.some((f: any) => f.name === bareFileName)) {
+                  resolvedBucket = ALT_PHOTO_BUCKET;
+                }
+              }
             }
 
-            const { data: signedData, error: signedError } = await supabase.storage
-              .from(bucketName)
-              .createSignedUrl(filePath, 3600);
+            const { data: publicUrlData } = supabase.storage
+              .from(resolvedBucket)
+              .getPublicUrl(filePath);
 
-            if (signedError) {
-              console.warn(`[PHOTOS] Fallback signed URL failed for ${bucketName}/${filePath}:`, signedError);
+            if (!publicUrlData?.publicUrl) {
+              console.warn(`[PHOTOS] Fallback public URL failed for ${resolvedBucket}/${filePath}`);
               return null;
             }
 
             return {
-              url: signedData?.signedUrl,
-              signedUrl: signedData?.signedUrl,
+              url: publicUrlData.publicUrl,
+              signedUrl: publicUrlData.publicUrl,
               file_path: filePath,
               file_name: filePath.split('/').pop() || `photo-${index + 1}`,
               caption: `Photo ${index + 1}`,
               source: 'asset_photo_urls',
-              bucket_id: bucketName,
+              bucket_id: resolvedBucket,
             };
           })
         )
@@ -4063,32 +4145,24 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
       return c.json({ photos: resolvedFallbackPhotos });
     }
     
-    // Generate signed URLs for each photo
+    // Generate public URLs for each photo (bucket is public — no expiry)
     const photosWithUrls = await Promise.all(
-      imageFiles.map(async (file) => {
-        const filePath = `${folderPath}/${file.name}`;
-        
-        console.log(`[PHOTOS] Generating signed URL for: ${filePath}`);
-        
-        // Generate signed URL (valid for 1 hour)
-        const { data: signedData, error: signedError } = await supabase.storage
-          .from(PHOTO_BUCKET)
-          .createSignedUrl(filePath, 3600);
-        
-        if (signedError) {
-          // Only log as warning if photo doesn't exist (404), not as error
-          if (signedError.message?.includes('not found') || signedError.statusCode === '404') {
-            console.log(`[PHOTOS] Photo not found (skipping): ${filePath}`);
-          } else {
-            console.error(`[PHOTOS] Error generating signed URL for ${filePath}:`, signedError);
-          }
-          return null;
-        }
-        
+      imageFiles.map(async (file: any) => {
+        // Use the folder the file was actually found in, or the _dbPath for DB-tracked photos
+        const filePath = (file as any)._dbPath || `${(file as any)._folder || folderPath}/${file.name}`;
+        const fileBucket = (file as any)._bucket || PHOTO_BUCKET;
+
+        const { data: publicData } = supabase.storage
+          .from(fileBucket)
+          .getPublicUrl(filePath);
+
+        const publicUrl = publicData?.publicUrl;
+        if (!publicUrl) return null;
+
         // Parse photo number from filename (e.g., "0.jpg" -> 0, "1_1.jpg" -> "1_1")
         const photoNumber = file.name.replace(/\.[^.]+$/, ''); // Remove extension
-        
-        return { 
+
+        return {
           photo_id: `${assetId}_${photoNumber}`, // Generate unique ID
           asset_id: assetId,
           asset_ref: asset.asset_ref,
@@ -4096,8 +4170,8 @@ app.get("/make-server-c894a9ff/assets/:id/photos", async (c) => {
           file_path: filePath,
           file_name: file.name,
           name: file.name, // Add name field for popup compatibility
-          signedUrl: signedData.signedUrl,
-          url: signedData.signedUrl, // Backward compatibility
+          signedUrl: publicUrl,
+          url: publicUrl, // Backward compatibility
           created_at: file.created_at,
           updated_at: file.updated_at,
           caption: photoNumber === '0' ? 'Main Asset Photo' : 
@@ -7095,9 +7169,60 @@ app.get("/make-server-c894a9ff/inspections", async (c) => {
     }
 
     console.log(`Fetched ${inspections?.length || 0} inspections (page ${page}) out of ${count || 0} total`);
+
+    // Enrich inspections with component-derived D/E/R for any where calculation_metadata.degree is null.
+    // One batch query for all inspection IDs on this page — no N+1.
+    let enrichedInspections = inspections || [];
+    const inspectionIds = enrichedInspections
+      .filter((i: any) => !i.calculation_metadata?.degree)
+      .map((i: any) => i.inspection_id)
+      .filter(Boolean);
+
+    if (inspectionIds.length > 0) {
+      const { data: scores } = await supabase
+        .schema("tams360")
+        .from("inspection_component_scores")
+        .select("inspection_id, degree_value, extent_value, relevancy_value")
+        .in("inspection_id", inspectionIds);
+
+      if (scores && scores.length > 0) {
+        // Group by inspection_id and find the component with highest D+E+R total
+        const toNum = (v: any) => { const n = parseInt(String(v ?? '0'), 10); return isNaN(n) ? 0 : n; };
+        const bestByInspection = new Map<string, { degree: string; extent: string; relevancy: string }>();
+
+        for (const score of scores) {
+          const total = toNum(score.degree_value) + toNum(score.extent_value) + toNum(score.relevancy_value);
+          if (total === 0) continue;
+          const existing = bestByInspection.get(score.inspection_id);
+          if (!existing) {
+            bestByInspection.set(score.inspection_id, { degree: score.degree_value, extent: score.extent_value, relevancy: score.relevancy_value });
+          } else {
+            const existingTotal = toNum(existing.degree) + toNum(existing.extent) + toNum(existing.relevancy);
+            if (total > existingTotal) {
+              bestByInspection.set(score.inspection_id, { degree: score.degree_value, extent: score.extent_value, relevancy: score.relevancy_value });
+            }
+          }
+        }
+
+        enrichedInspections = enrichedInspections.map((insp: any) => {
+          const best = bestByInspection.get(insp.inspection_id);
+          if (!best) return insp;
+          return {
+            ...insp,
+            calculation_metadata: {
+              ...(insp.calculation_metadata || {}),
+              degree: best.degree,
+              extent: best.extent,
+              relevancy: best.relevancy,
+            },
+          };
+        });
+      }
+    }
+
     // The app view already has ci, ci_health, ci_safety as computed columns
-    return c.json({ 
-      inspections: inspections || [], 
+    return c.json({
+      inspections: enrichedInspections,
       total: count || 0,
       page,
       pageSize,
@@ -8055,6 +8180,7 @@ const wrapWithTimeout = (handler: any) => {
 // ==============================================
 
 const PHOTO_BUCKET = "tams360-inspection-photos";
+const ALT_PHOTO_BUCKET = "make-c894a9ff-tams360-inspection-photos";
 
 function getBearerToken(authHeader: string | null) {
   if (!authHeader) return null;
