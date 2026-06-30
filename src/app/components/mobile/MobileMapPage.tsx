@@ -273,6 +273,25 @@ export default function MobileMapPage() {
     tileLayer.addTo(map);
     tileLayerRef.current = tileLayer;
 
+    // North arrow control
+    const NorthArrow = L.Control.extend({
+      options: { position: "bottomright" },
+      onAdd() {
+        const div = L.DomUtil.create("div");
+        div.style.cssText = "background:rgba(255,255,255,0.9);border-radius:6px;padding:6px 8px;box-shadow:0 1px 4px rgba(0,0,0,0.3);display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none;";
+        div.innerHTML = `
+          <svg width="28" height="40" viewBox="0 0 28 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="14,2 20,20 14,16 8,20" fill="#1a1a1a"/>
+            <polygon points="14,38 8,20 14,24 20,20" fill="#9ca3af"/>
+            <circle cx="14" cy="20" r="3" fill="white" stroke="#1a1a1a" stroke-width="1.5"/>
+          </svg>
+          <span style="font-size:10px;font-weight:700;color:#1a1a1a;line-height:1;">N</span>
+        `;
+        return div;
+      },
+    });
+    new NorthArrow().addTo(map);
+
     mapRef.current = map;
 
     return () => {
