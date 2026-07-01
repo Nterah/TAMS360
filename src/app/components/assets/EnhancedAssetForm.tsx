@@ -14,7 +14,8 @@ import {
   classifyGpsAccuracy,
   shouldRequireGpsSaveOverride,
 } from "../../utils/gpsCapture";
-import { supabase } from "../../../lib/supabaseClient";
+import { fetchWithSessionAuth } from "../../utils/authSession";
+import { API_URL } from "../../../lib/supabaseClient";
 
 const ASSET_TYPE_ABBREVIATIONS: Record<string, string> = {
   "Signage": "SIG",
@@ -195,8 +196,6 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   }, [assetType, roadName, roadSubsection, direction, roadSide]);
 
   // Auto-compute sequential number when prefix fields are complete.
-  // Queries tams360_assets directly via the Supabase client with an ilike filter,
-  // using the exact same prefix format as generateAssetReference (no slug transforms).
   useEffect(() => {
     if (mode === "edit") return;
     if (!assetType || !roadName || !direction) return;
@@ -204,41 +203,42 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
 
     const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
     const fullRoad = roadName + (roadSubsection || "");
-    // Match what generateAssetReference produces, e.g. "GR-R706-SB-" or "GR-R706-SB-LHS-"
-    const refPrefix = roadSide && roadSide !== "none"
-      ? `${typeAbbr}-${fullRoad}-${direction}-${roadSide}-`
-      : `${typeAbbr}-${fullRoad}-${direction}-`;
+    // Build prefix using the exact same format as generateAssetReference so
+    // the comparison always matches the stored asset_ref values.
+    const refPrefix = (
+      roadSide && roadSide !== "none"
+        ? `${typeAbbr}-${fullRoad}-${direction}-${roadSide}-`
+        : `${typeAbbr}-${fullRoad}-${direction}-`
+    ).toLowerCase();
 
     let active = true;
     setFetchingSeqNum(true);
 
-    (async () => {
-      try {
-        // ilike is case-insensitive, so "GR-R706-SB-%" matches "gr-r706-sb-001" too.
-        const { data, error } = await supabase
-          .from("tams360_assets")
-          .select("asset_ref")
-          .ilike("asset_ref", `${refPrefix}%`);
-
+    // fetchWithSessionAuth hits the Edge Function (service-role key), which
+    // bypasses RLS and returns all tenant assets — the same path every other
+    // read in the app uses.
+    fetchWithSessionAuth(`${API_URL}/assets?pageSize=1000`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data) => {
         if (!active || seqNumManuallyEdited.current) return;
-        if (error || !data) { setSequentialNumber("001"); return; }
+        const assets: any[] = data.assets || data.data || [];
 
-        const prefixLen = refPrefix.length;
-        const nums = data
+        const nums = assets
           .map((a: any) => {
-            const suffix = (a.asset_ref || "").slice(prefixLen);
+            const ref = (a.asset_ref || "").toLowerCase();
+            if (!ref.startsWith(refPrefix)) return 0;
+            const suffix = ref.slice(refPrefix.length);
             return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
           })
           .filter((n: number) => n > 0);
 
         const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
         setSequentialNumber(String(next).padStart(3, "0"));
-      } catch {
+      })
+      .catch(() => {
         if (active && !seqNumManuallyEdited.current) setSequentialNumber("001");
-      } finally {
-        if (active) setFetchingSeqNum(false);
-      }
-    })();
+      })
+      .finally(() => { if (active) setFetchingSeqNum(false); });
 
     return () => { active = false; setFetchingSeqNum(false); };
   }, [assetType, roadName, roadSubsection, direction, roadSide, mode]);
