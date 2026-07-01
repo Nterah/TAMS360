@@ -87,7 +87,6 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   const [roadSide, setRoadSide] = useState(""); // Optional
   const [sequentialNumber, setSequentialNumber] = useState("");
   const [generatedAssetRef, setGeneratedAssetRef] = useState("");
-  const [seqDebug, setSeqDebug] = useState("");
 
   // Location detection
   const [latitude, setLatitude] = useState("");
@@ -230,12 +229,6 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     });
 
     const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-    const sampleTs = existingAssets
-      .filter((a: any) => (a.asset_ref || "").toLowerCase().startsWith(typeAbbr.toLowerCase() + "-"))
-      .slice(0, 5)
-      .map((a: any) => a.asset_ref)
-      .join(" | ");
-    setSeqDebug(`prefix="${prefix}" | ${matched}/${existingAssets.length} matched | next=${next} | sample ${typeAbbr} refs: ${sampleTs || "none"}`);
     setSequentialNumber(String(next).padStart(3, "0"));
   }, [assetType, roadName, roadSubsection, direction, roadSide, existingAssets, mode]);
 
@@ -547,9 +540,6 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
             <p className="text-xs text-muted-foreground">
               Auto-generated when type, road and direction are filled. Click <RefreshCw className="w-3 h-3 inline" /> to refresh.
             </p>
-            {seqDebug && (
-              <p className="text-xs font-mono text-orange-500 break-all">[debug] {seqDebug}</p>
-            )}
           </div>
         </div>
       </div>
