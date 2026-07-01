@@ -14,6 +14,8 @@ import {
   classifyGpsAccuracy,
   shouldRequireGpsSaveOverride,
 } from "../../utils/gpsCapture";
+import { fetchWithSessionAuth } from "../../utils/authSession";
+import { API_URL } from "../../../lib/supabaseClient";
 
 const ASSET_TYPE_ABBREVIATIONS: Record<string, string> = {
   "Signage": "SIG",
@@ -188,13 +190,15 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     generateAssetReference();
   }, [assetType, roadName, roadSubsection, direction, roadSide, sequentialNumber]);
 
-  // Auto-compute sequential number when prefix fields change,
-  // unless the user has manually typed a number.
+  // Auto-compute sequential number when prefix fields change.
   useEffect(() => {
     if (!assetType || !roadName || !direction) return;
     if (seqNumManuallyEdited.current) return;
-    fetchNextSequentialNumber();
-  }, [assetType, roadName, roadSubsection, direction, roadSide, existingAssets]);
+    const cancel = { cancelled: false };
+    fetchNextSequentialNumber(cancel);
+    return () => { cancel.cancelled = true; setFetchingSeqNum(false); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetType, roadName, roadSubsection, direction, roadSide]);
 
   const detectLocation = async () => {
     if (!navigator.geolocation) {
@@ -244,55 +248,67 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     }
   };
 
-  const fetchNextSequentialNumber = () => {
+  const fetchNextSequentialNumber = (cancelSignal?: { cancelled: boolean }) => {
     if (!assetType || !roadName || !direction) return;
 
     const norm = (s: string) => (s || "").toLowerCase().trim();
+    const slug = (s: string) =>
+      s.trim().replace(/\s+/g, "_").replace(/[^A-Za-z0-9_\-]/g, "").toLowerCase();
 
     const targetType = norm(assetType);
     const targetRoad = norm(roadName);
     const targetDir  = norm(direction);
     const targetSide = norm(roadSide);
-
-    // Match by direct field comparison — works even when asset_ref is null.
-    const samePrefix = existingAssets.filter((a: any) => {
-      const aType = norm(a.asset_type_name || a.type || "");
-      const aRoad = norm(a.road_name || a.road_number || "");
-      const aDir  = norm(a.direction || a.road_direction || "");
-      const aSide = norm(a.road_side || "");
-      return (
-        aType === targetType &&
-        aRoad === targetRoad &&
-        aDir  === targetDir &&
-        (!targetSide || aSide === targetSide)
-      );
-    });
-
-    // Also try to extract the highest sequence number from existing asset_refs
-    // (for assets that do have refs, to avoid duplicating a number).
-    const typeAbbr = (ASSET_TYPE_ABBREVIATIONS[assetType] || "").toLowerCase();
-    const slug = (s: string) => s.trim().replace(/\s+/g, "_").replace(/[^A-Za-z0-9_\-]/g, "").toLowerCase();
-    const side = roadSide ? slug(roadSide) : "";
-    const prefix = side
-      ? `${typeAbbr}-${slug(roadName + roadSubsection)}-${targetDir}-${side}-`
+    const typeAbbr   = (ASSET_TYPE_ABBREVIATIONS[assetType] || "").toLowerCase();
+    const sideSlug   = roadSide ? slug(roadSide) : "";
+    const prefix     = sideSlug
+      ? `${typeAbbr}-${slug(roadName + roadSubsection)}-${targetDir}-${sideSlug}-`
       : `${typeAbbr}-${slug(roadName + roadSubsection)}-${targetDir}-`;
 
-    const refNums = samePrefix
-      .map((a: any) => {
-        const ref = (a.asset_ref || "").toLowerCase().replace(/\s+/g, "_");
-        if (ref.startsWith(prefix)) {
-          const suffix = ref.slice(prefix.length);
-          return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+    setFetchingSeqNum(true);
+
+    fetchWithSessionAuth(`${API_URL}/assets?pageSize=500`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => {
+        if (cancelSignal?.cancelled) return;
+        const assets: any[] = data.assets || data.data || [];
+
+        // Match by direct field values — works even when asset_ref is null.
+        const samePrefix = assets.filter((a: any) => {
+          const aType = norm(a.asset_type_name || a.type || "");
+          const aRoad = norm(a.road_name || a.road_number || "");
+          const aDir  = norm(a.direction || "");
+          const aSide = norm(a.road_side || "");
+          return (
+            aType === targetType &&
+            aRoad === targetRoad &&
+            aDir  === targetDir &&
+            (!targetSide || aSide === targetSide)
+          );
+        });
+
+        // Also extract numeric suffixes from any asset_refs that match the prefix.
+        const refNums = samePrefix
+          .map((a: any) => {
+            const ref = (a.asset_ref || "").toLowerCase().replace(/\s+/g, "_");
+            if (ref.startsWith(prefix)) {
+              const suffix = ref.slice(prefix.length);
+              return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+            }
+            return 0;
+          })
+          .filter((n: number) => n > 0);
+
+        const next = refNums.length > 0
+          ? Math.max(...refNums) + 1
+          : samePrefix.length + 1;
+
+        if (!cancelSignal?.cancelled) {
+          setSequentialNumber(String(next).padStart(3, "0"));
         }
-        return 0;
       })
-      .filter((n: number) => n > 0);
-
-    const next = refNums.length > 0
-      ? Math.max(...refNums) + 1
-      : samePrefix.length + 1;
-
-    setSequentialNumber(String(next).padStart(3, "0"));
+      .catch(() => { /* keep existing value on error */ })
+      .finally(() => { if (!cancelSignal?.cancelled) setFetchingSeqNum(false); });
   };
 
   const generateAssetReference = () => {
@@ -541,7 +557,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
                 size="icon"
                 onClick={() => {
                   seqNumManuallyEdited.current = false;
-                  fetchNextSequentialNumber();
+                  fetchNextSequentialNumber(undefined);
                 }}
                 disabled={fetchingSeqNum || !assetType || !roadName || !direction}
                 title="Re-fetch next available number"
