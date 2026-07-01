@@ -362,6 +362,7 @@ export default function FieldCapturePage() {
   const [assetTypes, setAssetTypes] = useState<Option[]>([]);
   const [existingAssets, setExistingAssets] = useState<any[]>([]);
   const seqNumManuallyEdited = useRef(false);
+  const [fetchingSeqNum, setFetchingSeqNum] = useState(false);
   const [lookupOptions, setLookupOptions] = useState({
     regions: [] as string[],
     depots: [] as string[],
@@ -458,12 +459,14 @@ export default function FieldCapturePage() {
     }));
   }, [tenantName]);
 
-  // Reset manual-edit flag whenever the prefix fields change so auto-numbering re-runs.
+  // Reset manual-edit flag whenever prefix fields change so auto-numbering re-runs.
   useEffect(() => {
     seqNumManuallyEdited.current = false;
   }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide]);
 
-  // Auto-increment sequential number when prefix fields change, unless user typed manually.
+  // Auto-compute next sequential number by querying the API directly.
+  // This is independent of whether fetchCaptureLookups succeeded, so it works
+  // even when the general lookup fetch fails or returns before this point.
   useEffect(() => {
     const { assetType, roadName, roadSubsection, direction, roadSide } = formData;
     if (!assetType || !roadName || !direction) return;
@@ -473,27 +476,50 @@ export default function FieldCapturePage() {
     const road = slugForReference([roadName, roadSubsection].filter(Boolean).join("_"));
     const dir = directionCode(direction);
     const side = roadSide && roadSide !== "None" ? slugForReference(roadSide).toUpperCase() : "";
-    // Build prefix the same way buildAssetReference does, then lowercase for comparison
     const prefix = [...[typeAbbr, road, dir, side].filter(Boolean)].join("-").toLowerCase() + "-";
 
-    // Normalise stored refs the same way: lowercase + spaces→underscores so refs
-    // created by EnhancedAssetForm (which doesn't slugify) still match.
     const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, "_");
-    const allRefs = existingAssets.map((a: any) => normalise(a.asset_ref || a.assetReference || ""));
 
-    const matchingNumbers = allRefs
-      .filter((ref: string) => ref.startsWith(prefix))
-      .map((ref: string) => {
-        // Extract only the suffix after the prefix and parse it.
-        // Using /^\d+$/ ensures we only count purely-numeric suffixes
-        // (avoids misreading numbers embedded in road names like "r104").
-        const suffix = ref.slice(prefix.length);
-        return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
-      })
-      .filter((n: number) => n > 0);
+    const computeFromRefs = (assets: any[]) => {
+      if (seqNumManuallyEdited.current) return;
+      const matching = assets
+        .map((a: any) => normalise(a.asset_ref || a.assetReference || ""))
+        .filter((ref: string) => ref.startsWith(prefix))
+        .map((ref: string) => {
+          const suffix = ref.slice(prefix.length);
+          return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+        })
+        .filter((n: number) => n > 0);
+      const next = matching.length > 0 ? Math.max(...matching) + 1 : 1;
+      setFormData((cur) => ({ ...cur, sequentialNumber: String(next).padStart(3, "0") }));
+    };
 
-    const nextNum = matchingNumbers.length > 0 ? Math.max(...matchingNumbers) + 1 : 1;
-    setFormData((current) => ({ ...current, sequentialNumber: String(nextNum).padStart(3, "0") }));
+    // Use already-loaded assets if available, otherwise fetch them now.
+    if (existingAssets.length > 0) {
+      computeFromRefs(existingAssets);
+      return;
+    }
+
+    let cancelled = false;
+    setFetchingSeqNum(true);
+    (async () => {
+      try {
+        const res = await fetchWithSessionAuth(`${API_URL}/assets?pageSize=500`);
+        if (cancelled || !res.ok) return;
+        const data = await res.json();
+        const assets: any[] = data.assets || data.data || [];
+        if (!cancelled) {
+          setExistingAssets(assets);
+          computeFromRefs(assets);
+        }
+      } catch {
+        // ignore — seq number stays at current value
+      } finally {
+        if (!cancelled) setFetchingSeqNum(false);
+      }
+    })();
+
+    return () => { cancelled = true; setFetchingSeqNum(false); };
   }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide, existingAssets]);
 
   useEffect(() => {
@@ -1091,15 +1117,21 @@ export default function FieldCapturePage() {
 
               <div className="space-y-1.5">
                 <Label className="text-xs">Sequential Number *</Label>
-                <Input
-                  value={formData.sequentialNumber}
-                  onChange={(e) => {
-                    seqNumManuallyEdited.current = true;
-                    setFormData({ ...formData, sequentialNumber: e.target.value });
-                  }}
-                  placeholder="001"
-                  className="h-9 text-sm"
-                />
+                <div className="relative">
+                  <Input
+                    value={formData.sequentialNumber}
+                    onChange={(e) => {
+                      seqNumManuallyEdited.current = true;
+                      setFormData({ ...formData, sequentialNumber: e.target.value });
+                    }}
+                    placeholder={fetchingSeqNum ? "Fetching..." : "001"}
+                    disabled={fetchingSeqNum}
+                    className="h-9 text-sm pr-8"
+                  />
+                  {fetchingSeqNum && (
+                    <Loader2 className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />
+                  )}
+                </div>
               </div>
 
               <div className="space-y-1.5">
