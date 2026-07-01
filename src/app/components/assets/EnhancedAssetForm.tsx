@@ -247,36 +247,52 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   const fetchNextSequentialNumber = () => {
     if (!assetType || !roadName || !direction) return;
 
-    // Normalize a ref segment: spaces→underscores, lowercase, strip special chars.
-    const slugify = (s: string) =>
-      s.trim().replace(/\s+/g, "_").replace(/[^A-Za-z0-9_\-]/g, "").toLowerCase();
+    const norm = (s: string) => (s || "").toLowerCase().trim();
 
-    const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
-    const road = slugify(roadName + roadSubsection);
-    const dir = direction.toLowerCase();
-    const side = roadSide ? slugify(roadSide) : "";
+    const targetType = norm(assetType);
+    const targetRoad = norm(roadName);
+    const targetDir  = norm(direction);
+    const targetSide = norm(roadSide);
+
+    // Match by direct field comparison — works even when asset_ref is null.
+    const samePrefix = existingAssets.filter((a: any) => {
+      const aType = norm(a.asset_type_name || a.type || "");
+      const aRoad = norm(a.road_name || a.road_number || "");
+      const aDir  = norm(a.direction || a.road_direction || "");
+      const aSide = norm(a.road_side || "");
+      return (
+        aType === targetType &&
+        aRoad === targetRoad &&
+        aDir  === targetDir &&
+        (!targetSide || aSide === targetSide)
+      );
+    });
+
+    // Also try to extract the highest sequence number from existing asset_refs
+    // (for assets that do have refs, to avoid duplicating a number).
+    const typeAbbr = (ASSET_TYPE_ABBREVIATIONS[assetType] || "").toLowerCase();
+    const slug = (s: string) => s.trim().replace(/\s+/g, "_").replace(/[^A-Za-z0-9_\-]/g, "").toLowerCase();
+    const side = roadSide ? slug(roadSide) : "";
     const prefix = side
-      ? `${typeAbbr.toLowerCase()}-${road}-${dir}-${side}-`
-      : `${typeAbbr.toLowerCase()}-${road}-${dir}-`;
+      ? `${typeAbbr}-${slug(roadName + roadSubsection)}-${targetDir}-${side}-`
+      : `${typeAbbr}-${slug(roadName + roadSubsection)}-${targetDir}-`;
 
-    setFetchingSeqNum(true);
-    try {
-      const allRefs = existingAssets.map((asset: any) => (asset.asset_ref || "").toLowerCase().replace(/\s+/g, "_"));
-      console.log("[SeqNum] existingAssets count:", existingAssets.length, "| prefix:", prefix, "| sample refs:", allRefs.slice(0, 5));
-      const matchingNumbers = allRefs
-        .filter((ref: string) => ref.startsWith(prefix))
-        .map((ref: string) => {
-          const match = ref.match(/-(\d+)$/);
-          return match ? parseInt(match[1], 10) : 0;
-        })
-        .filter((n: number) => !isNaN(n) && n > 0);
-      console.log("[SeqNum] matching refs:", allRefs.filter((r: string) => r.startsWith(prefix)), "| numbers:", matchingNumbers);
+    const refNums = samePrefix
+      .map((a: any) => {
+        const ref = (a.asset_ref || "").toLowerCase().replace(/\s+/g, "_");
+        if (ref.startsWith(prefix)) {
+          const suffix = ref.slice(prefix.length);
+          return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+        }
+        return 0;
+      })
+      .filter((n: number) => n > 0);
 
-      const nextNum = matchingNumbers.length > 0 ? Math.max(...matchingNumbers) + 1 : 1;
-      setSequentialNumber(String(nextNum).padStart(3, "0"));
-    } finally {
-      setFetchingSeqNum(false);
-    }
+    const next = refNums.length > 0
+      ? Math.max(...refNums) + 1
+      : samePrefix.length + 1;
+
+    setSequentialNumber(String(next).padStart(3, "0"));
   };
 
   const generateAssetReference = () => {
