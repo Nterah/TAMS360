@@ -458,6 +458,11 @@ export default function FieldCapturePage() {
     }));
   }, [tenantName]);
 
+  // Reset manual-edit flag whenever the prefix fields change so auto-numbering re-runs.
+  useEffect(() => {
+    seqNumManuallyEdited.current = false;
+  }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide]);
+
   // Auto-increment sequential number when prefix fields change, unless user typed manually.
   useEffect(() => {
     const { assetType, roadName, roadSubsection, direction, roadSide } = formData;
