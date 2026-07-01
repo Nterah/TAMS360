@@ -214,28 +214,33 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     let active = true;
     setFetchingSeqNum(true);
 
-    // fetchWithSessionAuth hits the Edge Function (service-role key), which
-    // bypasses RLS and returns all tenant assets — the same path every other
-    // read in the app uses.
     fetchWithSessionAuth(`${API_URL}/assets?pageSize=1000`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => {
         if (!active || seqNumManuallyEdited.current) return;
         const assets: any[] = data.assets || data.data || [];
 
-        const nums = assets
+        const matching = assets.filter((a: any) =>
+          (a.asset_ref || "").toLowerCase().startsWith(refPrefix)
+        );
+        const nums = matching
           .map((a: any) => {
-            const ref = (a.asset_ref || "").toLowerCase();
-            if (!ref.startsWith(refPrefix)) return 0;
-            const suffix = ref.slice(refPrefix.length);
+            const suffix = (a.asset_ref || "").toLowerCase().slice(refPrefix.length);
             return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
           })
           .filter((n: number) => n > 0);
 
+        // DEBUG toast — remove once sequential numbering is confirmed working
+        toast.info(
+          `[SeqNum debug] prefix="${refPrefix}" | total=${assets.length} | matching=${matching.length} | refs=${matching.map((a: any) => a.asset_ref).join(", ") || "none"}`,
+          { duration: 15000 }
+        );
+
         const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
         setSequentialNumber(String(next).padStart(3, "0"));
       })
-      .catch(() => {
+      .catch((err) => {
+        toast.error(`[SeqNum debug] fetch failed: ${err?.message || err}`, { duration: 15000 });
         if (active && !seqNumManuallyEdited.current) setSequentialNumber("001");
       })
       .finally(() => { if (active) setFetchingSeqNum(false); });
