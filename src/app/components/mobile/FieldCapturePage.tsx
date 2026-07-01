@@ -473,26 +473,27 @@ export default function FieldCapturePage() {
     const road = slugForReference([roadName, roadSubsection].filter(Boolean).join("_"));
     const dir = directionCode(direction);
     const side = roadSide && roadSide !== "None" ? slugForReference(roadSide).toUpperCase() : "";
-    const prefix = (side
-      ? `${typeAbbr}-${road}-${dir}-${side}-`
-      : `${typeAbbr}-${road}-${dir}-`).toLowerCase();
+    // Build prefix the same way buildAssetReference does, then lowercase for comparison
+    const prefix = [...[typeAbbr, road, dir, side].filter(Boolean)].join("-").toLowerCase() + "-";
 
-    const allRefs = existingAssets.map((a: any) => (a.asset_ref || a.assetReference || "").toLowerCase());
-    console.log("[SeqNum] existingAssets count:", existingAssets.length, "| prefix:", prefix, "| sample refs:", allRefs.slice(0, 5));
+    // Normalise stored refs the same way: lowercase + spaces→underscores so refs
+    // created by EnhancedAssetForm (which doesn't slugify) still match.
+    const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, "_");
+    const allRefs = existingAssets.map((a: any) => normalise(a.asset_ref || a.assetReference || ""));
 
     const matchingNumbers = allRefs
       .filter((ref: string) => ref.startsWith(prefix))
       .map((ref: string) => {
-        const match = ref.match(/-(\d+)$/);
-        return match ? parseInt(match[1], 10) : 0;
+        // Extract only the suffix after the prefix and parse it.
+        // Using /^\d+$/ ensures we only count purely-numeric suffixes
+        // (avoids misreading numbers embedded in road names like "r104").
+        const suffix = ref.slice(prefix.length);
+        return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
       })
-      .filter((n: number) => !isNaN(n) && n > 0);
-
-    console.log("[SeqNum] matching refs:", allRefs.filter((r: string) => r.startsWith(prefix)), "| matchingNumbers:", matchingNumbers);
+      .filter((n: number) => n > 0);
 
     const nextNum = matchingNumbers.length > 0 ? Math.max(...matchingNumbers) + 1 : 1;
-    const nextSeq = String(nextNum).padStart(3, "0");
-    setFormData((current) => ({ ...current, sequentialNumber: nextSeq }));
+    setFormData((current) => ({ ...current, sequentialNumber: String(nextNum).padStart(3, "0") }));
   }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide, existingAssets]);
 
   useEffect(() => {
