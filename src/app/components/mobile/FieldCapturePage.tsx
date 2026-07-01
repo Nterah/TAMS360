@@ -464,9 +464,8 @@ export default function FieldCapturePage() {
     seqNumManuallyEdited.current = false;
   }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide]);
 
-  // Auto-compute next sequential number by querying the API directly.
-  // This is independent of whether fetchCaptureLookups succeeded, so it works
-  // even when the general lookup fetch fails or returns before this point.
+  // Fetch assets and compute the next sequential number whenever prefix fields are complete.
+  // Fetches directly each time — does NOT depend on existingAssets state to avoid re-trigger loops.
   useEffect(() => {
     const { assetType, roadName, roadSubsection, direction, roadSide } = formData;
     if (!assetType || !roadName || !direction) return;
@@ -478,49 +477,34 @@ export default function FieldCapturePage() {
     const side = roadSide && roadSide !== "None" ? slugForReference(roadSide).toUpperCase() : "";
     const prefix = [...[typeAbbr, road, dir, side].filter(Boolean)].join("-").toLowerCase() + "-";
 
-    const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, "_");
-
-    const computeFromRefs = (assets: any[]) => {
-      if (seqNumManuallyEdited.current) return;
-      const matching = assets
-        .map((a: any) => normalise(a.asset_ref || a.assetReference || ""))
-        .filter((ref: string) => ref.startsWith(prefix))
-        .map((ref: string) => {
-          const suffix = ref.slice(prefix.length);
-          return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
-        })
-        .filter((n: number) => n > 0);
-      const next = matching.length > 0 ? Math.max(...matching) + 1 : 1;
-      setFormData((cur) => ({ ...cur, sequentialNumber: String(next).padStart(3, "0") }));
-    };
-
-    // Use already-loaded assets if available, otherwise fetch them now.
-    if (existingAssets.length > 0) {
-      computeFromRefs(existingAssets);
-      return;
-    }
-
-    let cancelled = false;
+    let active = true;
     setFetchingSeqNum(true);
-    (async () => {
-      try {
-        const res = await fetchWithSessionAuth(`${API_URL}/assets?pageSize=500`);
-        if (cancelled || !res.ok) return;
-        const data = await res.json();
-        const assets: any[] = data.assets || data.data || [];
-        if (!cancelled) {
-          setExistingAssets(assets);
-          computeFromRefs(assets);
-        }
-      } catch {
-        // ignore — seq number stays at current value
-      } finally {
-        if (!cancelled) setFetchingSeqNum(false);
-      }
-    })();
 
-    return () => { cancelled = true; setFetchingSeqNum(false); };
-  }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide, existingAssets]);
+    fetchWithSessionAuth(`${API_URL}/assets?pageSize=500`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => {
+        if (!active) return;
+        const assets: any[] = data.assets || data.data || [];
+        setExistingAssets(assets);
+        if (seqNumManuallyEdited.current) return;
+        const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, "_");
+        const nums = assets
+          .map((a: any) => normalise(a.asset_ref || ""))
+          .filter((ref: string) => ref.startsWith(prefix))
+          .map((ref: string) => {
+            const suffix = ref.slice(prefix.length);
+            return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+          })
+          .filter((n: number) => n > 0);
+        const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+        setFormData((cur) => ({ ...cur, sequentialNumber: String(next).padStart(3, "0") }));
+      })
+      .catch(() => { /* keep existing value on error */ })
+      .finally(() => { if (active) setFetchingSeqNum(false); });
+
+    return () => { active = false; setFetchingSeqNum(false); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide]);
 
   useEffect(() => {
     const generatedReference = buildAssetReference(formData);
