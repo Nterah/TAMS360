@@ -89,6 +89,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   const [roadSide, setRoadSide] = useState(""); // Optional
   const [sequentialNumber, setSequentialNumber] = useState("");
   const [generatedAssetRef, setGeneratedAssetRef] = useState("");
+  const [seqDebug, setSeqDebug] = useState("");
 
   // Location detection
   const [latitude, setLatitude] = useState("");
@@ -247,7 +248,11 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
 
     // Immediate result from already-loaded prop (no network wait).
     if (existingAssets.length > 0) {
-      setSequentialNumber(String(computeNext(existingAssets)).padStart(3, "0"));
+      const n = computeNext(existingAssets);
+      setSeqDebug(`prop: ${existingAssets.length} assets → next=${n}`);
+      setSequentialNumber(String(n).padStart(3, "0"));
+    } else {
+      setSeqDebug(`prop: empty — waiting for fetch…`);
     }
 
     // Refresh with fresh data from API to catch assets added since page load.
@@ -258,9 +263,13 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
       .then((data) => {
         if (!active || seqNumManuallyEdited.current) return;
         const assets: any[] = data.assets || data.data || [];
-        setSequentialNumber(String(computeNext(assets)).padStart(3, "0"));
+        const n = computeNext(assets);
+        const sample = assets.slice(0, 3).map((a: any) => `${a.asset_type_name}|${a.road_name}|${a.metadata?.direction}|${a.asset_ref}`).join(" / ");
+        setSeqDebug(`API: ${assets.length} assets → next=${n} | sample: ${sample}`);
+        setSequentialNumber(String(n).padStart(3, "0"));
       })
-      .catch(() => {
+      .catch((err) => {
+        setSeqDebug(`FETCH ERROR: ${err?.message || err}`);
         if (active && !seqNumManuallyEdited.current) {
           setSequentialNumber((prev) => prev || "001");
         }
@@ -581,6 +590,9 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
             <p className="text-xs text-muted-foreground">
               Auto-generated when type, road and direction are filled. Click <RefreshCw className="w-3 h-3 inline" /> to refresh.
             </p>
+            {seqDebug && (
+              <p className="text-xs font-mono text-orange-500 break-all">[debug] {seqDebug}</p>
+            )}
           </div>
         </div>
       </div>
