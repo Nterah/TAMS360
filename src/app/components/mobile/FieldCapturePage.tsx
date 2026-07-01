@@ -464,18 +464,13 @@ export default function FieldCapturePage() {
     seqNumManuallyEdited.current = false;
   }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide]);
 
-  // Fetch assets and compute the next sequential number whenever prefix fields are complete.
-  // Fetches directly each time — does NOT depend on existingAssets state to avoid re-trigger loops.
+  // Compute next sequential number when prefix fields are complete.
+  // Counts existing assets with the same type + road + direction using direct field comparison
+  // instead of fragile asset_ref string matching (which breaks if refs were created differently).
   useEffect(() => {
     const { assetType, roadName, roadSubsection, direction, roadSide } = formData;
     if (!assetType || !roadName || !direction) return;
     if (seqNumManuallyEdited.current) return;
-
-    const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || slugForReference(assetType).slice(0, 4).toUpperCase();
-    const road = slugForReference([roadName, roadSubsection].filter(Boolean).join("_"));
-    const dir = directionCode(direction);
-    const side = roadSide && roadSide !== "None" ? slugForReference(roadSide).toUpperCase() : "";
-    const prefix = [...[typeAbbr, road, dir, side].filter(Boolean)].join("-").toLowerCase() + "-";
 
     let active = true;
     setFetchingSeqNum(true);
@@ -487,16 +482,50 @@ export default function FieldCapturePage() {
         const assets: any[] = data.assets || data.data || [];
         setExistingAssets(assets);
         if (seqNumManuallyEdited.current) return;
-        const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, "_");
-        const nums = assets
-          .map((a: any) => normalise(a.asset_ref || ""))
-          .filter((ref: string) => ref.startsWith(prefix))
-          .map((ref: string) => {
-            const suffix = ref.slice(prefix.length);
-            return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+
+        const normalise = (s: string) => (s || "").toLowerCase().trim();
+        const targetType = normalise(assetType);
+        const targetRoad = normalise([roadName, roadSubsection].filter(Boolean).join(" "));
+        const targetDir  = normalise(directionCode(direction));
+        const targetSide = normalise(roadSide === "None" ? "" : roadSide);
+
+        // Match on type + road + direction (+ side if set). Falls back to type-only count
+        // so we always have a sensible starting number even when road names differ.
+        const samePrefix = assets.filter((a: any) => {
+          const aType = normalise(a.asset_type_name || a.type || "");
+          const aRoad = normalise([a.road_name, a.road_subsection].filter(Boolean).join(" "));
+          const aDir  = normalise(a.direction || a.road_direction || "");
+          const aSide = normalise(a.road_side || "");
+          const typeMatch = aType === targetType;
+          const roadMatch = aRoad === targetRoad;
+          const dirMatch  = !targetDir || aDir === targetDir || directionCode(a.direction || "") === targetDir.toUpperCase();
+          const sideMatch = !targetSide || aSide === targetSide;
+          return typeMatch && roadMatch && dirMatch && sideMatch;
+        });
+
+        // Try to read existing sequential numbers from asset_ref for highest-number tracking.
+        const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || slugForReference(assetType).slice(0, 4).toUpperCase();
+        const road = slugForReference([roadName, roadSubsection].filter(Boolean).join("_"));
+        const dir = directionCode(direction);
+        const side = roadSide && roadSide !== "None" ? slugForReference(roadSide).toUpperCase() : "";
+        const prefix = [...[typeAbbr, road, dir, side].filter(Boolean)].join("-").toLowerCase() + "-";
+
+        const refNums = samePrefix
+          .map((a: any) => {
+            const ref = (a.asset_ref || "").toLowerCase().replace(/\s+/g, "_");
+            if (ref.startsWith(prefix)) {
+              const suffix = ref.slice(prefix.length);
+              return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+            }
+            return 0;
           })
           .filter((n: number) => n > 0);
-        const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+
+        // Use max ref number if available; otherwise fall back to count-based numbering.
+        const next = refNums.length > 0
+          ? Math.max(...refNums) + 1
+          : samePrefix.length + 1;
+
         setFormData((cur) => ({ ...cur, sequentialNumber: String(next).padStart(3, "0") }));
       })
       .catch(() => { /* keep existing value on error */ })
