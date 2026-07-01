@@ -14,8 +14,7 @@ import {
   classifyGpsAccuracy,
   shouldRequireGpsSaveOverride,
 } from "../../utils/gpsCapture";
-import { fetchWithSessionAuth } from "../../utils/authSession";
-import { API_URL } from "../../../lib/supabaseClient";
+import { supabase } from "../../../lib/supabaseClient";
 
 const ASSET_TYPE_ABBREVIATIONS: Record<string, string> = {
   "Signage": "SIG",
@@ -196,82 +195,53 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   }, [assetType, roadName, roadSubsection, direction, roadSide]);
 
   // Auto-compute sequential number when prefix fields are complete.
-  // Uses existingAssets prop for an immediate result, then refreshes from the API.
+  // Queries tams360_assets directly via the Supabase client with an ilike filter,
+  // using the exact same prefix format as generateAssetReference (no slug transforms).
   useEffect(() => {
     if (mode === "edit") return;
     if (!assetType || !roadName || !direction) return;
     if (seqNumManuallyEdited.current) return;
 
-    const slug = (s: string) =>
-      (s || "").trim().replace(/\s+/g, "_").replace(/[^A-Za-z0-9_\-]/g, "").toLowerCase();
-    const norm = (s: string) => (s || "").toLowerCase().trim();
+    const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
+    const fullRoad = roadName + (roadSubsection || "");
+    // Match what generateAssetReference produces, e.g. "GR-R706-SB-" or "GR-R706-SB-LHS-"
+    const refPrefix = roadSide && roadSide !== "none"
+      ? `${typeAbbr}-${fullRoad}-${direction}-${roadSide}-`
+      : `${typeAbbr}-${fullRoad}-${direction}-`;
 
-    const typeAbbr = (ASSET_TYPE_ABBREVIATIONS[assetType] || "").toLowerCase();
-    const targetDir = norm(direction);
-    const sideSlug  = roadSide ? slug(roadSide) : "";
-    const prefix    = sideSlug
-      ? `${typeAbbr}-${slug(roadName + roadSubsection)}-${targetDir}-${sideSlug}-`
-      : `${typeAbbr}-${slug(roadName + roadSubsection)}-${targetDir}-`;
-
-    const computeFrom = (assets: any[]): number => {
-      // Primary: scan asset_ref — top-level column, always set, encodes the full prefix.
-      const refNums = assets
-        .map((a: any) => {
-          const ref = (a.asset_ref || "").toLowerCase().replace(/\s+/g, "_");
-          if (!ref.startsWith(prefix)) return 0;
-          const suffix = ref.slice(prefix.length);
-          return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
-        })
-        .filter((n: number) => n > 0);
-
-      // Fallback: count field matches for assets without asset_ref.
-      // direction is stored in metadata.direction, not as a top-level column.
-      const targetType = norm(assetType);
-      const targetRoad = norm(roadName);
-      const targetSide = norm(roadSide);
-      const fieldCount = assets.filter((a: any) => {
-        const aType = norm(a.asset_type_name || a.type || "");
-        const aRoad = norm(a.road_name || a.road_number || "");
-        const aDir  = norm(a.direction || a.metadata?.direction || "");
-        const aSide = norm(a.road_side || a.metadata?.road_side || "");
-        return (
-          aType === targetType &&
-          aRoad === targetRoad &&
-          (!targetDir || aDir === targetDir) &&
-          (!targetSide || aSide === targetSide)
-        );
-      }).length;
-
-      const maxRef = refNums.length > 0 ? Math.max(...refNums) : 0;
-      return Math.max(maxRef, fieldCount) + 1;
-    };
-
-    // Immediate result from already-loaded prop data (no network wait).
-    if (existingAssets.length > 0 && !seqNumManuallyEdited.current) {
-      setSequentialNumber(String(computeFrom(existingAssets)).padStart(3, "0"));
-    }
-
-    // Refresh from API to catch any assets added since the prop was last fetched.
     let active = true;
     setFetchingSeqNum(true);
-    fetchWithSessionAuth(`${API_URL}/assets?pageSize=500`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
+
+    (async () => {
+      try {
+        // ilike is case-insensitive, so "GR-R706-SB-%" matches "gr-r706-sb-001" too.
+        const { data, error } = await supabase
+          .from("tams360_assets")
+          .select("asset_ref")
+          .ilike("asset_ref", `${refPrefix}%`);
+
         if (!active || seqNumManuallyEdited.current) return;
-        const assets: any[] = data.assets || data.data || [];
-        setSequentialNumber(String(computeFrom(assets)).padStart(3, "0"));
-      })
-      .catch(() => {
-        // Keep whatever was already set from the prop; fall back to "001" if still empty.
-        if (active && !seqNumManuallyEdited.current) {
-          setSequentialNumber((prev) => prev || "001");
-        }
-      })
-      .finally(() => { if (active) setFetchingSeqNum(false); });
+        if (error || !data) { setSequentialNumber("001"); return; }
+
+        const prefixLen = refPrefix.length;
+        const nums = data
+          .map((a: any) => {
+            const suffix = (a.asset_ref || "").slice(prefixLen);
+            return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+          })
+          .filter((n: number) => n > 0);
+
+        const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+        setSequentialNumber(String(next).padStart(3, "0"));
+      } catch {
+        if (active && !seqNumManuallyEdited.current) setSequentialNumber("001");
+      } finally {
+        if (active) setFetchingSeqNum(false);
+      }
+    })();
 
     return () => { active = false; setFetchingSeqNum(false); };
-  // existingAssets included so the immediate path re-runs if the prop updates.
-  }, [assetType, roadName, roadSubsection, direction, roadSide, existingAssets, mode]);
+  }, [assetType, roadName, roadSubsection, direction, roadSide, mode]);
 
   const detectLocation = async () => {
     if (!navigator.geolocation) {
