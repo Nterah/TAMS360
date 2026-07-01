@@ -197,79 +197,41 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   }, [assetType, roadName, roadSubsection, direction, roadSide]);
 
   // Auto-compute sequential number when prefix fields are complete.
+  // Strategy: build the exact same prefix generateAssetReference() would use,
+  // then scan every asset_ref for refs that start with it and find max+1.
+  // No field-matching needed — the prefix IS the type+road+direction.
   useEffect(() => {
     if (mode === "edit") return;
     if (!assetType || !roadName || !direction) return;
     if (seqNumManuallyEdited.current) return;
 
-    const norm = (s: string) => (s || "").toLowerCase().trim();
-
-    // Resolve direction to a two-letter code.  "South Bound (SB)", "SB", "sb" → "SB".
-    const dirCode = (d: string): string => {
-      const u = (d || "").toUpperCase();
-      if (u.includes("NB") || u.includes("NORTH")) return "NB";
-      if (u.includes("SB") || u.includes("SOUTH")) return "SB";
-      if (u.includes("EB") || u.includes("EAST"))  return "EB";
-      if (u.includes("WB") || u.includes("WEST"))  return "WB";
-      return u;
-    };
-
-    // Extract direction from an asset: metadata first, then by scanning
-    // asset_ref dash-segments for NB/SB/EB/WB.
-    // Most existing assets have metadata.direction=undefined because direction
-    // was not included in the create payload before this fix was applied.
-    const getAssetDir = (a: any): string => {
-      const meta = a.metadata?.direction || a.direction;
-      if (meta) return dirCode(meta);
-      const parts = (a.asset_ref || "").toUpperCase().split("-");
-      for (const p of parts) {
-        if (p === "NB" || p === "SB" || p === "EB" || p === "WB") return p;
-      }
-      return ""; // unknown — caller treats this conservatively
-    };
-
-    const targetType = norm(assetType);
-    const targetRoad = norm(roadName);
-    const targetDir  = dirCode(direction);
-    const targetSide = norm(roadSide === "none" ? "" : roadSide);
+    const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
+    const fullRoad = roadName + (roadSubsection || "");
+    const side = roadSide && roadSide !== "none" ? roadSide : "";
+    // Same template as generateAssetReference — lowercased for comparison.
+    const prefix = (side
+      ? `${typeAbbr}-${fullRoad}-${direction}-${side}-`
+      : `${typeAbbr}-${fullRoad}-${direction}-`
+    ).toLowerCase();
 
     const computeNext = (assets: any[]): number => {
-      const matched = assets.filter((a: any) => {
-        const aType = norm(a.asset_type_name || a.type || "");
-        const aRoad = norm(a.road_name || a.road_number || "");
-        if (aType !== targetType || aRoad !== targetRoad) return false;
-
-        const aDir  = getAssetDir(a);
-        // When direction is unknown (not in metadata AND not in asset_ref),
-        // include the asset rather than exclude it — better to over-count
-        // than to start a duplicate series at 001.
-        if (targetDir && aDir && aDir !== targetDir) return false;
-
-        const aSide = norm(a.metadata?.road_side || a.road_side || "");
-        if (targetSide && aSide && aSide !== targetSide) return false;
-
-        return true;
-      });
-
-      const nums = matched.map((a: any) => {
-        const parts = (a.asset_ref || "").split("-");
-        const last  = parts[parts.length - 1];
-        return /^\d+$/.test(last) ? parseInt(last, 10) : 0;
-      }).filter((n: number) => n > 0);
-
+      const nums = assets
+        .map((a: any) => {
+          const ref = (a.asset_ref || "").toLowerCase();
+          if (!ref.startsWith(prefix)) return 0;
+          const suffix = ref.slice(prefix.length);
+          return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
+        })
+        .filter((n: number) => n > 0);
       return nums.length > 0 ? Math.max(...nums) + 1 : 1;
     };
 
     // Immediate result from already-loaded prop (no network wait).
     if (existingAssets.length > 0) {
-      const n = computeNext(existingAssets);
-      setSeqDebug(`prop: ${existingAssets.length} assets → next=${n}`);
-      setSequentialNumber(String(n).padStart(3, "0"));
-    } else {
-      setSeqDebug(`prop: empty — waiting for fetch…`);
+      setSequentialNumber(String(computeNext(existingAssets)).padStart(3, "0"));
     }
 
-    // Refresh with fresh data from API to catch assets added since page load.
+    // Refresh with fresh data from the API.
     let active = true;
     setFetchingSeqNum(true);
     fetchWithSessionAuth(`${API_URL}/assets?pageSize=1000`)
@@ -278,19 +240,8 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
         if (!active || seqNumManuallyEdited.current) return;
         const assets: any[] = data.assets || data.data || [];
         const n = computeNext(assets);
-        const sameType = assets.filter((a: any) =>
-          norm(a.asset_type_name || a.type || "") === targetType
-        );
-        const sameTypeRoad = sameType.filter((a: any) =>
-          norm(a.road_name || a.road_number || "") === targetRoad
-        );
-        const sampleTypes = assets.slice(0, 3).map((a: any) => norm(a.asset_type_name || a.type || "")).join(", ");
-        const sampleRoads = sameType.slice(0, 3).map((a: any) => norm(a.road_name || a.road_number || "")).join(", ");
-        setSeqDebug(
-          `form: type="${targetType}" road="${targetRoad}" dir="${targetDir}" | ` +
-          `API: ${assets.length} total | ${sameType.length} same type | ${sameTypeRoad.length} same type+road | next=${n} | ` +
-          `db types: ${sampleTypes} | db roads (same type): ${sampleRoads}`
-        );
+        const hits = assets.filter((a: any) => (a.asset_ref || "").toLowerCase().startsWith(prefix));
+        setSeqDebug(`prefix="${prefix}" | ${hits.length}/${assets.length} matched | next=${n} | refs: ${hits.slice(0, 3).map((a: any) => a.asset_ref).join(", ")}`);
         setSequentialNumber(String(n).padStart(3, "0"));
       })
       .catch((err) => {
