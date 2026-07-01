@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext, useMemo } from "react";
+import { useState, useEffect, useContext, useMemo, useRef } from "react";
 import { AuthContext } from "../../App";
 import { useTenant } from "../../contexts/TenantContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -360,6 +360,8 @@ export default function FieldCapturePage() {
   const [saving, setSaving] = useState(false);
   const [gettingLocation, setGettingLocation] = useState(false);
   const [assetTypes, setAssetTypes] = useState<Option[]>([]);
+  const [existingAssets, setExistingAssets] = useState<any[]>([]);
+  const seqNumManuallyEdited = useRef(false);
   const [lookupOptions, setLookupOptions] = useState({
     regions: [] as string[],
     depots: [] as string[],
@@ -455,6 +457,38 @@ export default function FieldCapturePage() {
       responsibleParty: current.responsibleParty || tenantName,
     }));
   }, [tenantName]);
+
+  // Auto-increment sequential number when prefix fields change, unless user typed manually.
+  useEffect(() => {
+    const { assetType, roadName, roadSubsection, direction, roadSide } = formData;
+    if (!assetType || !roadName || !direction) return;
+    if (seqNumManuallyEdited.current) return;
+
+    const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || slugForReference(assetType).slice(0, 4).toUpperCase();
+    const road = slugForReference([roadName, roadSubsection].filter(Boolean).join("_"));
+    const dir = directionCode(direction);
+    const side = roadSide && roadSide !== "None" ? slugForReference(roadSide).toUpperCase() : "";
+    const prefix = (side
+      ? `${typeAbbr}-${road}-${dir}-${side}-`
+      : `${typeAbbr}-${road}-${dir}-`).toLowerCase();
+
+    const allRefs = existingAssets.map((a: any) => (a.asset_ref || a.assetReference || "").toLowerCase());
+    console.log("[SeqNum] existingAssets count:", existingAssets.length, "| prefix:", prefix, "| sample refs:", allRefs.slice(0, 5));
+
+    const matchingNumbers = allRefs
+      .filter((ref: string) => ref.startsWith(prefix))
+      .map((ref: string) => {
+        const match = ref.match(/-(\d+)$/);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter((n: number) => !isNaN(n) && n > 0);
+
+    console.log("[SeqNum] matching refs:", allRefs.filter((r: string) => r.startsWith(prefix)), "| matchingNumbers:", matchingNumbers);
+
+    const nextNum = matchingNumbers.length > 0 ? Math.max(...matchingNumbers) + 1 : 1;
+    const nextSeq = String(nextNum).padStart(3, "0");
+    setFormData((current) => ({ ...current, sequentialNumber: nextSeq }));
+  }, [formData.assetType, formData.roadName, formData.roadSubsection, formData.direction, formData.roadSide, existingAssets]);
 
   useEffect(() => {
     const generatedReference = buildAssetReference(formData);
@@ -578,6 +612,7 @@ export default function FieldCapturePage() {
         installers: uniqueSorted(assets.map((a: any) => a.installer_name ?? a.installer)),
       };
       setLookupOptions(finalLookupOptions);
+      setExistingAssets(assets);
 
       // Cache results for 10 minutes
       setCacheEntry("field_capture_lookups", {
@@ -1052,7 +1087,10 @@ export default function FieldCapturePage() {
                 <Label className="text-xs">Sequential Number *</Label>
                 <Input
                   value={formData.sequentialNumber}
-                  onChange={(e) => setFormData({ ...formData, sequentialNumber: e.target.value })}
+                  onChange={(e) => {
+                    seqNumManuallyEdited.current = true;
+                    setFormData({ ...formData, sequentialNumber: e.target.value });
+                  }}
                   placeholder="001"
                   className="h-9 text-sm"
                 />
