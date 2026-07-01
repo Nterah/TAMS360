@@ -508,27 +508,43 @@ export default function AssetDetailPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Asset Reference</p>
-                <p className="font-medium">{asset.asset_ref || asset.reference_number || "N/A"}</p>
+                <p className="font-medium font-mono">{asset.asset_ref || asset.reference_number || "N/A"}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Asset Type</p>
-                <Badge variant="outline">{asset.asset_type_name || asset.type}</Badge>
+                <Badge variant="outline">{asset.asset_type_name || asset.type || "N/A"}</Badge>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Status</p>
-                <Badge>{asset.status || "Active"}</Badge>
+                <Badge>{asset.status_name || asset.status || "Active"}</Badge>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Condition</p>
+                <p className="font-medium">{asset.condition_name || asset.latest_condition || asset.metadata?.condition || asset.condition || "N/A"}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Installation Date</p>
                 <p className="font-medium">
-                  {asset.installation_date ? new Date(asset.installation_date).toLocaleDateString() : "N/A"}
+                  {(asset.install_date || asset.installation_date)
+                    ? new Date(asset.install_date || asset.installation_date).toLocaleDateString()
+                    : "N/A"}
                 </p>
               </div>
-            </div>
-            {asset.description && (
               <div>
-                <p className="text-sm text-muted-foreground mb-1">Description</p>
-                <p className="font-medium">{asset.description}</p>
+                <p className="text-sm text-muted-foreground mb-1">Expected Life (yrs)</p>
+                <p className="font-medium">{asset.useful_life_years ?? "N/A"}</p>
+              </div>
+            </div>
+            {(asset.asset_name || asset.metadata?.asset_name || asset.description) && (
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Asset Name / Description</p>
+                <p className="font-medium">{asset.asset_name || asset.metadata?.asset_name || asset.description}</p>
+              </div>
+            )}
+            {asset.notes && (
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Notes</p>
+                <p className="text-sm">{asset.notes}</p>
               </div>
             )}
           </CardContent>
@@ -565,23 +581,51 @@ export default function AssetDetailPage() {
                 <p className="font-medium">{asset.road_number || "N/A"}</p>
               </div>
               <div>
-                <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
-                  <Navigation className="w-3 h-3" />
-                  Latitude
-                </p>
-                <p className="font-medium font-mono text-sm">
-                  {asset.gps_lat ? Number(asset.gps_lat).toFixed(6) : "N/A"}
-                </p>
+                <p className="text-sm text-muted-foreground mb-1">Kilometer Marker</p>
+                <p className="font-medium">{asset.km_marker != null ? `${asset.km_marker} km` : "N/A"}</p>
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
-                  <Navigation className="w-3 h-3" />
-                  Longitude
-                </p>
-                <p className="font-medium font-mono text-sm">
-                  {asset.gps_lng ? Number(asset.gps_lng).toFixed(6) : "N/A"}
-                </p>
+              <div className="col-span-2 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
+                    <Navigation className="w-3 h-3" />
+                    Start Latitude
+                  </p>
+                  <p className="font-medium font-mono text-sm">
+                    {asset.gps_lat ? Number(asset.gps_lat).toFixed(6) : "N/A"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
+                    <Navigation className="w-3 h-3" />
+                    Start Longitude
+                  </p>
+                  <p className="font-medium font-mono text-sm">
+                    {asset.gps_lng ? Number(asset.gps_lng).toFixed(6) : "N/A"}
+                  </p>
+                </div>
               </div>
+              {(asset.end_latitude || asset.end_longitude) && (
+                <div className="col-span-2 grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
+                      <Navigation className="w-3 h-3" />
+                      End Latitude
+                    </p>
+                    <p className="font-medium font-mono text-sm">
+                      {asset.end_latitude ? Number(asset.end_latitude).toFixed(6) : "N/A"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
+                      <Navigation className="w-3 h-3" />
+                      End Longitude
+                    </p>
+                    <p className="font-medium font-mono text-sm">
+                      {asset.end_longitude ? Number(asset.end_longitude).toFixed(6) : "N/A"}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -596,15 +640,15 @@ export default function AssetDetailPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Owner</p>
-                <p className="font-medium">{asset.owner || "N/A"}</p>
+                <p className="font-medium">{asset.owner_entity || asset.owned_by || asset.owner || "N/A"}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Responsible Party</p>
-                <p className="font-medium">{asset.responsible_party || "N/A"}</p>
+                <p className="font-medium">{asset.maintenance_responsibility || asset.responsible_party || "N/A"}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Installer</p>
-                <p className="font-medium">{asset.installer || "N/A"}</p>
+                <p className="font-medium">{asset.installer_name || asset.installer || "N/A"}</p>
               </div>
             </div>
           </CardContent>
@@ -624,19 +668,58 @@ export default function AssetDetailPage() {
                   Replacement Value
                 </p>
                 <p className="font-bold text-lg">
-                  {asset.replacement_value ? `R ${asset.replacement_value.toLocaleString()}` : "N/A"}
+                  {asset.replacement_value ? `R ${Number(asset.replacement_value).toLocaleString()}` : "N/A"}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Installation Cost</p>
                 <p className="font-medium">
-                  {asset.installation_cost ? `R ${asset.installation_cost.toLocaleString()}` : "N/A"}
+                  {(asset.purchase_price || asset.installation_cost)
+                    ? `R ${Number(asset.purchase_price || asset.installation_cost).toLocaleString()}`
+                    : "N/A"}
                 </p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Additional Asset Details (type-specific metadata) */}
+      {asset.metadata && Object.keys(asset.metadata).filter(k =>
+        ["mounting_type","number_of_posts_supports","number_of_beams","width_m","length_m","height_m","orientation_position"].includes(k)
+        && asset.metadata[k] != null && asset.metadata[k] !== ""
+      ).length > 0 && (() => {
+        const fieldLabels: Record<string, string> = {
+          mounting_type: "Mounting Type",
+          number_of_posts_supports: "No. of Posts / Supports",
+          number_of_beams: "No. of Beams",
+          width_m: "Width (m)",
+          length_m: "Length (m)",
+          height_m: "Height (m)",
+          orientation_position: "Orientation / Position",
+        };
+        const fields = Object.entries(fieldLabels).filter(
+          ([k]) => asset.metadata[k] != null && asset.metadata[k] !== ""
+        );
+        return (
+          <Card>
+            <CardHeader>
+              <CardTitle>Additional Asset Details</CardTitle>
+              <CardDescription>Type-specific physical attributes</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {fields.map(([key, label]) => (
+                  <div key={key}>
+                    <p className="text-sm text-muted-foreground mb-1">{label}</p>
+                    <p className="font-medium">{String(asset.metadata[key])}</p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Recent Inspections */}
       <Card>

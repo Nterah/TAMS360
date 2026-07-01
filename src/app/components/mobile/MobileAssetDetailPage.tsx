@@ -318,16 +318,20 @@ export default function MobileAssetDetailPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <p className="text-xs text-slate-500 mb-1">Asset Ref</p>
-                <p className="text-sm font-medium font-mono">{asset.asset_ref}</p>
+                <p className="text-sm font-medium font-mono">{(asset as any).asset_ref}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 mb-1">Type</p>
-                <p className="text-sm font-medium">{asset.asset_type_name}</p>
+                <p className="text-sm font-medium">{(asset as any).asset_type_name || asset.asset_type}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Status</p>
+                <p className="text-sm font-medium">{(asset as any).status_name || (asset as any).status || "Active"}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 mb-1">Condition</p>
-                <Badge className={getConditionColor(asset.condition)} variant="outline">
-                  {asset.condition}
+                <Badge className={getConditionColor((asset as any).condition_name || asset.condition)} variant="outline">
+                  {(asset as any).condition_name || (asset as any).latest_condition || (asset as any).metadata?.condition || asset.condition || "N/A"}
                 </Badge>
               </div>
               {asset.ci_score && (
@@ -336,21 +340,27 @@ export default function MobileAssetDetailPage() {
                   <p className="text-sm font-bold text-primary">{asset.ci_score}</p>
                 </div>
               )}
+              {((asset as any).useful_life_years != null) && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Expected Life</p>
+                  <p className="text-sm font-medium">{(asset as any).useful_life_years} yrs</p>
+                </div>
+              )}
             </div>
 
-            {asset.description && (
+            {((asset as any).asset_name || (asset as any).metadata?.asset_name || asset.description) && (
               <div>
-                <p className="text-xs text-slate-500 mb-1">Description</p>
-                <p className="text-sm">{asset.description}</p>
+                <p className="text-xs text-slate-500 mb-1">Name / Description</p>
+                <p className="text-sm">{(asset as any).asset_name || (asset as any).metadata?.asset_name || asset.description}</p>
               </div>
             )}
 
-            {asset.installation_date && (
+            {((asset as any).install_date || asset.installation_date) && (
               <div>
                 <p className="text-xs text-slate-500 mb-1">Installation Date</p>
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-slate-400" />
-                  <p className="text-sm">{formatDate(asset.installation_date)}</p>
+                  <p className="text-sm">{formatDate((asset as any).install_date || asset.installation_date)}</p>
                 </div>
               </div>
             )}
@@ -362,6 +372,13 @@ export default function MobileAssetDetailPage() {
                   <ClipboardCheck className="w-4 h-4 text-slate-400" />
                   <p className="text-sm">{formatDate(asset.last_inspection_date)}</p>
                 </div>
+              </div>
+            )}
+
+            {asset.notes && (
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Notes</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">{asset.notes}</p>
               </div>
             )}
           </CardContent>
@@ -383,26 +400,38 @@ export default function MobileAssetDetailPage() {
               </div>
             )}
 
-            {asset.road_name && (
-              <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              {((asset as any).region) && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Region</p>
+                  <p className="text-sm font-medium">{(asset as any).region}</p>
+                </div>
+              )}
+              {((asset as any).depot) && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Depot</p>
+                  <p className="text-sm font-medium">{(asset as any).depot}</p>
+                </div>
+              )}
+              {(asset.road_name || (asset as any).road_number) && (
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Road</p>
-                  <p className="text-sm font-medium">{asset.road_name}</p>
+                  <p className="text-sm font-medium">{asset.road_name || (asset as any).road_number}</p>
                 </div>
-                {asset.chainage && (
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">Chainage</p>
-                    <p className="text-sm font-medium">{asset.chainage}km</p>
-                  </div>
-                )}
-                {asset.side && (
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">Side</p>
-                    <p className="text-sm font-medium">{asset.side}</p>
-                  </div>
-                )}
-              </div>
-            )}
+              )}
+              {((asset as any).km_marker != null || asset.chainage != null) && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">KM Marker</p>
+                  <p className="text-sm font-medium">{(asset as any).km_marker ?? asset.chainage} km</p>
+                </div>
+              )}
+              {asset.side && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Side</p>
+                  <p className="text-sm font-medium">{asset.side}</p>
+                </div>
+              )}
+            </div>
 
             {assetCoordinates && (
               <div>
@@ -410,6 +439,11 @@ export default function MobileAssetDetailPage() {
                 <p className="text-xs font-mono text-slate-600 dark:text-slate-400">
                   {assetCoordinates.lat.toFixed(6)}, {assetCoordinates.lng.toFixed(6)}
                 </p>
+                {((asset as any).end_latitude && (asset as any).end_longitude) && (
+                  <p className="text-xs font-mono text-slate-500 mt-1">
+                    End: {Number((asset as any).end_latitude).toFixed(6)}, {Number((asset as any).end_longitude).toFixed(6)}
+                  </p>
+                )}
                 <div className="flex gap-2 mt-2">
                   <Button
                     size="sm"
@@ -440,22 +474,91 @@ export default function MobileAssetDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Notes */}
-        {asset.notes && (
+        {/* Ownership & Financial */}
+        {((asset as any).owner_entity || (asset as any).owned_by || (asset as any).owner ||
+          (asset as any).maintenance_responsibility || (asset as any).responsible_party ||
+          (asset as any).installer_name || (asset as any).installer ||
+          (asset as any).replacement_value || (asset as any).purchase_price || (asset as any).installation_cost) && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                Notes
+                <Package className="w-4 h-4" />
+                Ownership & Financial
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                {asset.notes}
-              </p>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                {((asset as any).owner_entity || (asset as any).owned_by || (asset as any).owner) && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Owner</p>
+                    <p className="text-sm font-medium">{(asset as any).owner_entity || (asset as any).owned_by || (asset as any).owner}</p>
+                  </div>
+                )}
+                {((asset as any).maintenance_responsibility || (asset as any).responsible_party) && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Responsible Party</p>
+                    <p className="text-sm font-medium">{(asset as any).maintenance_responsibility || (asset as any).responsible_party}</p>
+                  </div>
+                )}
+                {((asset as any).installer_name || (asset as any).installer) && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Installer</p>
+                    <p className="text-sm font-medium">{(asset as any).installer_name || (asset as any).installer}</p>
+                  </div>
+                )}
+                {((asset as any).replacement_value) && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Replacement Value</p>
+                    <p className="text-sm font-bold">R {Number((asset as any).replacement_value).toLocaleString()}</p>
+                  </div>
+                )}
+                {((asset as any).purchase_price || (asset as any).installation_cost) && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Installation Cost</p>
+                    <p className="text-sm font-medium">R {Number((asset as any).purchase_price || (asset as any).installation_cost).toLocaleString()}</p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
+
+        {/* Additional Asset Details */}
+        {(asset as any).metadata && (() => {
+          const metaFieldLabels: Record<string, string> = {
+            mounting_type: "Mounting Type",
+            number_of_posts_supports: "No. of Posts / Supports",
+            number_of_beams: "No. of Beams",
+            width_m: "Width (m)",
+            length_m: "Length (m)",
+            height_m: "Height (m)",
+            orientation_position: "Orientation / Position",
+          };
+          const entries = Object.entries(metaFieldLabels).filter(
+            ([k]) => (asset as any).metadata[k] != null && (asset as any).metadata[k] !== ""
+          );
+          if (entries.length === 0) return null;
+          return (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Package className="w-4 h-4" />
+                  Additional Asset Details
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-3">
+                  {entries.map(([key, label]) => (
+                    <div key={key}>
+                      <p className="text-xs text-slate-500 mb-1">{label}</p>
+                      <p className="text-sm font-medium">{String((asset as any).metadata[key])}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* Actions */}
         <div className="flex gap-3">

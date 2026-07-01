@@ -47,6 +47,28 @@ const ASSET_TYPES = Object.keys(ASSET_TYPE_ABBREVIATIONS);
 const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"];
 const STATUSES = ["Active", "Inactive", "Needs Maintenance", "Scheduled for Replacement"];
 
+const ADDITIONAL_ASSET_FIELDS: Record<string, string[]> = {
+  Signage: ["mounting_type", "number_of_posts_supports", "width_m", "length_m", "height_m", "orientation_position"],
+  "Traffic Signal": [],
+  Gantry: ["number_of_posts_supports", "number_of_beams", "length_m", "height_m", "orientation_position"],
+  Guardrail: ["number_of_posts_supports", "width_m", "length_m", "orientation_position"],
+  Fence: ["mounting_type", "length_m", "height_m", "orientation_position"],
+  "Safety Barrier": ["mounting_type", "number_of_beams", "length_m", "height_m", "orientation_position"],
+  Guidepost: ["mounting_type", "number_of_posts_supports", "width_m", "length_m", "height_m", "orientation_position"],
+  "Road Marking": ["width_m", "length_m"],
+  "Raised Road Marker": ["mounting_type", "length_m"],
+};
+
+const ADDITIONAL_FIELD_LABELS: Record<string, string> = {
+  mounting_type: "Mounting Type",
+  number_of_posts_supports: "No. of Posts / Supports",
+  number_of_beams: "No. of Beams",
+  width_m: "Width (m)",
+  length_m: "Length (m)",
+  height_m: "Height (m)",
+  orientation_position: "Orientation / Position",
+};
+
 interface EnhancedAssetFormProps {
   onSubmit: (assetData: any) => void;
   onCancel: () => void;
@@ -96,6 +118,10 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   const [replacementValue, setReplacementValue] = useState("");
   const [installationCost, setInstallationCost] = useState("");
 
+  // Additional asset details (type-specific metadata fields)
+  const [additionalFields, setAdditionalFields] = useState<Record<string, string>>({});
+  const selectedAdditionalFields = ADDITIONAL_ASSET_FIELDS[assetType] ?? [];
+
   // Photo upload (laptop/tablet)
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
@@ -144,6 +170,16 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     setEndLatitude(String(initialValues.end_latitude ?? initialValues.endLatitude ?? ""));
     setEndLongitude(String(initialValues.end_longitude ?? initialValues.endLongitude ?? ""));
     setGeneratedAssetRef(initialValues.asset_ref || initialValues.referenceNumber || "");
+
+    // Pre-populate additional metadata fields
+    const meta = initialValues.metadata || {};
+    const additionalFieldNames = ["mounting_type", "number_of_posts_supports", "number_of_beams", "width_m", "length_m", "height_m", "orientation_position"];
+    const preloaded: Record<string, string> = {};
+    additionalFieldNames.forEach((key) => {
+      const val = meta[key] ?? initialValues[key];
+      if (val !== undefined && val !== null) preloaded[key] = String(val);
+    });
+    setAdditionalFields(preloaded);
   }, [mode, initialValues]);
 
   // Generate asset reference whenever relevant fields change (create mode only)
@@ -211,22 +247,30 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   const fetchNextSequentialNumber = () => {
     if (!assetType || !roadName || !direction) return;
 
+    // Normalize a ref segment: spaces→underscores, lowercase, strip special chars.
+    const slugify = (s: string) =>
+      s.trim().replace(/\s+/g, "_").replace(/[^A-Za-z0-9_\-]/g, "").toLowerCase();
+
     const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
-    const fullRoadName = roadName + roadSubsection;
-    const prefix = roadSide
-      ? `${typeAbbr}-${fullRoadName}-${direction}-${roadSide}-`
-      : `${typeAbbr}-${fullRoadName}-${direction}-`;
+    const road = slugify(roadName + roadSubsection);
+    const dir = direction.toLowerCase();
+    const side = roadSide ? slugify(roadSide) : "";
+    const prefix = side
+      ? `${typeAbbr.toLowerCase()}-${road}-${dir}-${side}-`
+      : `${typeAbbr.toLowerCase()}-${road}-${dir}-`;
 
     setFetchingSeqNum(true);
     try {
-      const matchingNumbers = existingAssets
-        .map((asset: any) => asset.asset_ref || "")
+      const allRefs = existingAssets.map((asset: any) => (asset.asset_ref || "").toLowerCase().replace(/\s+/g, "_"));
+      console.log("[SeqNum] existingAssets count:", existingAssets.length, "| prefix:", prefix, "| sample refs:", allRefs.slice(0, 5));
+      const matchingNumbers = allRefs
         .filter((ref: string) => ref.startsWith(prefix))
         .map((ref: string) => {
-          const match = ref.match(/-(\d{3})$/);
+          const match = ref.match(/-(\d+)$/);
           return match ? parseInt(match[1], 10) : 0;
         })
-        .filter((n: number) => !isNaN(n));
+        .filter((n: number) => !isNaN(n) && n > 0);
+      console.log("[SeqNum] matching refs:", allRefs.filter((r: string) => r.startsWith(prefix)), "| numbers:", matchingNumbers);
 
       const nextNum = matchingNumbers.length > 0 ? Math.max(...matchingNumbers) + 1 : 1;
       setSequentialNumber(String(nextNum).padStart(3, "0"));
@@ -317,6 +361,14 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
       replacementValue,
       installationCost,
       photos: photoFiles,
+      // Additional type-specific metadata fields
+      mounting_type: additionalFields.mounting_type,
+      number_of_posts_supports: additionalFields.number_of_posts_supports,
+      number_of_beams: additionalFields.number_of_beams,
+      width_m: additionalFields.width_m,
+      length_m: additionalFields.length_m,
+      height_m: additionalFields.height_m,
+      orientation_position: additionalFields.orientation_position,
     };
 
     onSubmit(assetData);
@@ -836,6 +888,29 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
         )}
         <p className="text-xs text-muted-foreground">Photos will be uploaded when the asset is saved.</p>
       </div>
+
+      {/* Additional Asset Details */}
+      {selectedAdditionalFields.length > 0 && (
+        <div className="space-y-4 p-4 border border-blue-200 rounded-lg bg-blue-50/40">
+          <div>
+            <h3 className="text-sm font-semibold">Additional Asset Details</h3>
+            <p className="text-xs text-muted-foreground">Extra fields for {assetType}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {selectedAdditionalFields.map((fieldName) => (
+              <div key={fieldName} className="space-y-2">
+                <Label htmlFor={`add-${fieldName}`}>{ADDITIONAL_FIELD_LABELS[fieldName] || fieldName}</Label>
+                <Input
+                  id={`add-${fieldName}`}
+                  value={additionalFields[fieldName] || ""}
+                  onChange={(e) => setAdditionalFields((prev) => ({ ...prev, [fieldName]: e.target.value }))}
+                  placeholder={ADDITIONAL_FIELD_LABELS[fieldName] || fieldName}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Notes */}
       <div className="space-y-2">
