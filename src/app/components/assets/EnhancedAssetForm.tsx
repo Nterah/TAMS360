@@ -201,52 +201,74 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     if (!assetType || !roadName || !direction) return;
     if (seqNumManuallyEdited.current) return;
 
-    const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
-    const fullRoad = roadName + (roadSubsection || "");
-    // Build prefix using the exact same format as generateAssetReference so
-    // the comparison always matches the stored asset_ref values.
-    const refPrefix = (
-      roadSide && roadSide !== "none"
-        ? `${typeAbbr}-${fullRoad}-${direction}-${roadSide}-`
-        : `${typeAbbr}-${fullRoad}-${direction}-`
-    ).toLowerCase();
+    // Normalize a direction string to its two-letter code so "South Bound (SB)"
+    // and "SB" both compare equal when stored values and form values differ in format.
+    const dirCode = (d: string): string => {
+      const u = (d || "").toUpperCase();
+      if (u.includes("NB") || u.includes("NORTH")) return "NB";
+      if (u.includes("SB") || u.includes("SOUTH")) return "SB";
+      if (u.includes("EB") || u.includes("EAST"))  return "EB";
+      if (u.includes("WB") || u.includes("WEST"))  return "WB";
+      return u;
+    };
 
+    const norm       = (s: string) => (s || "").toLowerCase().trim();
+    const targetType = norm(assetType);
+    const targetRoad = norm(roadName);
+    const targetDir  = dirCode(direction);
+    const targetSide = norm(roadSide === "none" ? "" : roadSide);
+
+    // Match assets by top-level DB columns (asset_type_name, road_name) — always
+    // present — then refine with direction/road_side from metadata JSONB.
+    // Sequential number is extracted as the LAST dash-segment of asset_ref, e.g.
+    // "GR-R706-SB-001" → "001" → 1.  This avoids all prefix-format guessing.
+    const computeNext = (assets: any[]): number => {
+      const matched = assets.filter((a: any) => {
+        const aType = norm(a.asset_type_name || a.type || "");
+        const aRoad = norm(a.road_name || a.road_number || "");
+        if (aType !== targetType || aRoad !== targetRoad) return false;
+
+        const aDir  = dirCode(a.metadata?.direction || a.direction || "");
+        const aSide = norm(a.metadata?.road_side || a.road_side || "");
+        return (
+          (!targetDir  || aDir  === targetDir) &&
+          (!targetSide || aSide === targetSide)
+        );
+      });
+
+      const nums = matched.map((a: any) => {
+        const parts = (a.asset_ref || "").split("-");
+        const last  = parts[parts.length - 1];
+        return /^\d+$/.test(last) ? parseInt(last, 10) : 0;
+      }).filter((n: number) => n > 0);
+
+      return nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    };
+
+    // Immediate result from already-loaded prop (no network wait).
+    if (existingAssets.length > 0) {
+      setSequentialNumber(String(computeNext(existingAssets)).padStart(3, "0"));
+    }
+
+    // Refresh with fresh data from API to catch assets added since page load.
     let active = true;
     setFetchingSeqNum(true);
-
     fetchWithSessionAuth(`${API_URL}/assets?pageSize=1000`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => {
         if (!active || seqNumManuallyEdited.current) return;
         const assets: any[] = data.assets || data.data || [];
-
-        const matching = assets.filter((a: any) =>
-          (a.asset_ref || "").toLowerCase().startsWith(refPrefix)
-        );
-        const nums = matching
-          .map((a: any) => {
-            const suffix = (a.asset_ref || "").toLowerCase().slice(refPrefix.length);
-            return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
-          })
-          .filter((n: number) => n > 0);
-
-        // DEBUG toast — remove once sequential numbering is confirmed working
-        toast.info(
-          `[SeqNum debug] prefix="${refPrefix}" | total=${assets.length} | matching=${matching.length} | refs=${matching.map((a: any) => a.asset_ref).join(", ") || "none"}`,
-          { duration: 15000 }
-        );
-
-        const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-        setSequentialNumber(String(next).padStart(3, "0"));
+        setSequentialNumber(String(computeNext(assets)).padStart(3, "0"));
       })
-      .catch((err) => {
-        toast.error(`[SeqNum debug] fetch failed: ${err?.message || err}`, { duration: 15000 });
-        if (active && !seqNumManuallyEdited.current) setSequentialNumber("001");
+      .catch(() => {
+        if (active && !seqNumManuallyEdited.current) {
+          setSequentialNumber((prev) => prev || "001");
+        }
       })
       .finally(() => { if (active) setFetchingSeqNum(false); });
 
     return () => { active = false; setFetchingSeqNum(false); };
-  }, [assetType, roadName, roadSubsection, direction, roadSide, mode]);
+  }, [assetType, roadName, roadSubsection, direction, roadSide, existingAssets, mode]);
 
   const detectLocation = async () => {
     if (!navigator.geolocation) {
