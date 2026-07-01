@@ -273,22 +273,11 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
         if (cancelSignal?.cancelled) return;
         const assets: any[] = data.assets || data.data || [];
 
-        // Match by direct field values — works even when asset_ref is null.
-        const samePrefix = assets.filter((a: any) => {
-          const aType = norm(a.asset_type_name || a.type || "");
-          const aRoad = norm(a.road_name || a.road_number || "");
-          const aDir  = norm(a.direction || "");
-          const aSide = norm(a.road_side || "");
-          return (
-            aType === targetType &&
-            aRoad === targetRoad &&
-            aDir  === targetDir &&
-            (!targetSide || aSide === targetSide)
-          );
-        });
-
-        // Also extract numeric suffixes from any asset_refs that match the prefix.
-        const refNums = samePrefix
+        // Strategy 1: asset_ref prefix match on ALL assets.
+        // asset_ref is a top-level DB column so it's always available.
+        // direction/road_side are stored in metadata JSONB, not top-level columns,
+        // so the prefix is the only reliable way to check them.
+        const refNums = assets
           .map((a: any) => {
             const ref = (a.asset_ref || "").toLowerCase().replace(/\s+/g, "_");
             if (ref.startsWith(prefix)) {
@@ -299,9 +288,24 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
           })
           .filter((n: number) => n > 0);
 
-        const next = refNums.length > 0
-          ? Math.max(...refNums) + 1
-          : samePrefix.length + 1;
+        // Strategy 2: direct field comparison for assets that may have null asset_ref.
+        // direction is in metadata.direction; road_side is in metadata.road_side.
+        const fieldCount = assets.filter((a: any) => {
+          const aType = norm(a.asset_type_name || a.type || "");
+          const aRoad = norm(a.road_name || a.road_number || "");
+          const aDir  = norm(a.direction || a.metadata?.direction || "");
+          const aSide = norm(a.road_side || a.metadata?.road_side || "");
+          return (
+            aType === targetType &&
+            aRoad === targetRoad &&
+            aDir  === targetDir &&
+            (!targetSide || aSide === targetSide)
+          );
+        }).length;
+
+        // Use whichever strategy gives the higher number.
+        const maxRef = refNums.length > 0 ? Math.max(...refNums) : 0;
+        const next = Math.max(maxRef, fieldCount) + 1;
 
         if (!cancelSignal?.cancelled) {
           setSequentialNumber(String(next).padStart(3, "0"));
@@ -378,6 +382,8 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
       depot,
       roadNumber: roadName,
       roadName: `${roadName}${roadSubsection}`,
+      direction,
+      road_side: roadSide || null,
       kilometer,
       installDate,
       condition,

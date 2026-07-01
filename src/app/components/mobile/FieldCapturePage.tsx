@@ -489,28 +489,18 @@ export default function FieldCapturePage() {
         const targetDir  = normalise(directionCode(direction));
         const targetSide = normalise(roadSide === "None" ? "" : roadSide);
 
-        // Match on type + road + direction (+ side if set). Falls back to type-only count
-        // so we always have a sensible starting number even when road names differ.
-        const samePrefix = assets.filter((a: any) => {
-          const aType = normalise(a.asset_type_name || a.type || "");
-          const aRoad = normalise([a.road_name, a.road_subsection].filter(Boolean).join(" "));
-          const aDir  = normalise(a.direction || a.road_direction || "");
-          const aSide = normalise(a.road_side || "");
-          const typeMatch = aType === targetType;
-          const roadMatch = aRoad === targetRoad;
-          const dirMatch  = !targetDir || aDir === targetDir || directionCode(a.direction || "") === targetDir.toUpperCase();
-          const sideMatch = !targetSide || aSide === targetSide;
-          return typeMatch && roadMatch && dirMatch && sideMatch;
-        });
-
-        // Try to read existing sequential numbers from asset_ref for highest-number tracking.
+        // Build the asset_ref prefix for prefix-based matching.
         const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || slugForReference(assetType).slice(0, 4).toUpperCase();
         const road = slugForReference([roadName, roadSubsection].filter(Boolean).join("_"));
         const dir = directionCode(direction);
         const side = roadSide && roadSide !== "None" ? slugForReference(roadSide).toUpperCase() : "";
         const prefix = [...[typeAbbr, road, dir, side].filter(Boolean)].join("-").toLowerCase() + "-";
 
-        const refNums = samePrefix
+        // Strategy 1: asset_ref prefix match on ALL assets.
+        // asset_ref is a top-level DB column — always available.
+        // direction/road_side live in metadata JSONB so the prefix is the only
+        // reliable encoding of them in a single comparable string.
+        const refNums = assets
           .map((a: any) => {
             const ref = (a.asset_ref || "").toLowerCase().replace(/\s+/g, "_");
             if (ref.startsWith(prefix)) {
@@ -521,10 +511,23 @@ export default function FieldCapturePage() {
           })
           .filter((n: number) => n > 0);
 
-        // Use max ref number if available; otherwise fall back to count-based numbering.
-        const next = refNums.length > 0
-          ? Math.max(...refNums) + 1
-          : samePrefix.length + 1;
+        // Strategy 2: field match for assets without asset_ref.
+        // direction is stored in metadata.direction, not a top-level column.
+        const fieldCount = assets.filter((a: any) => {
+          const aType = normalise(a.asset_type_name || a.type || "");
+          const aRoad = normalise([a.road_name, a.road_subsection].filter(Boolean).join(" "));
+          const aDir  = normalise(a.direction || a.metadata?.direction || "");
+          const aSide = normalise(a.road_side || a.metadata?.road_side || "");
+          return (
+            aType === targetType &&
+            aRoad === targetRoad &&
+            (!targetDir || aDir === targetDir) &&
+            (!targetSide || aSide === targetSide)
+          );
+        }).length;
+
+        const maxRef = refNums.length > 0 ? Math.max(...refNums) : 0;
+        const next = Math.max(maxRef, fieldCount) + 1;
 
         setFormData((cur) => ({ ...cur, sequentialNumber: String(next).padStart(3, "0") }));
       })
