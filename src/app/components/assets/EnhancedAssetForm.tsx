@@ -14,8 +14,6 @@ import {
   classifyGpsAccuracy,
   shouldRequireGpsSaveOverride,
 } from "../../utils/gpsCapture";
-import { fetchWithSessionAuth } from "../../utils/authSession";
-import { API_URL } from "../../../lib/supabaseClient";
 
 const ASSET_TYPE_ABBREVIATIONS: Record<string, string> = {
   "Signage": "SIG",
@@ -103,7 +101,6 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
 
   // Tracks whether the user manually typed a sequential number (suppresses auto-fetch)
   const seqNumManuallyEdited = useRef(false);
-  const [fetchingSeqNum, setFetchingSeqNum] = useState(false);
 
   // Other asset fields
   const [assetName, setAssetName] = useState("");
@@ -197,9 +194,8 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   }, [assetType, roadName, roadSubsection, direction, roadSide]);
 
   // Auto-compute sequential number when prefix fields are complete.
-  // Strategy: build the exact same prefix generateAssetReference() would use,
-  // then scan every asset_ref for refs that start with it and find max+1.
-  // No field-matching needed — the prefix IS the type+road+direction.
+  // Uses existingAssets prop which AssetsPage populates by fetching ALL pages —
+  // no separate fetch here to avoid the pageSize truncation that caused 0 matches.
   useEffect(() => {
     if (mode === "edit") return;
     if (!assetType || !roadName || !direction) return;
@@ -208,51 +204,39 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
     const fullRoad = roadName + (roadSubsection || "");
     const side = roadSide && roadSide !== "none" ? roadSide : "";
-    // Same template as generateAssetReference — lowercased for comparison.
     const prefix = (side
       ? `${typeAbbr}-${fullRoad}-${direction}-${side}-`
       : `${typeAbbr}-${fullRoad}-${direction}-`
     ).toLowerCase();
 
-    const computeNext = (assets: any[]): number => {
-      const nums = assets
-        .map((a: any) => {
-          const ref = (a.asset_ref || "").toLowerCase();
-          if (!ref.startsWith(prefix)) return 0;
-          const suffix = ref.slice(prefix.length);
-          return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : 0;
-        })
-        .filter((n: number) => n > 0);
-      return nums.length > 0 ? Math.max(...nums) + 1 : 1;
-    };
+    // Also match old-format refs that have no direction segment (e.g. "TS-R800-001")
+    const prefixTypeRoad = `${typeAbbr}-${fullRoad}-`.toLowerCase();
 
-    // Immediate result from already-loaded prop (no network wait).
-    if (existingAssets.length > 0) {
-      setSequentialNumber(String(computeNext(existingAssets)).padStart(3, "0"));
-    }
+    const nums: number[] = [];
+    let matched = 0;
+    existingAssets.forEach((a: any) => {
+      const ref = (a.asset_ref || "").toLowerCase();
+      // New format: TYPE-ROAD-DIR[-SIDE]-NNN
+      if (ref.startsWith(prefix)) {
+        const suffix = ref.slice(prefix.length);
+        if (/^\d+$/.test(suffix)) { nums.push(parseInt(suffix, 10)); matched++; }
+        return;
+      }
+      // Old format: TYPE-ROAD-NNN (no direction segment — bare digits after road)
+      if (ref.startsWith(prefixTypeRoad)) {
+        const rest = ref.slice(prefixTypeRoad.length);
+        if (/^\d+$/.test(rest)) { nums.push(parseInt(rest, 10)); matched++; }
+      }
+    });
 
-    // Refresh with fresh data from the API.
-    let active = true;
-    setFetchingSeqNum(true);
-    fetchWithSessionAuth(`${API_URL}/assets?pageSize=1000`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((data) => {
-        if (!active || seqNumManuallyEdited.current) return;
-        const assets: any[] = data.assets || data.data || [];
-        const n = computeNext(assets);
-        const hits = assets.filter((a: any) => (a.asset_ref || "").toLowerCase().startsWith(prefix));
-        setSeqDebug(`prefix="${prefix}" | ${hits.length}/${assets.length} matched | next=${n} | refs: ${hits.slice(0, 3).map((a: any) => a.asset_ref).join(", ")}`);
-        setSequentialNumber(String(n).padStart(3, "0"));
-      })
-      .catch((err) => {
-        setSeqDebug(`FETCH ERROR: ${err?.message || err}`);
-        if (active && !seqNumManuallyEdited.current) {
-          setSequentialNumber((prev) => prev || "001");
-        }
-      })
-      .finally(() => { if (active) setFetchingSeqNum(false); });
-
-    return () => { active = false; setFetchingSeqNum(false); };
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    const sampleTs = existingAssets
+      .filter((a: any) => (a.asset_ref || "").toLowerCase().startsWith(typeAbbr.toLowerCase() + "-"))
+      .slice(0, 5)
+      .map((a: any) => a.asset_ref)
+      .join(" | ");
+    setSeqDebug(`prefix="${prefix}" | ${matched}/${existingAssets.length} matched | next=${next} | sample ${typeAbbr} refs: ${sampleTs || "none"}`);
+    setSequentialNumber(String(next).padStart(3, "0"));
   }, [assetType, roadName, roadSubsection, direction, roadSide, existingAssets, mode]);
 
   const detectLocation = async () => {
@@ -312,10 +296,11 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
 
     const typeAbbr = ASSET_TYPE_ABBREVIATIONS[assetType] || "";
     const fullRoadName = roadName + roadSubsection;
+    const side = roadSide && roadSide !== "none" ? roadSide : "";
 
     // Format: {TYPE}-{ROAD}-{DIRECTION}[-{SIDE}]-{SEQ}
-    const ref = roadSide
-      ? `${typeAbbr}-${fullRoadName}-${direction}-${roadSide}-${sequentialNumber}`
+    const ref = side
+      ? `${typeAbbr}-${fullRoadName}-${direction}-${side}-${sequentialNumber}`
       : `${typeAbbr}-${fullRoadName}-${direction}-${sequentialNumber}`;
 
     setGeneratedAssetRef(ref);
@@ -538,13 +523,9 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
                     seqNumManuallyEdited.current = true;
                     setSequentialNumber(e.target.value.padStart(3, "0"));
                   }}
-                  placeholder={fetchingSeqNum ? "Fetching..." : "001"}
+                  placeholder="001"
                   maxLength={3}
-                  disabled={fetchingSeqNum}
                 />
-                {fetchingSeqNum && (
-                  <RefreshCw className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />
-                )}
               </div>
               <Button
                 type="button"
@@ -557,7 +538,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
                   setDirection("");
                   requestAnimationFrame(() => setDirection(d));
                 }}
-                disabled={fetchingSeqNum || !assetType || !roadName || !direction}
+                disabled={!assetType || !roadName || !direction}
                 title="Re-fetch next available number"
               >
                 <RefreshCw className="w-4 h-4" />
