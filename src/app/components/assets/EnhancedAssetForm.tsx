@@ -202,8 +202,9 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     if (!assetType || !roadName || !direction) return;
     if (seqNumManuallyEdited.current) return;
 
-    // Normalize a direction string to its two-letter code so "South Bound (SB)"
-    // and "SB" both compare equal when stored values and form values differ in format.
+    const norm = (s: string) => (s || "").toLowerCase().trim();
+
+    // Resolve direction to a two-letter code.  "South Bound (SB)", "SB", "sb" → "SB".
     const dirCode = (d: string): string => {
       const u = (d || "").toUpperCase();
       if (u.includes("NB") || u.includes("NORTH")) return "NB";
@@ -213,28 +214,41 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
       return u;
     };
 
-    const norm       = (s: string) => (s || "").toLowerCase().trim();
+    // Extract direction from an asset: metadata first, then by scanning
+    // asset_ref dash-segments for NB/SB/EB/WB.
+    // Most existing assets have metadata.direction=undefined because direction
+    // was not included in the create payload before this fix was applied.
+    const getAssetDir = (a: any): string => {
+      const meta = a.metadata?.direction || a.direction;
+      if (meta) return dirCode(meta);
+      const parts = (a.asset_ref || "").toUpperCase().split("-");
+      for (const p of parts) {
+        if (p === "NB" || p === "SB" || p === "EB" || p === "WB") return p;
+      }
+      return ""; // unknown — caller treats this conservatively
+    };
+
     const targetType = norm(assetType);
     const targetRoad = norm(roadName);
     const targetDir  = dirCode(direction);
     const targetSide = norm(roadSide === "none" ? "" : roadSide);
 
-    // Match assets by top-level DB columns (asset_type_name, road_name) — always
-    // present — then refine with direction/road_side from metadata JSONB.
-    // Sequential number is extracted as the LAST dash-segment of asset_ref, e.g.
-    // "GR-R706-SB-001" → "001" → 1.  This avoids all prefix-format guessing.
     const computeNext = (assets: any[]): number => {
       const matched = assets.filter((a: any) => {
         const aType = norm(a.asset_type_name || a.type || "");
         const aRoad = norm(a.road_name || a.road_number || "");
         if (aType !== targetType || aRoad !== targetRoad) return false;
 
-        const aDir  = dirCode(a.metadata?.direction || a.direction || "");
+        const aDir  = getAssetDir(a);
+        // When direction is unknown (not in metadata AND not in asset_ref),
+        // include the asset rather than exclude it — better to over-count
+        // than to start a duplicate series at 001.
+        if (targetDir && aDir && aDir !== targetDir) return false;
+
         const aSide = norm(a.metadata?.road_side || a.road_side || "");
-        return (
-          (!targetDir  || aDir  === targetDir) &&
-          (!targetSide || aSide === targetSide)
-        );
+        if (targetSide && aSide && aSide !== targetSide) return false;
+
+        return true;
       });
 
       const nums = matched.map((a: any) => {
@@ -264,8 +278,11 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
         if (!active || seqNumManuallyEdited.current) return;
         const assets: any[] = data.assets || data.data || [];
         const n = computeNext(assets);
-        const sample = assets.slice(0, 3).map((a: any) => `${a.asset_type_name}|${a.road_name}|${a.metadata?.direction}|${a.asset_ref}`).join(" / ");
-        setSeqDebug(`API: ${assets.length} assets → next=${n} | sample: ${sample}`);
+        const sameTypeRoad = assets.filter((a: any) =>
+          norm(a.asset_type_name || a.type || "") === targetType &&
+          norm(a.road_name || a.road_number || "") === targetRoad
+        );
+        setSeqDebug(`API: ${assets.length} total | ${sameTypeRoad.length} same type+road | next=${n} | sample refs: ${sameTypeRoad.slice(0, 3).map((a: any) => a.asset_ref).join(", ")}`);
         setSequentialNumber(String(n).padStart(3, "0"));
       })
       .catch((err) => {
