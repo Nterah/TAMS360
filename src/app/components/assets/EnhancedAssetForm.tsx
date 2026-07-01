@@ -278,11 +278,19 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
         if (!active || seqNumManuallyEdited.current) return;
         const assets: any[] = data.assets || data.data || [];
         const n = computeNext(assets);
-        const sameTypeRoad = assets.filter((a: any) =>
-          norm(a.asset_type_name || a.type || "") === targetType &&
+        const sameType = assets.filter((a: any) =>
+          norm(a.asset_type_name || a.type || "") === targetType
+        );
+        const sameTypeRoad = sameType.filter((a: any) =>
           norm(a.road_name || a.road_number || "") === targetRoad
         );
-        setSeqDebug(`API: ${assets.length} total | ${sameTypeRoad.length} same type+road | next=${n} | sample refs: ${sameTypeRoad.slice(0, 3).map((a: any) => a.asset_ref).join(", ")}`);
+        const sampleTypes = assets.slice(0, 3).map((a: any) => norm(a.asset_type_name || a.type || "")).join(", ");
+        const sampleRoads = sameType.slice(0, 3).map((a: any) => norm(a.road_name || a.road_number || "")).join(", ");
+        setSeqDebug(
+          `form: type="${targetType}" road="${targetRoad}" dir="${targetDir}" | ` +
+          `API: ${assets.length} total | ${sameType.length} same type | ${sameTypeRoad.length} same type+road | next=${n} | ` +
+          `db types: ${sampleTypes} | db roads (same type): ${sampleRoads}`
+        );
         setSequentialNumber(String(n).padStart(3, "0"));
       })
       .catch((err) => {
