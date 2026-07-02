@@ -16,6 +16,7 @@ import {
 } from "../../utils/gpsCapture";
 
 const ASSET_TYPE_ABBREVIATIONS: Record<string, string> = {
+  "Road Sign": "RS",
   "Signage": "SIG",
   "Guardrail": "GR",
   "Traffic Signal": "TS",
@@ -48,6 +49,7 @@ const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"];
 const STATUSES = ["Active", "Inactive", "Needs Maintenance", "Scheduled for Replacement"];
 
 const ADDITIONAL_ASSET_FIELDS: Record<string, string[]> = {
+  "Road Sign": ["mounting_type", "number_of_posts_supports", "width_m", "length_m", "height_m", "orientation_position"],
   Signage: ["mounting_type", "number_of_posts_supports", "width_m", "length_m", "height_m", "orientation_position"],
   "Traffic Signal": [],
   Gantry: ["number_of_posts_supports", "number_of_beams", "length_m", "height_m", "orientation_position"],
@@ -138,7 +140,10 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
   // Pre-populate fields from initialValues when in edit mode
   useEffect(() => {
     if (mode !== "edit" || !initialValues) return;
-    setAssetType(initialValues.asset_type_name || initialValues.type || "");
+    // Match the incoming type name to a known ASSET_TYPES entry (case-insensitive)
+    const rawType = initialValues.asset_type_name || initialValues.type || "";
+    const matched = ASSET_TYPES.find((t) => t.toLowerCase() === rawType.toLowerCase()) || rawType;
+    setAssetType(matched);
     setAssetName(initialValues.asset_name || initialValues.description || initialValues.name || "");
     setInstaller(initialValues.installer_name || initialValues.installer || "");
     setRegion(initialValues.region || initialValues.region_name || "");
