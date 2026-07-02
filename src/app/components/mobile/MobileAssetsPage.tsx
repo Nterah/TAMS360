@@ -10,10 +10,10 @@ import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { 
-  Search, 
-  Filter, 
-  MapPin, 
+import {
+  Search,
+  Filter,
+  MapPin,
   Package,
   AlertCircle,
   CheckCircle2,
@@ -21,8 +21,11 @@ import {
   Plus,
   Navigation2,
   ChevronRight,
-  Loader2
+  Loader2,
+  Trash2
 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
+import { toast } from "sonner";
 import { projectId } from "../../../../utils/supabase/info";
 import {
   Select,
@@ -61,6 +64,7 @@ export default function MobileAssetsPage() {
   const [filterType, setFilterType] = useState("all");
   const [filterCondition, setFilterCondition] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Asset | null>(null);
 
   // Fetch assets
   useEffect(() => {
@@ -271,6 +275,27 @@ export default function MobileAssetsPage() {
     }
   };
 
+  const confirmDeleteAsset = async () => {
+    const asset = deleteTarget;
+    setDeleteTarget(null);
+    if (!asset) return;
+    const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+    try {
+      const response = await fetch(`${API_URL}/assets/${(asset as any).asset_id || asset.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (response.ok) {
+        toast.success("Asset deleted successfully!");
+        setAssets((prev) => prev.filter((a) => (a as any).asset_id !== (asset as any).asset_id && a.id !== asset.id));
+      } else {
+        toast.error("Failed to delete asset");
+      }
+    } catch {
+      toast.error("Error deleting asset");
+    }
+  };
+
   const getConditionColor = (condition: string) => {
     switch (condition?.toLowerCase()) {
       case "excellent":
@@ -308,6 +333,26 @@ export default function MobileAssetsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-4">
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Asset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{deleteTarget?.asset_ref}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmDeleteAsset}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Search Bar */}
       <div className="sticky top-[73px] z-10 bg-white dark:bg-slate-800 border-b p-4 space-y-3">
         <div className="relative">
@@ -457,7 +502,21 @@ export default function MobileAssetsPage() {
                       {asset.asset_type_name}
                     </p>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0 mt-1" />
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(asset);
+                      }}
+                      title="Delete asset"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                    <ChevronRight className="w-5 h-5 text-slate-400 mt-0.5" />
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">

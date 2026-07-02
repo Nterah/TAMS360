@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { ColumnCustomizer, ColumnConfig } from "../ui/column-customizer";
@@ -55,6 +56,7 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -481,8 +483,14 @@ export default function AssetsPage() {
     navigate(`/assets/${asset.asset_id}/edit`);
   };
 
-  const handleDeleteAsset = async (asset: any) => {
-    if (!confirm("Are you sure you want to delete this asset?")) return;
+  const handleDeleteAsset = (asset: any) => {
+    setDeleteTarget(asset);
+  };
+
+  const confirmDeleteAsset = async () => {
+    const asset = deleteTarget;
+    setDeleteTarget(null);
+    if (!asset) return;
 
     if (asset.is_offline_pending) {
       removePendingOfflineAsset(asset.asset_id);
@@ -535,6 +543,27 @@ export default function AssetsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Asset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{deleteTarget?.asset_ref}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmDeleteAsset}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl">Assets</h2>

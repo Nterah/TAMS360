@@ -4,19 +4,22 @@ import { AuthContext } from "../../App";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { 
-  ArrowLeft, 
-  MapPin, 
+import {
+  ArrowLeft,
+  MapPin,
   Calendar,
   Package,
   FileText,
   Image as ImageIcon,
   Loader2,
   Edit,
+  Trash2,
   ClipboardCheck,
   Navigation2,
   AlertCircle
 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
+import { toast } from "sonner";
 import { projectId } from "../../../../utils/supabase/info";
 import { resolveAssetCoordinates } from "../../utils/assetDisplay";
 
@@ -60,6 +63,7 @@ export default function MobileAssetDetailPage() {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [assetPhotos, setAssetPhotos] = useState<AssetPhoto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const assetCoordinates = asset ? resolveAssetCoordinates(asset, { rejectNullIsland: true }) : null;
 
   useEffect(() => {
@@ -138,6 +142,25 @@ export default function MobileAssetDetailPage() {
       if (localPhotos.length > 0) {
         setAssetPhotos((prev) => normalisePhotoList([...prev, ...localPhotos], []));
       }
+    }
+  };
+
+  const handleDelete = async () => {
+    const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+    try {
+      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (response.ok) {
+        toast.success("Asset deleted successfully");
+        navigate("/mobile/assets");
+      } else {
+        const err = await response.json().catch(() => ({}));
+        toast.error(`Failed to delete: ${err.error || "Unknown error"}`);
+      }
+    } catch {
+      toast.error("Failed to delete asset");
     }
   };
 
@@ -236,6 +259,26 @@ export default function MobileAssetDetailPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-20">
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Asset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{asset?.asset_ref}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDelete}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Fixed Header */}
       <div className="sticky top-0 z-20 bg-white dark:bg-slate-800 border-b shadow-sm">
         <div className="flex items-center justify-between p-4">
@@ -263,6 +306,15 @@ export default function MobileAssetDetailPage() {
               title="Edit Asset"
             >
               <Edit className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowDeleteDialog(true)}
+              title="Delete Asset"
+              className="text-destructive border-destructive/40 hover:bg-destructive/10"
+            >
+              <Trash2 className="w-4 h-4" />
             </Button>
           </div>
         </div>

@@ -26,6 +26,7 @@ import {
   Image as ImageIcon
 } from "lucide-react";
 import { toast } from "sonner";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 
 import {
@@ -45,6 +46,7 @@ export default function AssetDetailPage() {
   const [loading, setLoading] = useState(true);
   const [photos, setPhotos] = useState<any[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
 
@@ -312,8 +314,6 @@ export default function AssetDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm("Are you sure you want to delete this asset?")) return;
-
     try {
       const response = await fetch(`${API_URL}/assets/${assetId}`, {
         method: "DELETE",
@@ -424,6 +424,26 @@ export default function AssetDetailPage() {
 
   return (
     <div className="space-y-6 pb-8">
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Asset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{asset?.asset_ref}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDelete}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -443,7 +463,7 @@ export default function AssetDetailPage() {
             <Edit className="w-4 h-4 mr-2" />
             Edit Asset
           </Button>
-          <Button variant="destructive" onClick={handleDelete}>
+          <Button variant="destructive" onClick={() => setShowDeleteDialog(true)}>
             <Trash2 className="w-4 h-4 mr-2" />
             Delete
           </Button>
