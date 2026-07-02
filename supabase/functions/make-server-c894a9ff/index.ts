@@ -138,6 +138,26 @@ async function withTimeout<T>(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Helper: resolve user profile from Postgres view OR KV fallback.
+// Centralises the "not in Postgres yet" scenario so every route can benefit.
+// ---------------------------------------------------------------------------
+async function resolveUserProfile(userId: string): Promise<{ id: string; tenant_id: string; role: string } | null> {
+  const { data, error } = await supabase
+    .from('tams360_user_profiles_v')
+    .select('id, tenant_id, role')
+    .eq('id', userId)
+    .single();
+
+  if (!error && data && data.tenant_id) return data;
+
+  const kvUser = await kv.get(`user:${userId}`);
+  if (kvUser && kvUser.tenantId) {
+    return { id: kvUser.id || userId, tenant_id: kvUser.tenantId, role: kvUser.role || "admin" };
+  }
+  return null;
+}
+
 // Enable logger
 app.use("*", logger(console.log));
 
@@ -504,7 +524,7 @@ app.post("/make-server-c894a9ff/auth/tenant-signup", async (c) => {
       },
     });
 
-    // Store admin user profile
+    // Store admin user profile in KV
     await kv.set(`user:${data.user.id}`, {
       id: data.user.id,
       tenantId,
@@ -517,6 +537,36 @@ app.post("/make-server-c894a9ff/auth/tenant-signup", async (c) => {
       approvedAt: new Date().toISOString(),
       approvedBy: "system",
     });
+
+    // Also persist tenant and admin profile to Postgres so all routes can find them.
+    // Failures here are non-fatal (KV is the primary store for initial setup) but are logged.
+    try {
+      await supabase.from("tams360_tenants_v").upsert({
+        tenant_id: tenantId,
+        name: tenantName,
+        domain: tenantDomain || null,
+        owner_id: data.user.id,
+        tier: "trial",
+        status: "active",
+        trial_ends_at: trialEndDate.toISOString(),
+        settings: { allowDomainSignup: false, requireInvitation: true },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "tenant_id" });
+
+      await supabase.from("tams360_user_profiles_v").upsert({
+        id: data.user.id,
+        tenant_id: tenantId,
+        email: adminEmail,
+        name: adminName,
+        role: "admin",
+        status: "approved",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "id" });
+    } catch (pgErr) {
+      console.error("⚠️ [TENANT-SIGNUP] Non-fatal: failed to persist to Postgres:", pgErr);
+    }
 
     return c.json({
       success: true,
@@ -783,7 +833,28 @@ app.post("/make-server-c894a9ff/auth/signup", async (c) => {
       .eq('tenant_id', inviteData.tenantId)
       .single();
 
-    const organizationName = tenantData?.name || 'TAMS360';
+    const organizationName = tenantData?.name || tenantData?.tenant_name || 'TAMS360';
+
+    // Ensure the tenant exists in Postgres (may only be in KV if created via tenant-signup).
+    // This must happen before inserting the user profile due to the FK constraint on tenant_id.
+    if (!tenantData) {
+      const kvTenant = await kv.get(`tenant:${inviteData.tenantId}`);
+      if (kvTenant) {
+        await supabase.from("tams360_tenants_v").upsert({
+          tenant_id: inviteData.tenantId,
+          name: kvTenant.name || organizationName,
+          domain: kvTenant.domain || null,
+          owner_id: kvTenant.ownerId || null,
+          tier: kvTenant.tier || "trial",
+          status: kvTenant.status || "active",
+          trial_ends_at: kvTenant.trialEndsAt || null,
+          settings: kvTenant.settings || {},
+          created_at: kvTenant.createdAt || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "tenant_id" });
+        console.log(`✅ [SIGNUP] Synced KV tenant to Postgres: ${inviteData.tenantId}`);
+      }
+    }
 
     // Create user with Supabase Auth
     const { data, error } = await supabase.auth.admin.createUser({
@@ -800,28 +871,30 @@ app.post("/make-server-c894a9ff/auth/signup", async (c) => {
 
     console.log(`✅ [SIGNUP] Auth user created: ${data.user.id}`);
 
-    // Create user profile in database (THIS WAS MISSING!)
+    // Create user profile in database using upsert to handle duplicate registrations gracefully.
+    // Only include columns guaranteed by DATABASE_SETUP.sql — omit optional ones like 'organization'
+    // so this works regardless of which schema version is deployed.
     const { error: profileError } = await supabase
       .from('tams360_user_profiles_v')
-      .insert({
+      .upsert({
         id: data.user.id,
         tenant_id: inviteData.tenantId,
         email,
         name,
         role: inviteData.role || "field_user",
-        status: "approved", // Pre-approved via invitation
-        organization: organizationName,
+        status: "approved",
         created_at: new Date().toISOString(),
-      });
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "id" });
 
     if (profileError) {
       console.error("❌ [SIGNUP] Failed to create user profile:", profileError);
-      
+
       // Clean up: delete the auth user since profile creation failed
       await supabase.auth.admin.deleteUser(data.user.id);
-      
-      return c.json({ 
-        error: `Failed to create user profile: ${profileError.message}` 
+
+      return c.json({
+        error: `Failed to create user profile: ${profileError.message}`
       }, 500);
     }
 
@@ -869,20 +942,92 @@ app.post("/make-server-c894a9ff/auth/login", async (c) => {
     console.log(`🔐 Login attempt for user: ${data.user.id} (${email})`);
 
     // Query the TAMS360 public view for user profile
-    const { data: userProfile, error: profileError } = await supabase
+    let { data: userProfile, error: profileError } = await supabase
       .from('tams360_user_profiles_v')
       .select('*')
       .eq('id', data.user.id)
       .single();
 
+    // If not found in Postgres, fall back to KV store and auto-sync the profile to Postgres
     if (profileError || !userProfile) {
-      console.error(`❌ [TAMS360] User profile not found in tams360_user_profiles_v for ${email}:`, profileError);
-      
-      // Sign out the user since they have no profile
+      const kvUser = await kv.get(`user:${data.user.id}`);
+      if (kvUser && kvUser.tenantId) {
+        console.log(`⚠️ [LOGIN] Profile only in KV for ${email}, auto-syncing to Postgres…`);
+
+        // Ensure the tenant exists in Postgres first (needed for FK constraint)
+        const kvTenant = await kv.get(`tenant:${kvUser.tenantId}`);
+        if (kvTenant) {
+          await supabase.from("tams360_tenants_v").upsert({
+            tenant_id: kvUser.tenantId,
+            name: kvTenant.name || "Organisation",
+            domain: kvTenant.domain || null,
+            owner_id: kvTenant.ownerId || data.user.id,
+            tier: kvTenant.tier || "trial",
+            status: kvTenant.status || "active",
+            trial_ends_at: kvTenant.trialEndsAt || null,
+            settings: kvTenant.settings || {},
+            created_at: kvTenant.createdAt || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "tenant_id" });
+        }
+
+        // Upsert the user profile into Postgres
+        const { error: syncError } = await supabase.from("tams360_user_profiles_v").upsert({
+          id: data.user.id,
+          tenant_id: kvUser.tenantId,
+          email: kvUser.email || email,
+          name: kvUser.name || email,
+          role: kvUser.role || "admin",
+          status: kvUser.status || "approved",
+          created_at: kvUser.createdAt || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "id" });
+
+        if (!syncError) {
+          // Re-fetch the profile now that it's in Postgres
+          const refreshed = await supabase
+            .from('tams360_user_profiles_v')
+            .select('*')
+            .eq('id', data.user.id)
+            .single();
+          if (!refreshed.error && refreshed.data) {
+            userProfile = refreshed.data;
+          } else {
+            // Use KV data directly as a last resort
+            userProfile = {
+              id: kvUser.id,
+              tenant_id: kvUser.tenantId,
+              email: kvUser.email || email,
+              name: kvUser.name || email,
+              role: kvUser.role || "admin",
+              status: kvUser.status || "approved",
+              tier: kvUser.tier || "trial",
+              organization: kvUser.organization || "",
+            };
+          }
+          console.log(`✅ [LOGIN] Auto-synced profile for ${email}`);
+        } else {
+          console.error(`❌ [LOGIN] Auto-sync failed for ${email}:`, syncError);
+          // Use KV data as fallback even if sync failed
+          userProfile = {
+            id: kvUser.id,
+            tenant_id: kvUser.tenantId,
+            email: kvUser.email || email,
+            name: kvUser.name || email,
+            role: kvUser.role || "admin",
+            status: kvUser.status || "approved",
+            tier: kvUser.tier || "trial",
+            organization: kvUser.organization || "",
+          };
+        }
+      }
+    }
+
+    if (!userProfile) {
+      console.error(`❌ [LOGIN] User profile not found anywhere for ${email}`);
       await supabaseAuth.auth.signOut();
-      
-      return c.json({ 
-        error: "User profile not found. Please contact your administrator." 
+      return c.json({
+        error: "User profile not found. Please contact your administrator."
       }, 403);
     }
 
@@ -2812,15 +2957,23 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
       return c.json({ error: "Invalid session" }, 401);
     }
 
-    // Use the same tenant source as the working GET /assets route.
-    // Do not use the old KV-only tenant profile here, because it can be stale after project moves.
-    const { data: userProfile, error: profileError } = await supabase
+    // Get user profile from Postgres view (primary source)
+    let { data: userProfile, error: profileError } = await supabase
       .from("tams360_user_profiles_v")
       .select("id, tenant_id, role")
       .eq("id", userData.user.id)
       .single();
 
+    // Fallback to KV store so that users created via tenant-signup (KV-only) can create assets
     if (profileError || !userProfile || !userProfile.tenant_id) {
+      const kvUser = await kv.get(`user:${userData.user.id}`);
+      if (kvUser && kvUser.tenantId) {
+        userProfile = { id: kvUser.id, tenant_id: kvUser.tenantId, role: kvUser.role || "admin" };
+        console.log(`[POST /assets] KV fallback for user ${userData.user.id}, tenant ${kvUser.tenantId}`);
+      }
+    }
+
+    if (!userProfile || !userProfile.tenant_id) {
       console.error("Asset create profile lookup failed:", profileError);
       return c.json({ error: "User not associated with an organization" }, 403);
     }
@@ -3032,13 +3185,22 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     }
 
     // Get user profile from Postgres view to retrieve tenant_id and role
-    const { data: userProfile, error: profileError } = await supabase
+    let { data: userProfile, error: profileError } = await supabase
       .from('tams360_user_profiles_v')
       .select('id, tenant_id, role')
       .eq('id', userData.user.id)
       .single();
 
+    // Fallback to KV store for users whose profile exists only in KV (e.g. admins via tenant-signup)
     if (profileError || !userProfile || !userProfile.tenant_id) {
+      const kvUser = await kv.get(`user:${userData.user.id}`);
+      if (kvUser && kvUser.tenantId) {
+        userProfile = { id: kvUser.id, tenant_id: kvUser.tenantId, role: kvUser.role || "admin" };
+        console.log(`[GET /assets] KV fallback for user ${userData.user.id}, tenant ${kvUser.tenantId}`);
+      }
+    }
+
+    if (!userProfile || !userProfile.tenant_id) {
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
@@ -3594,19 +3756,13 @@ app.get("/make-server-c894a9ff/assets/:id", async (c) => {
       return c.json({ error: "Invalid session" }, 401);
     }
 
-    // Get user profile from Postgres view to retrieve tenant_id
-    const { data: userProfile, error: profileError } = await supabase
-      .from('tams360_user_profiles_v')
-      .select('id, tenant_id, role')
-      .eq('id', userData.user.id)
-      .single();
-
-    if (profileError || !userProfile || !userProfile.tenant_id) {
+    const userProfile = await resolveUserProfile(userData.user.id);
+    if (!userProfile) {
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
     const assetId = c.req.param("id");
-    
+
     // Validate UUID format (basic check to prevent SQL errors)
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(assetId)) {
@@ -3739,13 +3895,8 @@ app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
     const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
     if (authError || !userData.user) return c.json({ error: "Invalid session" }, 401);
 
-    const { data: userProfile, error: profileError } = await supabase
-      .from("tams360_user_profiles_v")
-      .select("id, tenant_id, role")
-      .eq("id", userData.user.id)
-      .single();
-
-    if (profileError || !userProfile?.tenant_id) {
+    const userProfile = await resolveUserProfile(userData.user.id);
+    if (!userProfile?.tenant_id) {
       return c.json({ error: "User not associated with an organization" }, 403);
     }
 
@@ -3848,9 +3999,34 @@ app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
 // Delete asset
 app.delete("/make-server-c894a9ff/assets/:id", async (c) => {
   try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) return c.json({ error: "Unauthorized" }, 401);
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+    if (authError || !userData.user) return c.json({ error: "Invalid session" }, 401);
+
+    const userProfile = await resolveUserProfile(userData.user.id);
+    if (!userProfile?.tenant_id) {
+      return c.json({ error: "User not associated with an organization" }, 403);
+    }
+
     const assetId = c.req.param("id");
 
-    await kv.del(`asset:${assetId}`);
+    // Delete from database (tenant-scoped for safety)
+    const { error: dbError } = await supabase
+      .from("tams360_assets")
+      .delete()
+      .eq("asset_id", assetId)
+      .eq("tenant_id", userProfile.tenant_id);
+
+    if (dbError) {
+      console.error("Error deleting asset from database:", dbError);
+      return c.json({ error: "Failed to delete asset", details: dbError.message }, 500);
+    }
+
+    // Also remove from KV store (legacy, may not exist)
+    await kv.del(`asset:${assetId}`).catch(() => {});
 
     return c.json({ success: true });
   } catch (error) {
