@@ -175,8 +175,16 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     setEndLongitude(String(initialValues.end_longitude ?? initialValues.endLongitude ?? ""));
     setGeneratedAssetRef(initialValues.asset_ref || initialValues.referenceNumber || "");
 
-    // Pre-populate additional metadata fields
+    // Pre-populate direction and road side — from metadata, direct column, or parsed from asset_ref
+    const ref = initialValues.asset_ref || "";
+    const refParts = ref.split("-");
+    const parsedDirection = refParts.find((p: string) => DIRECTIONS.includes(p.toUpperCase()))?.toUpperCase() || "";
+    const parsedRoadSide = refParts.find((p: string) => ROAD_SIDES.includes(p.toUpperCase()))?.toUpperCase() || "";
     const meta = initialValues.metadata || {};
+    setDirection(meta.direction || initialValues.direction || parsedDirection);
+    setRoadSide(meta.road_side || initialValues.road_side || parsedRoadSide);
+
+    // Pre-populate additional metadata fields
     const additionalFieldNames = ["mounting_type", "number_of_posts_supports", "number_of_beams", "width_m", "length_m", "height_m", "orientation_position"];
     const preloaded: Record<string, string> = {};
     additionalFieldNames.forEach((key) => {
@@ -550,32 +558,70 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
       </div>
       )} {/* end create-mode auto-numbering section */}
 
-      {/* Edit-mode only: Asset Type and Road Name fields */}
+      {/* Edit-mode only: Asset Type, Road Name, Direction, Road Side */}
       {mode === "edit" && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="edit-asset-type">Asset Type</Label>
-            <Select value={assetType} onValueChange={setAssetType}>
-              <SelectTrigger id="edit-asset-type">
-                <SelectValue placeholder="Select type" />
-              </SelectTrigger>
-              <SelectContent>
-                {ASSET_TYPES.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {type} ({ASSET_TYPE_ABBREVIATIONS[type]})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-road-name">Road Name</Label>
-            <Input
-              id="edit-road-name"
-              value={roadName}
-              onChange={(e) => setRoadName(e.target.value.trim())}
-              placeholder="e.g., M1, N2, R104"
-            />
+        <div className="space-y-4 p-4 border rounded-lg bg-primary/5">
+          <h3 className="text-sm font-semibold">Asset Classification</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-asset-type">Asset Type</Label>
+              <Select value={assetType} onValueChange={setAssetType}>
+                <SelectTrigger id="edit-asset-type">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ASSET_TYPES.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type} ({ASSET_TYPE_ABBREVIATIONS[type]})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-road-name">Road Name</Label>
+              <Input
+                id="edit-road-name"
+                value={roadName}
+                onChange={(e) => setRoadName(e.target.value.trim())}
+                placeholder="e.g., M1, N2, R104"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-direction">Direction</Label>
+              <Select value={direction} onValueChange={setDirection}>
+                <SelectTrigger id="edit-direction">
+                  <SelectValue placeholder="Select direction" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DIRECTIONS.map((dir) => (
+                    <SelectItem key={dir} value={dir}>
+                      {dir === "NB" && "North Bound (NB)"}
+                      {dir === "SB" && "South Bound (SB)"}
+                      {dir === "EB" && "East Bound (EB)"}
+                      {dir === "WB" && "West Bound (WB)"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-road-side">Road Side</Label>
+              <Select value={roadSide || "none"} onValueChange={(v) => setRoadSide(v === "none" ? "" : v)}>
+                <SelectTrigger id="edit-road-side">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {ROAD_SIDES.map((side) => (
+                    <SelectItem key={side} value={side}>
+                      {side === "LHS" && "Left Hand Side (LHS)"}
+                      {side === "RHS" && "Right Hand Side (RHS)"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       )}
@@ -599,7 +645,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="latitude">Latitude</Label>
             <Input
@@ -673,7 +719,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
             <p className="text-xs text-muted-foreground font-medium">
               End Point — required for linear assets (e.g. guardrail end, road marking end)
             </p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="end-latitude">End Latitude</Label>
                 <Input
@@ -702,7 +748,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
       </div>
 
       {/* General Information */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="asset-name">Asset Name</Label>
           <Input
@@ -811,7 +857,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
       {/* Ownership & Responsibility */}
       <div className="space-y-4">
         <h3 className="text-sm font-semibold border-b pb-2">Ownership & Responsibility</h3>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="owner">Owner</Label>
             <Input
@@ -836,7 +882,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
       {/* Financial Information */}
       <div className="space-y-4">
         <h3 className="text-sm font-semibold border-b pb-2">Financial Information</h3>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="replacement-value">Replacement Value (R)</Label>
             <Input
@@ -905,7 +951,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
             <h3 className="text-sm font-semibold">Additional Asset Details</h3>
             <p className="text-xs text-muted-foreground">Extra fields for {assetType}</p>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {selectedAdditionalFields.map((fieldName) => (
               <div key={fieldName} className="space-y-2">
                 <Label htmlFor={`add-${fieldName}`}>{ADDITIONAL_FIELD_LABELS[fieldName] || fieldName}</Label>

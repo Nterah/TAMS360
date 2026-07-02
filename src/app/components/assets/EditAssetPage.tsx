@@ -53,6 +53,8 @@ export default function EditAssetPage() {
 
       if (assetData.roadNumber  !== undefined) updates.road_number   = assetData.roadNumber  || null;
       if (assetData.roadName    !== undefined) updates.road_name     = assetData.roadName    || null;
+      if (assetData.direction   !== undefined) updates.direction     = assetData.direction   || null;
+      if (assetData.road_side   !== undefined) updates.road_side     = assetData.road_side   || null;
       if (assetData.region      !== undefined) updates.region        = assetData.region      || null;
       if (assetData.depot       !== undefined) updates.depot         = assetData.depot       || null;
       if (assetData.installDate !== undefined) updates.install_date  = assetData.installDate || null;
