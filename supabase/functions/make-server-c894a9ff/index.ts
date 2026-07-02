@@ -2485,6 +2485,159 @@ app.post("/make-server-c894a9ff/admin/diagnostic/sync-users", requireAdmin, asyn
   }
 });
 
+// Diagnostic: show tenant_id for every user in the system (admin only)
+app.get("/make-server-c894a9ff/admin/diagnostic/tenant-summary", requireAdmin, async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    const accessToken = authHeader!.split(" ")[1];
+    const { data: userData } = await supabaseAuth.auth.getUser(accessToken);
+    const adminProfile = await resolveUserProfile(userData!.user.id);
+
+    // All profiles in Postgres
+    const { data: pgProfiles } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, email, role, tenant_id, status");
+
+    // All KV users
+    const kvUsers = await kv.getByPrefix("user:");
+
+    // Asset counts per tenant
+    const { data: assetCounts } = await supabase
+      .from("tams360_assets_v")
+      .select("tenant_id");
+
+    const tenantAssetMap: Record<string, number> = {};
+    for (const a of assetCounts || []) {
+      tenantAssetMap[a.tenant_id] = (tenantAssetMap[a.tenant_id] || 0) + 1;
+    }
+
+    return c.json({
+      adminTenantId: adminProfile?.tenant_id,
+      postgresProfiles: (pgProfiles || []).map((p: any) => ({
+        id: p.id,
+        email: p.email,
+        role: p.role,
+        tenant_id: p.tenant_id,
+        matchesAdmin: p.tenant_id === adminProfile?.tenant_id,
+      })),
+      kvProfiles: kvUsers.map((u: any) => ({
+        id: u.id,
+        email: u.email,
+        role: u.role,
+        tenantId: u.tenantId,
+        matchesAdmin: u.tenantId === adminProfile?.tenant_id,
+      })),
+      assetCountsByTenant: tenantAssetMap,
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// Repair: realign all invited users and their assets to the admin's tenant_id
+app.post("/make-server-c894a9ff/admin/repair/realign-tenant", requireAdmin, async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    const accessToken = authHeader!.split(" ")[1];
+    const { data: userData } = await supabaseAuth.auth.getUser(accessToken);
+    const adminProfile = await resolveUserProfile(userData!.user.id);
+
+    if (!adminProfile?.tenant_id) {
+      return c.json({ error: "Admin tenant_id could not be resolved" }, 400);
+    }
+
+    const adminTenantId = adminProfile.tenant_id;
+    const results = { usersUpdated: 0, assetsUpdated: 0, errors: [] as string[] };
+
+    // 1. Ensure admin's tenant record exists in Postgres
+    const kvAdminTenant = await kv.get(`tenant:${adminTenantId}`);
+    if (kvAdminTenant) {
+      await supabase.from("tams360_tenants_v").upsert({
+        tenant_id: adminTenantId,
+        name: kvAdminTenant.name || "Organisation",
+        domain: kvAdminTenant.domain || null,
+        owner_id: kvAdminTenant.ownerId || userData!.user.id,
+        tier: kvAdminTenant.tier || "trial",
+        status: kvAdminTenant.status || "active",
+        trial_ends_at: kvAdminTenant.trialEndsAt || null,
+        settings: kvAdminTenant.settings || {},
+        created_at: kvAdminTenant.createdAt || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "tenant_id" });
+    }
+
+    // 2. Find all users who were invited by this admin (via KV invite records)
+    const allInvites = await kv.getByPrefix("invite:");
+    const adminInvites = allInvites.filter((inv: any) =>
+      inv.invitedBy === userData!.user.id || inv.tenantId === adminTenantId
+    );
+    const invitedUserIds = adminInvites
+      .filter((inv: any) => inv.acceptedBy)
+      .map((inv: any) => inv.acceptedBy as string);
+
+    // 3. Also include all Postgres users that have any tenant_id (they may need alignment)
+    const { data: pgProfiles } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, tenant_id");
+
+    const misalignedUsers = (pgProfiles || []).filter(
+      (p: any) => p.tenant_id !== adminTenantId
+    );
+
+    // Only update users who were explicitly invited by this admin
+    const usersToUpdate = misalignedUsers.filter((p: any) =>
+      invitedUserIds.includes(p.id)
+    );
+
+    for (const user of usersToUpdate) {
+      const { error } = await supabase
+        .from("tams360_user_profiles_v")
+        .update({ tenant_id: adminTenantId, updated_at: new Date().toISOString() })
+        .eq("id", user.id);
+
+      if (error) {
+        results.errors.push(`Failed to update user ${user.id}: ${error.message}`);
+      } else {
+        results.usersUpdated++;
+      }
+    }
+
+    // 4. Also update assets created by invited users that have a different tenant_id
+    const allUserIds = [...invitedUserIds, userData!.user.id];
+    for (const userId of allUserIds) {
+      const { data: userAssets, error: assetFetchErr } = await supabase
+        .from("tams360_assets_v")
+        .select("asset_id, tenant_id")
+        .eq("created_by", userId)
+        .neq("tenant_id", adminTenantId);
+
+      if (assetFetchErr || !userAssets) continue;
+
+      for (const asset of userAssets) {
+        const { error: updateErr } = await supabase
+          .from("tams360_assets")
+          .update({ tenant_id: adminTenantId })
+          .eq("asset_id", asset.asset_id);
+
+        if (updateErr) {
+          results.errors.push(`Failed to update asset ${asset.asset_id}: ${updateErr.message}`);
+        } else {
+          results.assetsUpdated++;
+        }
+      }
+    }
+
+    return c.json({
+      success: true,
+      adminTenantId,
+      ...results,
+      message: `Realigned ${results.usersUpdated} users and ${results.assetsUpdated} assets to tenant ${adminTenantId}`,
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // ============================================================================
 // DATA ORGANIZATION & MIGRATION ROUTES
 // ============================================================================

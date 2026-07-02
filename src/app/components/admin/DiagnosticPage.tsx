@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Badge } from '@/app/components/ui/badge';
-import { ArrowLeft, Database, CheckCircle, XCircle, AlertTriangle, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Database, CheckCircle, XCircle, AlertTriangle, AlertCircle, Users, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/app/utils/auth';
 
@@ -11,6 +11,10 @@ export function DiagnosticPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [diagnosticResults, setDiagnosticResults] = useState<any | null>(null);
+  const [tenantSummary, setTenantSummary] = useState<any | null>(null);
+  const [tenantSummaryLoading, setTenantSummaryLoading] = useState(false);
+  const [repairLoading, setRepairLoading] = useState(false);
+  const [repairResult, setRepairResult] = useState<any | null>(null);
 
   const runDiagnostics = async () => {
     try {
@@ -41,6 +45,35 @@ export function DiagnosticPage() {
       toast.error('Failed to run diagnostics');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTenantSummary = async () => {
+    try {
+      setTenantSummaryLoading(true);
+      const res = await authenticatedFetch('/admin/diagnostic/tenant-summary');
+      if (!res.ok) throw new Error(await res.text());
+      setTenantSummary(await res.json());
+    } catch (err: any) {
+      toast.error(`Failed to load tenant summary: ${err.message}`);
+    } finally {
+      setTenantSummaryLoading(false);
+    }
+  };
+
+  const runTenantRepair = async () => {
+    try {
+      setRepairLoading(true);
+      const res = await authenticatedFetch('/admin/repair/realign-tenant', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Repair failed');
+      setRepairResult(data);
+      toast.success(`Repair complete: ${data.usersUpdated} users, ${data.assetsUpdated} assets realigned`);
+      await loadTenantSummary();
+    } catch (err: any) {
+      toast.error(`Repair failed: ${err.message}`);
+    } finally {
+      setRepairLoading(false);
     }
   };
 
@@ -85,6 +118,81 @@ export function DiagnosticPage() {
             <Database className="w-4 h-4 mr-2" />
             {loading ? 'Running...' : 'Run Diagnostics'}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Tenant Visibility Repair */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="w-5 h-5" />
+            Cross-User Asset Visibility
+          </CardTitle>
+          <CardDescription>
+            If assets created by field users don't appear for admin (or other users), use this tool to diagnose and repair tenant alignment.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-3 flex-wrap">
+            <Button variant="outline" onClick={loadTenantSummary} disabled={tenantSummaryLoading}>
+              <Database className="w-4 h-4 mr-2" />
+              {tenantSummaryLoading ? 'Loading…' : 'Check Tenant IDs'}
+            </Button>
+            <Button onClick={runTenantRepair} disabled={repairLoading} className="bg-amber-600 hover:bg-amber-700 text-white">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              {repairLoading ? 'Repairing…' : 'Repair: Realign Tenant IDs'}
+            </Button>
+          </div>
+
+          {tenantSummary && (
+            <div className="space-y-3">
+              <div className="p-3 bg-slate-50 rounded border text-sm">
+                <div className="font-semibold mb-1">Admin Tenant ID</div>
+                <code className="text-xs">{tenantSummary.adminTenantId}</code>
+              </div>
+
+              <div>
+                <div className="text-sm font-semibold mb-2">Users in Postgres</div>
+                <div className="space-y-1">
+                  {tenantSummary.postgresProfiles?.map((p: any) => (
+                    <div key={p.id} className={`flex items-center justify-between p-2 rounded border text-xs ${p.matchesAdmin ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                      <span>{p.email} <Badge variant="outline" className="ml-1">{p.role}</Badge></span>
+                      <span className={p.matchesAdmin ? 'text-green-700' : 'text-red-700'}>
+                        {p.matchesAdmin ? '✓ same tenant' : '✗ different tenant: ' + p.tenant_id}
+                      </span>
+                    </div>
+                  ))}
+                  {!tenantSummary.postgresProfiles?.length && (
+                    <div className="text-muted-foreground text-xs">No profiles found in Postgres</div>
+                  )}
+                </div>
+              </div>
+
+              {Object.keys(tenantSummary.assetCountsByTenant || {}).length > 0 && (
+                <div>
+                  <div className="text-sm font-semibold mb-2">Assets by Tenant ID</div>
+                  <div className="space-y-1">
+                    {Object.entries(tenantSummary.assetCountsByTenant).map(([tid, count]) => (
+                      <div key={tid} className={`flex justify-between p-2 rounded border text-xs ${tid === tenantSummary.adminTenantId ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                        <code>{tid}</code>
+                        <span className="font-medium">{count as number} assets</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {repairResult && (
+            <div className="p-3 bg-green-50 border border-green-200 rounded text-sm">
+              <div className="font-semibold text-green-800">Repair complete</div>
+              <div className="text-green-700">{repairResult.message}</div>
+              {repairResult.errors?.length > 0 && (
+                <div className="mt-2 text-red-700 text-xs">{repairResult.errors.join('; ')}</div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
