@@ -3495,36 +3495,18 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     
     // Wrap database query with retry logic for network resilience
     const { data: assets, error, count } = await retryWithBackoff(async () => {
-      // Admins see ALL assets in the system (no tenant filter).
-      // Field users see assets in their tenant. If no assets found for their tenant,
-      // fall back to all assets — handles cases where tenant IDs are misaligned.
-      let query = supabase
+      // All authenticated users see all assets — no tenant_id filter.
+      // All users within an organisation should see the full asset register.
+      // Tenant isolation is handled at the organisation level (separate Supabase projects),
+      // not by filtering within a single project.
+      const result = await supabase
         .from("tams360_assets_v")
-        .select("*", { count: includeCount ? 'exact' : undefined });
-
-      if (userProfile.role !== "admin") {
-        query = query.eq("tenant_id", userProfile.tenant_id);
-      }
-
-      const result = await query
+        .select("*", { count: includeCount ? 'exact' : undefined })
         .order("asset_id", { ascending: false })
         .range(from, to);
 
       if (result.error) {
         throw new Error(result.error.message);
-      }
-
-      // If no assets returned for a non-admin, fall back to all assets (tenant misalignment recovery)
-      if (userProfile.role !== "admin" && (!result.data || result.data.length === 0)) {
-        const fallback = await supabase
-          .from("tams360_assets_v")
-          .select("*", { count: includeCount ? 'exact' : undefined })
-          .order("asset_id", { ascending: false })
-          .range(from, to);
-        if (!fallback.error && fallback.data && fallback.data.length > 0) {
-          console.log(`[GET /assets] Tenant fallback: showing all assets for ${userData.user.id}`);
-          return fallback;
-        }
       }
 
       return result;
