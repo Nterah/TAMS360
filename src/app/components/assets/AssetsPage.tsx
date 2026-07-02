@@ -22,7 +22,7 @@ import { ColumnCustomizer, ColumnConfig } from "../ui/column-customizer";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import EnhancedAssetForm from "./EnhancedAssetForm";
 import { requiresMigration, handleMigrationRequired } from "../../utils/migrationHelper";
-import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets, removePendingOfflineAsset, storeRecentVisibleAsset } from "../../utils/offlineAssets";
+import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets, removePendingOfflineAsset, removeRecentVisibleAsset, storeRecentVisibleAsset } from "../../utils/offlineAssets";
 import { loadWithCache, invalidateCache, getCacheEntry, setCacheEntry } from "../../utils/dataCache";
 
 import {
@@ -509,6 +509,8 @@ export default function AssetsPage() {
       });
 
       if (response.ok) {
+        removePendingOfflineAsset(asset.asset_id);
+        removeRecentVisibleAsset(asset.asset_id);
         toast.success("Asset deleted successfully!");
         invalidateCache("assets_list_v2");
         window.dispatchEvent(new CustomEvent(ASSETS_CHANGED_EVENT));

@@ -4,7 +4,7 @@ import { useTenant } from "../../contexts/TenantContext";
 import { useNavigate } from "react-router-dom";
 import { useOffline } from "../offline/OfflineContext";
 import { AssetsCacheService } from "../../utils/offlineCache";
-import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from "../../utils/offlineAssets";
+import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets, removePendingOfflineAsset, removeRecentVisibleAsset } from "../../utils/offlineAssets";
 import { resolveAssetCoordinates } from "../../utils/assetDisplay";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
@@ -286,6 +286,9 @@ export default function MobileAssetsPage() {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (response.ok) {
+        const deletedId = (asset as any).asset_id || asset.id;
+        removePendingOfflineAsset(deletedId);
+        removeRecentVisibleAsset(deletedId);
         toast.success("Asset deleted successfully!");
         window.dispatchEvent(new CustomEvent(ASSETS_CHANGED_EVENT));
         setAssets((prev) => prev.filter((a) => (a as any).asset_id !== (asset as any).asset_id && a.id !== asset.id));

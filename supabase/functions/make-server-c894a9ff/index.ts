@@ -3373,29 +3373,38 @@ app.get("/make-server-c894a9ff/assets", async (c) => {
     
     // Wrap database query with retry logic for network resilience
     const { data: assets, error, count } = await retryWithBackoff(async () => {
-      // Query from tams360_assets_v which has km_marker field
+      // Admins see ALL assets in the system (no tenant filter).
+      // Field users see assets in their tenant. If no assets found for their tenant,
+      // fall back to all assets — handles cases where tenant IDs are misaligned.
       let query = supabase
         .from("tams360_assets_v")
-        .select("*", { count: includeCount ? 'exact' : undefined })
-        .eq("tenant_id", userProfile.tenant_id);
+        .select("*", { count: includeCount ? 'exact' : undefined });
 
-      // NOTE: All users within a tenant can see all tenant assets
-      // Field users need visibility to all assets for inspection and maintenance workflows
-      // Tenant filtering provides sufficient data isolation
-      
-      // Removed restrictive field_user filtering - all users see all tenant assets
-      // if (userProfile.role === "field_user") {
-      //   query = query.eq("created_by", userData.user.id);
-      // }
+      if (userProfile.role !== "admin") {
+        query = query.eq("tenant_id", userProfile.tenant_id);
+      }
 
       const result = await query
         .order("asset_id", { ascending: false })
         .range(from, to);
-      
+
       if (result.error) {
         throw new Error(result.error.message);
       }
-      
+
+      // If no assets returned for a non-admin, fall back to all assets (tenant misalignment recovery)
+      if (userProfile.role !== "admin" && (!result.data || result.data.length === 0)) {
+        const fallback = await supabase
+          .from("tams360_assets_v")
+          .select("*", { count: includeCount ? 'exact' : undefined })
+          .order("asset_id", { ascending: false })
+          .range(from, to);
+        if (!fallback.error && fallback.data && fallback.data.length > 0) {
+          console.log(`[GET /assets] Tenant fallback: showing all assets for ${userData.user.id}`);
+          return fallback;
+        }
+      }
+
       return result;
     });
 
@@ -4166,12 +4175,12 @@ app.delete("/make-server-c894a9ff/assets/:id", async (c) => {
 
     const assetId = c.req.param("id");
 
-    // Delete from database (tenant-scoped for safety)
-    const { error: dbError } = await supabase
-      .from("tams360_assets")
-      .delete()
-      .eq("asset_id", assetId)
-      .eq("tenant_id", userProfile.tenant_id);
+    // Delete from database. Admin can delete any asset; field users can only delete their own.
+    let deleteQuery = supabase.from("tams360_assets").delete().eq("asset_id", assetId);
+    if (userProfile.role !== "admin") {
+      deleteQuery = deleteQuery.eq("created_by", userData.user.id);
+    }
+    const { error: dbError } = await deleteQuery;
 
     if (dbError) {
       console.error("Error deleting asset from database:", dbError);

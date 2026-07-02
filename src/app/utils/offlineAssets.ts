@@ -77,6 +77,16 @@ export function removePendingOfflineAsset(assetId: string) {
   writePendingOfflineAssets(remaining);
 }
 
+export function removeRecentVisibleAsset(assetIdOrRef: string) {
+  if (!assetIdOrRef) return;
+  const normalised = normaliseIdentity(assetIdOrRef);
+  const current = readRecentVisibleAssets();
+  const remaining = current.filter((asset) =>
+    collectAssetIdentifiers(asset).every((id) => id !== normalised)
+  );
+  writeRecentVisibleAssets(remaining);
+}
+
 export function storeRecentVisibleAsset(asset: RecentVisibleAsset) {
   const identifiers = new Set(collectAssetIdentifiers(asset));
   if (identifiers.size === 0) return;
