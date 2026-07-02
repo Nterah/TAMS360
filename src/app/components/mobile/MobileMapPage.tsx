@@ -182,6 +182,7 @@ export default function MobileMapPage() {
   const [colorMode, setColorMode] = useState<"ci" | "urgency" | "status">("ci");
   const [mapLayer, setMapLayer] = useState<"street" | "satellite" | "hybrid">("street");
   const [clusteringEnabled, setClusteringEnabled] = useState(true);
+  const [dragMode, setDragMode] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
   
@@ -469,8 +470,15 @@ export default function MobileMapPage() {
       if (!coordinates) return;
 
       const icon = createAssetIcon(asset.asset_type_name, asset, colorMode);
-      const marker = L.marker([coordinates.lat, coordinates.lng], { icon });
-      
+      const marker = L.marker([coordinates.lat, coordinates.lng], { icon, draggable: dragMode });
+
+      if (dragMode) {
+        marker.on("dragend", () => {
+          const { lat, lng } = marker.getLatLng();
+          handleAssetMove(asset, lat, lng);
+        });
+      }
+
       const popupContent = `
         <div class="min-w-[200px] p-2">
           <div class="font-semibold text-sm mb-1">${asset.asset_ref}</div>
@@ -484,7 +492,7 @@ export default function MobileMapPage() {
       
       marker.bindPopup(popupContent);
       marker.on('click', () => {
-        setSelectedAsset(asset);
+        if (!dragMode) setSelectedAsset(asset);
       });
 
       if (clusteringEnabled && markerClusterRef.current) {
@@ -513,7 +521,34 @@ export default function MobileMapPage() {
         markerClusterRef.current.clearLayers();
       }
     };
-  }, [filteredAssets, colorMode, clusteringEnabled]);
+  }, [filteredAssets, colorMode, clusteringEnabled, dragMode]);
+
+  const handleAssetMove = async (asset: any, lat: number, lng: number) => {
+    const { projectId } = await import("../../../../utils/supabase/info");
+    const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+    const assetId = asset.asset_id || asset.id;
+    try {
+      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ gps_lat: lat, gps_lng: lng }),
+      });
+      if (!response.ok) throw new Error("Failed to save");
+      setAssets((prev) =>
+        prev.map((a) =>
+          (a.asset_id || a.id) === assetId
+            ? { ...a, gps_lat: lat, gps_lng: lng, latitude: lat, longitude: lng }
+            : a
+        )
+      );
+      toast.success(`${asset.asset_ref || "Asset"} moved and saved`);
+    } catch {
+      toast.error("Failed to save new position");
+    }
+  };
 
   const fetchAssets = async () => {
     try {
@@ -601,6 +636,13 @@ export default function MobileMapPage() {
         </Select>
       </div>
 
+      {/* Drag mode banner */}
+      {dragMode && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[1001] bg-amber-500 text-white text-xs font-semibold px-4 py-1.5 rounded-full shadow-lg pointer-events-none">
+          Move mode — drag markers to reposition
+        </div>
+      )}
+
       {/* Map Type Selector - Top Right */}
       <div className="absolute top-16 right-4 z-[1000] bg-white dark:bg-slate-800 border shadow-lg rounded-lg p-1 flex gap-1">
         <Button
@@ -626,6 +668,15 @@ export default function MobileMapPage() {
           className="h-7 px-2 text-xs"
         >
           Hybrid
+        </Button>
+        <Button
+          size="sm"
+          variant={dragMode ? "default" : "ghost"}
+          onClick={() => setDragMode((v) => !v)}
+          className={`h-7 px-2 text-xs ${dragMode ? "bg-amber-500 hover:bg-amber-600 border-amber-500 text-white" : ""}`}
+          title="Toggle move mode"
+        >
+          {dragMode ? "✓ Move" : "Move"}
         </Button>
       </div>
 
