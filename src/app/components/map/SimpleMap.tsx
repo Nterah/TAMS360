@@ -28,7 +28,9 @@ interface SimpleMapProps {
   colorMode?: "condition" | "ci" | "urgency" | "status" | "region" | "ward" | "depot" | "owner";
   mapLayer?: "street" | "satellite" | "hybrid";
   clusteringEnabled?: boolean;
-  accessToken?: string; // Add accessToken for authenticated API calls
+  accessToken?: string;
+  draggable?: boolean;
+  onAssetMove?: (asset: any, lat: number, lng: number) => void;
 }
 
 // Asset type icon SVG paths (simple shapes for different asset types)
@@ -175,17 +177,19 @@ const createAssetIcon = (assetType: string, asset: any, colorMode: string = "con
   });
 };
 
-export function SimpleMap({ 
-  center, 
-  zoom, 
-  assets, 
-  userLocation, 
-  onAssetClick, 
+export function SimpleMap({
+  center,
+  zoom,
+  assets,
+  userLocation,
+  onAssetClick,
   onNavigate,
   colorMode = "condition",
   mapLayer = "street",
   clusteringEnabled = true,
-  accessToken = publicAnonKey
+  accessToken = publicAnonKey,
+  draggable = false,
+  onAssetMove,
 }: SimpleMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -584,13 +588,26 @@ export function SimpleMap({
 
       const marker = L.marker(
         [coordinates.lat, coordinates.lng],
-        { icon: createAssetIcon(asset.type, asset, colorMode) }
+        {
+          icon: createAssetIcon(asset.type, asset, colorMode),
+          draggable,
+        }
       );
 
       // Use enhanced popup with photos and updated fields
       createEnhancedPopup(asset, marker);
 
-      marker.on('click', () => onAssetClick(asset));
+      marker.on('click', () => {
+        if (!draggable) onAssetClick(asset);
+      });
+
+      if (draggable && onAssetMove) {
+        marker.on('dragend', () => {
+          const { lat, lng } = marker.getLatLng();
+          onAssetMove(asset, lat, lng);
+        });
+      }
+
       markers.push(marker);
       addedCount++;
     });
@@ -702,7 +719,7 @@ export function SimpleMap({
       userMarkerRef.current = userMarker;
       console.log(`SimpleMap: Added user location marker`);
     }
-  }, [assets, userLocation, onAssetClick, colorMode, clusteringEnabled, accessToken]);
+  }, [assets, userLocation, onAssetClick, colorMode, clusteringEnabled, accessToken, draggable, onAssetMove]);
 
   return (
     <>

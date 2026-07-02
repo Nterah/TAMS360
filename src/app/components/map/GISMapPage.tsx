@@ -49,6 +49,7 @@ export default function GISMapPage() {
   const [colorMode, setColorMode] = useState<"condition" | "ci" | "urgency" | "status" | "region" | "ward" | "depot" | "owner">("ci");
   const [mapLayer, setMapLayer] = useState<"street" | "satellite" | "hybrid">("street");
   const [clusteringEnabled, setClusteringEnabled] = useState(true);
+  const [dragMode, setDragMode] = useState(false);
   
   const [filters, setFilters] = useState({
     type: "all",
@@ -606,6 +607,31 @@ export default function GISMapPage() {
       ...overlayVisibility,
       [layerId]: !overlayVisibility[layerId],
     });
+  };
+
+  const handleAssetMove = async (asset: any, lat: number, lng: number) => {
+    const assetId = asset.asset_id || asset.id;
+    try {
+      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ gps_lat: lat, gps_lng: lng }),
+      });
+      if (!response.ok) throw new Error("Failed to save");
+      setAssets((prev) =>
+        prev.map((a) =>
+          (a.asset_id || a.id) === assetId
+            ? { ...a, gps_lat: lat, gps_lng: lng, latitude: lat, longitude: lng }
+            : a
+        )
+      );
+      toast.success(`${asset.asset_ref || "Asset"} moved and saved`);
+    } catch {
+      toast.error("Failed to save new position — marker will reset on refresh");
+    }
   };
 
   const navigateToAsset = (asset: any) => {
@@ -1279,8 +1305,17 @@ export default function GISMapPage() {
                     mapLayer={mapLayer}
                     clusteringEnabled={clusteringEnabled}
                     accessToken={accessToken || publicAnonKey}
+                    draggable={dragMode}
+                    onAssetMove={handleAssetMove}
                   />
                 </div>
+
+                {/* Drag mode banner */}
+                {dragMode && (
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1001] bg-amber-500 text-white text-xs font-semibold px-4 py-1.5 rounded-full shadow-lg pointer-events-none">
+                    Move mode — drag markers to reposition
+                  </div>
+                )}
 
                 {/* Map Layer Selector */}
                 <div className="absolute top-4 right-4 bg-card border shadow-lg rounded-lg p-2 z-[1000]">
@@ -1308,6 +1343,15 @@ export default function GISMapPage() {
                       className="h-8 px-3 text-xs"
                     >
                       Hybrid
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={dragMode ? "default" : "outline"}
+                      onClick={() => setDragMode((v) => !v)}
+                      className={`h-8 px-3 text-xs ${dragMode ? "bg-amber-500 hover:bg-amber-600 border-amber-500" : ""}`}
+                      title="Toggle move mode — drag markers to update GPS position"
+                    >
+                      {dragMode ? "✓ Move" : "Move"}
                     </Button>
                   </div>
                 </div>
