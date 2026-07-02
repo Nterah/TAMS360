@@ -28,6 +28,7 @@ import {
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
+import { ASSETS_CHANGED_EVENT } from "../../utils/offlineAssets";
 
 import {
   getCIDisplay,
@@ -324,6 +325,7 @@ export default function AssetDetailPage() {
 
       if (response.ok) {
         toast.success("Asset deleted successfully");
+        window.dispatchEvent(new CustomEvent(ASSETS_CHANGED_EVENT));
         navigate("/assets");
       } else {
         const error = await response.json();
