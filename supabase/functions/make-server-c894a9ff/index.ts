@@ -2597,6 +2597,54 @@ app.get("/make-server-c894a9ff/admin/diagnostic/asset-tables", requireAdmin, asy
   }
 });
 
+// Repair: migrate assets from public.tams360_assets → tams360.assets so the view picks them up
+app.post("/make-server-c894a9ff/admin/repair/migrate-assets", requireAdmin, async (c) => {
+  try {
+    // Fetch all assets from the public table (where mobile inserts land)
+    const { data: publicAssets, error: pubErr } = await supabase
+      .from("tams360_assets")
+      .select("*");
+
+    if (pubErr) return c.json({ error: `Failed to read public.tams360_assets: ${pubErr.message}` }, 500);
+    if (!publicAssets?.length) return c.json({ migrated: 0, skipped: 0, message: "No assets in public.tams360_assets" });
+
+    // Fetch existing asset_ids in tams360.assets so we don't duplicate
+    const { data: schemaAssets, error: schErr } = await supabaseTams360
+      .from("assets")
+      .select("asset_id");
+
+    if (schErr) {
+      return c.json({
+        error: `Cannot access tams360 schema — it may not be exposed to PostgREST. Run this SQL in the Supabase SQL editor: ALTER DATABASE postgres SET search_path TO public, tams360; NOTIFY pgrst, 'reload schema';`,
+        details: schErr.message
+      }, 500);
+    }
+
+    const existingIds = new Set((schemaAssets || []).map((a: any) => a.asset_id));
+    const toMigrate = publicAssets.filter((a: any) => !existingIds.has(a.asset_id));
+
+    if (!toMigrate.length) {
+      return c.json({ migrated: 0, skipped: publicAssets.length, message: "All public assets already exist in tams360.assets" });
+    }
+
+    const { error: insertErr } = await supabaseTams360
+      .from("assets")
+      .insert(toMigrate);
+
+    if (insertErr) {
+      return c.json({ error: `Migration insert failed: ${insertErr.message}` }, 500);
+    }
+
+    return c.json({
+      migrated: toMigrate.length,
+      skipped: existingIds.size,
+      migratedRefs: toMigrate.map((a: any) => a.asset_ref),
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // Repair: realign all invited users and their assets to the admin's tenant_id
 app.post("/make-server-c894a9ff/admin/repair/realign-tenant", requireAdmin, async (c) => {
   try {

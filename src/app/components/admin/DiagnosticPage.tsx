@@ -50,6 +50,8 @@ export function DiagnosticPage() {
 
   const [assetTableCheck, setAssetTableCheck] = useState<any | null>(null);
   const [assetTableLoading, setAssetTableLoading] = useState(false);
+  const [migrateLoading, setMigrateLoading] = useState(false);
+  const [migrateResult, setMigrateResult] = useState<any | null>(null);
 
   const checkAssetTables = async () => {
     try {
@@ -61,6 +63,24 @@ export function DiagnosticPage() {
       toast.error(`Asset table check failed: ${err.message}`);
     } finally {
       setAssetTableLoading(false);
+    }
+  };
+
+  const migrateAssets = async () => {
+    try {
+      setMigrateLoading(true);
+      setMigrateResult(null);
+      const res = await authenticatedFetch('/admin/repair/migrate-assets', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Migration failed');
+      setMigrateResult(data);
+      toast.success(`Migration complete: ${data.migrated} assets moved`);
+      await checkAssetTables();
+    } catch (err: any) {
+      toast.error(`Migration failed: ${err.message}`);
+      setMigrateResult({ error: err.message });
+    } finally {
+      setMigrateLoading(false);
     }
   };
 
@@ -224,10 +244,35 @@ export function DiagnosticPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button variant="outline" onClick={checkAssetTables} disabled={assetTableLoading}>
-            <Database className="w-4 h-4 mr-2" />
-            {assetTableLoading ? 'Checking…' : 'Check Asset Tables'}
-          </Button>
+          <div className="flex gap-3 flex-wrap">
+            <Button variant="outline" onClick={checkAssetTables} disabled={assetTableLoading}>
+              <Database className="w-4 h-4 mr-2" />
+              {assetTableLoading ? 'Checking…' : 'Check Asset Tables'}
+            </Button>
+            <Button onClick={migrateAssets} disabled={migrateLoading} className="bg-blue-600 hover:bg-blue-700 text-white">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              {migrateLoading ? 'Migrating…' : 'Migrate Assets to View Table'}
+            </Button>
+          </div>
+
+          {migrateResult && (
+            <div className={`p-3 rounded border text-sm ${migrateResult.error ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+              {migrateResult.error ? (
+                <div>
+                  <div className="font-semibold text-red-800">Migration failed</div>
+                  <div className="text-red-700">{migrateResult.error}</div>
+                </div>
+              ) : (
+                <div>
+                  <div className="font-semibold text-green-800">Migration complete</div>
+                  <div className="text-green-700">{migrateResult.migrated} assets migrated, {migrateResult.skipped} already present</div>
+                  {migrateResult.migratedRefs?.length > 0 && (
+                    <div className="mt-1 text-xs text-green-600">{migrateResult.migratedRefs.join(', ')}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {assetTableCheck && (
             <div className="space-y-3 text-sm">
