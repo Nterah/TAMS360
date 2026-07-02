@@ -44,10 +44,18 @@ import { quickSetup } from "./quickSetup.tsx";
 
 const app = new Hono();
 
-// Supabase admin client (for database operations)
+// Supabase admin client (for database operations — public schema)
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") || "",
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+);
+
+// Supabase admin client that targets the tams360 schema directly.
+// Used to write to tams360.assets (the real asset table that the views read from).
+const supabaseTams360 = createClient(
+  Deno.env.get("SUPABASE_URL") || "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+  { db: { schema: "tams360" } }
 );
 
 // Supabase client for auth validation (uses anon key)
@@ -2534,6 +2542,61 @@ app.get("/make-server-c894a9ff/admin/diagnostic/tenant-summary", requireAdmin, a
   }
 });
 
+// Diagnostic: compare what's in tams360_assets (table) vs tams360_assets_v (view)
+// This reveals whether the view reads from a different underlying table
+app.get("/make-server-c894a9ff/admin/diagnostic/asset-tables", requireAdmin, async (c) => {
+  try {
+    // Count in view (what GET /assets returns)
+    const { count: viewCount } = await supabase
+      .from("tams360_assets_v")
+      .select("*", { count: "exact", head: true });
+
+    // Recent 5 from view
+    const { data: viewRecent } = await supabase
+      .from("tams360_assets_v")
+      .select("asset_id, asset_ref, tenant_id, created_at")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    // Count in raw public table
+    const { count: tableCount } = await supabase
+      .from("tams360_assets")
+      .select("*", { count: "exact", head: true });
+
+    // Recent 5 from raw table
+    const { data: tableRecent } = await supabase
+      .from("tams360_assets")
+      .select("asset_id, asset_ref, tenant_id, created_at")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    // Count in tams360 schema directly
+    const { count: schemaCount } = await supabaseTams360
+      .from("assets")
+      .select("*", { count: "exact", head: true });
+
+    // Recent 5 from tams360 schema
+    const { data: schemaRecent } = await supabaseTams360
+      .from("assets")
+      .select("asset_id, asset_ref, tenant_id, created_at")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    return c.json({
+      view_tams360_assets_v: { count: viewCount, recent: viewRecent },
+      table_public_tams360_assets: { count: tableCount, recent: tableRecent },
+      schema_tams360_assets: { count: schemaCount, recent: schemaRecent },
+      diagnosis: viewCount === tableCount
+        ? "view and public table match — same underlying table"
+        : viewCount === schemaCount
+          ? "view reads from tams360 schema — inserts need to go to tams360.assets"
+          : "counts differ — table structure mismatch detected",
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // Repair: realign all invited users and their assets to the admin's tenant_id
 app.post("/make-server-c894a9ff/admin/repair/realign-tenant", requireAdmin, async (c) => {
   try {
@@ -3263,14 +3326,24 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
       },
     };
 
-    const { data: insertedAsset, error: insertError } = await supabase
-      .from("tams360_assets")
-      .insert(assetData)
-      .select("*")
-      .single();
+    // Try inserting into tams360.assets first (the schema the views read from).
+    // Fall back to public.tams360_assets if the tams360 schema isn't exposed.
+    let insertedAsset: any = null;
+    let insertError: any = null;
+
+    const tams360Insert = await supabaseTams360.from("assets").insert(assetData).select("*").single();
+    if (!tams360Insert.error && tams360Insert.data) {
+      insertedAsset = tams360Insert.data;
+      console.log("[POST /assets] Asset saved to tams360.assets schema");
+    } else {
+      console.warn("[POST /assets] tams360 schema insert failed, falling back to public.tams360_assets:", tams360Insert.error?.message);
+      const publicInsert = await supabase.from("tams360_assets").insert(assetData).select("*").single();
+      insertedAsset = publicInsert.data;
+      insertError = publicInsert.error;
+    }
 
     if (insertError || !insertedAsset) {
-      console.error("Error inserting asset into public.tams360_assets:", insertError, "payload:", assetData);
+      console.error("Error inserting asset:", insertError, "payload:", assetData);
       return c.json({
         success: false,
         error: "Failed to save asset to database",
@@ -3279,15 +3352,16 @@ app.post("/make-server-c894a9ff/assets", async (c) => {
     }
 
     // Verify that the same source used by GET /assets can read this record back.
+    // Note: do NOT filter by tenant_id here — asset may have a different tenant_id than the user profile
+    // (can happen when tenant IDs are misaligned between KV and Postgres).
     const { data: verifiedAsset, error: verifyError } = await supabase
       .from("tams360_assets_v")
       .select("*")
       .eq("asset_id", insertedAsset.asset_id)
-      .eq("tenant_id", tenantId)
       .maybeSingle();
 
     if (verifyError || !verifiedAsset) {
-      console.error("Asset inserted but not visible in tams360_assets_v:", verifyError, insertedAsset.asset_id);
+      console.error("Asset inserted but not visible in tams360_assets_v (view may read from different table):", verifyError?.message, insertedAsset.asset_id);
       return c.json({
         success: true,
         savedTo: "database",

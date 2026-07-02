@@ -48,6 +48,22 @@ export function DiagnosticPage() {
     }
   };
 
+  const [assetTableCheck, setAssetTableCheck] = useState<any | null>(null);
+  const [assetTableLoading, setAssetTableLoading] = useState(false);
+
+  const checkAssetTables = async () => {
+    try {
+      setAssetTableLoading(true);
+      const res = await authenticatedFetch('/admin/diagnostic/asset-tables');
+      if (!res.ok) throw new Error(await res.text());
+      setAssetTableCheck(await res.json());
+    } catch (err: any) {
+      toast.error(`Asset table check failed: ${err.message}`);
+    } finally {
+      setAssetTableLoading(false);
+    }
+  };
+
   const loadTenantSummary = async () => {
     try {
       setTenantSummaryLoading(true);
@@ -191,6 +207,51 @@ export function DiagnosticPage() {
               {repairResult.errors?.length > 0 && (
                 <div className="mt-2 text-red-700 text-xs">{repairResult.errors.join('; ')}</div>
               )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Asset Table Discrepancy Check */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Database className="w-5 h-5" />
+            Asset Table vs View Check
+          </CardTitle>
+          <CardDescription>
+            Checks whether mobile-created assets are going into the same table the asset list reads from. Run this if field users can see their own assets but admin cannot.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Button variant="outline" onClick={checkAssetTables} disabled={assetTableLoading}>
+            <Database className="w-4 h-4 mr-2" />
+            {assetTableLoading ? 'Checking…' : 'Check Asset Tables'}
+          </Button>
+
+          {assetTableCheck && (
+            <div className="space-y-3 text-sm">
+              <div className={`p-3 rounded border ${assetTableCheck.diagnosis?.includes('mismatch') ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+                <div className="font-semibold">Diagnosis</div>
+                <div>{assetTableCheck.diagnosis}</div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: 'View (tams360_assets_v)', data: assetTableCheck.view_tams360_assets_v },
+                  { label: 'Public table (tams360_assets)', data: assetTableCheck.table_public_tams360_assets },
+                  { label: 'Schema table (tams360.assets)', data: assetTableCheck.schema_tams360_assets },
+                ].map(({ label, data }) => (
+                  <div key={label} className="p-2 bg-slate-50 rounded border">
+                    <div className="font-medium text-xs mb-1">{label}</div>
+                    <div className="text-lg font-bold">{data?.count ?? '—'}</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {(data?.recent || []).slice(0, 3).map((r: any) => (
+                        <div key={r.asset_id}>{r.asset_ref}</div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>
