@@ -43,6 +43,8 @@ import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from "../../utils/off
 import { resolveAssetCoordinates } from "../../utils/assetDisplay";
 import { captureBestGpsFix } from "../../utils/gpsCapture";
 import { toast } from "sonner";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
+import { projectId } from "../../../../utils/supabase/info";
 
 // Asset type icon SVG paths
 const ASSET_ICON_SHAPES = {
@@ -183,6 +185,8 @@ export default function MobileMapPage() {
   const [mapLayer, setMapLayer] = useState<"street" | "satellite" | "hybrid">("street");
   const [clusteringEnabled, setClusteringEnabled] = useState(true);
   const [dragMode, setDragMode] = useState(false);
+  const [assetToDelete, setAssetToDelete] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
   
@@ -479,17 +483,31 @@ export default function MobileMapPage() {
         });
       }
 
+      const assetId = asset.asset_id || asset.id;
+      const safeid = (assetId || '').replace(/[^a-zA-Z0-9]/g, '_');
+
       const popupContent = `
         <div class="min-w-[200px] p-2">
           <div class="font-semibold text-sm mb-1">${asset.asset_ref}</div>
-          <div class="text-xs mb-2">${asset.description}</div>
+          <div class="text-xs mb-2">${asset.description || ''}</div>
           <div class="flex flex-wrap gap-1 mb-2">
-            <span class="inline-flex items-center rounded-md border px-2 py-0.5 text-xs">${asset.asset_type_name}</span>
+            <span class="inline-flex items-center rounded-md border px-2 py-0.5 text-xs">${asset.asset_type_name || ''}</span>
             ${asset.latest_ci ? `<span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs bg-blue-100 text-blue-800">CI: ${asset.latest_ci}</span>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;margin-top:8px;">
+            <button onclick="window.viewMobileAsset_${safeid}()" style="flex:1;padding:5px 10px;background:#39AEDF;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:500;">View Details</button>
+            <button onclick="window.deleteMobileAsset_${safeid}()" style="padding:5px 10px;background:white;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-size:12px;" title="Delete">🗑</button>
           </div>
         </div>
       `;
-      
+
+      (window as any)[`viewMobileAsset_${safeid}`] = () => {
+        if (!dragMode) setSelectedAsset(asset);
+      };
+      (window as any)[`deleteMobileAsset_${safeid}`] = () => {
+        setAssetToDelete(asset);
+      };
+
       marker.bindPopup(popupContent);
       marker.on('click', () => {
         if (!dragMode) setSelectedAsset(asset);
@@ -522,6 +540,32 @@ export default function MobileMapPage() {
       }
     };
   }, [filteredAssets, colorMode, clusteringEnabled, dragMode]);
+
+  const handleDeleteConfirm = async () => {
+    if (!assetToDelete || !accessToken) return;
+    const assetId = assetToDelete.asset_id || assetToDelete.id;
+    const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-c894a9ff`;
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (response.ok) {
+        setAssets(prev => prev.filter((a: any) => (a.asset_id || a.id) !== assetId));
+        if (selectedAsset && (selectedAsset as any).asset_id === assetId) setSelectedAsset(null);
+        toast.success(`Asset ${assetToDelete.asset_ref} deleted`);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to delete asset');
+      }
+    } catch {
+      toast.error('Network error: could not delete asset');
+    } finally {
+      setIsDeleting(false);
+      setAssetToDelete(null);
+    }
+  };
 
   const handleAssetMove = async (asset: any, lat: number, lng: number) => {
     const { projectId } = await import("../../../../utils/supabase/info");
@@ -931,6 +975,30 @@ export default function MobileMapPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Asset Confirmation */}
+      <AlertDialog open={!!assetToDelete} onOpenChange={(open) => { if (!open) setAssetToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Asset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete{' '}
+              <span className="font-semibold">{assetToDelete?.asset_ref}</span>
+              {assetToDelete?.asset_type_name ? ` (${assetToDelete.asset_type_name})` : ''}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
