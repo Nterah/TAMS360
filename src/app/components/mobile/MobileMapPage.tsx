@@ -333,6 +333,21 @@ export default function MobileMapPage() {
     return () => window.removeEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
   }, [accessToken, tenantId]);
 
+  // Fly to asset from ?assetId query param
+  useEffect(() => {
+    const targetId = searchParams.get('assetId');
+    if (!targetId || assets.length === 0 || !mapRef.current) return;
+
+    const target = assets.find((a: any) => (a.asset_id || a.id) === targetId);
+    if (!target) return;
+
+    const coords = resolveAssetCoordinates(target, { rejectNullIsland: true });
+    if (!coords) return;
+
+    setSelectedAsset(target);
+    mapRef.current.flyTo([coords.lat, coords.lng], 18, { animate: true, duration: 1 });
+  }, [assets, searchParams]);
+
   // Get user's location
   useEffect(() => {
     void requestUserLocation({ centerMap: true });

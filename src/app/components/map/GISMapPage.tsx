@@ -1,4 +1,5 @@
 import { useState, useContext, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import L from "leaflet";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -38,6 +39,7 @@ const DEFAULT_ZOOM = 13;
 
 export default function GISMapPage() {
   const { user, accessToken } = useContext(AuthContext);
+  const [searchParams] = useSearchParams();
   const [assets, setAssets] = useState<any[]>([]);
   const [totalAssetCount, setTotalAssetCount] = useState<number>(0);
   const [selectedAsset, setSelectedAsset] = useState<any>(null);
@@ -122,6 +124,22 @@ export default function GISMapPage() {
     window.addEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
     return () => window.removeEventListener(ASSETS_CHANGED_EVENT, handleAssetsChanged);
   }, [accessToken]);
+
+  // Fly to asset from ?assetId query param
+  useEffect(() => {
+    const targetId = searchParams.get('assetId');
+    if (!targetId || assets.length === 0) return;
+
+    const target = assets.find((a: any) => (a.asset_id || a.id) === targetId);
+    if (!target) return;
+
+    const coords = resolveAssetCoordinates(target, { rejectNullIsland: true });
+    if (!coords) return;
+
+    setSelectedAsset(target);
+    setMapCenter([coords.lat, coords.lng]);
+    setMapZoom(18);
+  }, [assets, searchParams]);
 
   // Dynamically initialize layer visibility when assets change
   useEffect(() => {
