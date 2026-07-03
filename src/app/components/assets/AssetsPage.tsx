@@ -340,12 +340,26 @@ export default function AssetsPage() {
   const filteredAssets = assets
     .filter((asset) => {
       // Search term filter
-      const matchesSearch =
-        asset.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        asset.asset_type_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        asset.asset_ref?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        asset.road_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        asset.road_number?.toLowerCase().includes(searchTerm.toLowerCase());
+      const q = searchTerm.toLowerCase();
+      const matchesSearch = !q || [
+        asset.asset_ref,
+        asset.asset_id,
+        asset.referenceNumber,
+        asset.reference_number,
+        asset.asset_name,
+        asset.name,
+        asset.description,
+        asset.metadata?.description,
+        asset.asset_type_name,
+        asset.road_name,
+        asset.road_number,
+        asset.region,
+        asset.depot,
+        asset.owner_entity,
+        asset.metadata?.road_subsection,
+        asset.metadata?.direction,
+        asset.metadata?.road_side,
+      ].some((v) => v?.toString().toLowerCase().includes(q));
 
       // Asset type filter
       const matchesAssetType =
@@ -399,6 +413,9 @@ export default function AssetsPage() {
           !asset.responsible_party_name
         );
       })();
+
+      // When a search term is active, bypass all other filters so assets are always findable by reference
+      if (searchTerm.trim()) return matchesSearch;
 
       return (
         matchesSearch &&
