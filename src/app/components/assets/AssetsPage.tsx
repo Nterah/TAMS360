@@ -174,36 +174,14 @@ export default function AssetsPage() {
 
     // 2. Fetch page 1 — show immediately without waiting for all pages
     try {
-      const response = await fetch(`${API_URL}/assets?pageSize=500`, {
+      const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!response.ok) { if (!cached) setLoading(false); return; }
       const data = await response.json();
-      const firstPage = (data.assets || []).map(normaliseAssetForDisplay);
-
-      // Show page 1 right away (fast first paint)
-      applyAssets(firstPage, data.total || firstPage.length);
-
-      // 3. Fetch remaining pages in parallel (background)
-      if (data.totalPages > 1) {
-        const pages = Array.from({ length: data.totalPages - 1 }, (_, i) => i + 2);
-        const rest = await Promise.all(
-          pages.map((p) =>
-            fetch(`${API_URL}/assets?page=${p}&pageSize=500`, {
-              headers: { Authorization: `Bearer ${accessToken}` },
-            }).then((r) => (r.ok ? r.json() : null))
-          )
-        );
-        const allAssets = [
-          ...firstPage,
-          ...rest.flatMap((d) => (d?.assets || []).map(normaliseAssetForDisplay)),
-        ];
-        applyAssets(allAssets, data.total || allAssets.length);
-        // Cache the complete dataset
-        setCacheEntry("assets_list_v2", { assets: allAssets, total: data.total || allAssets.length });
-      } else {
-        setCacheEntry("assets_list_v2", { assets: firstPage, total: data.total || firstPage.length });
-      }
+      const allAssets = (data.assets || []).map(normaliseAssetForDisplay);
+      applyAssets(allAssets, data.total || allAssets.length);
+      setCacheEntry("assets_list_v2", { assets: allAssets, total: data.total || allAssets.length });
     } catch (error) {
       console.error("Error fetching assets:", error);
       if (!cached) setLoading(false);
