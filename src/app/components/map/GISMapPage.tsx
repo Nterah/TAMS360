@@ -1356,6 +1356,7 @@ export default function GISMapPage() {
                     draggable={dragMode}
                     onAssetMove={handleAssetMove}
                     onDeleteAsset={setAssetToDelete}
+                    highlightAssetId={searchParams.get('assetId') || undefined}
                   />
                 </div>
 

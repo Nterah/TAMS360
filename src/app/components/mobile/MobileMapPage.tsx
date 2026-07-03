@@ -121,6 +121,38 @@ const getMarkerColor = (asset: any, colorMode: string = "ci") => {
   }
 };
 
+// Highlighted marker icon with pulsing gold ring
+const createHighlightedAssetIcon = (assetType: string, asset: any, colorMode: string = "ci") => {
+  const color = getMarkerColor(asset, colorMode);
+  const iconShape = ASSET_ICON_SHAPES[assetType as keyof typeof ASSET_ICON_SHAPES] || ASSET_ICON_SHAPES["Road Markings"];
+  return L.divIcon({
+    className: "custom-asset-marker-highlight",
+    html: `
+      <div style="position:relative;width:48px;height:60px;">
+        <div style="
+          position:absolute;top:-10px;left:-10px;
+          width:68px;height:68px;border-radius:50%;
+          background:rgba(255,215,0,0.25);
+          border:3px solid #FFD700;
+          animation:assetHighlightPulse 1.4s ease-in-out infinite;
+        "></div>
+        <div style="filter:drop-shadow(0 4px 8px rgba(0,0,0,0.5));">
+          <svg width="48" height="60" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg">
+            <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 26 16 26s16-14 16-26C32 7.2 24.8 0 16 0z"
+              fill="${color}" stroke="#FFD700" stroke-width="3" opacity="1"/>
+            <g transform="translate(8,4) scale(1)">
+              <path d="${iconShape}" fill="#fff" stroke="#fff" stroke-width="0.5" opacity="0.95"/>
+            </g>
+          </svg>
+        </div>
+      </div>
+    `,
+    iconSize: [48, 60],
+    iconAnchor: [24, 60],
+    popupAnchor: [0, -60],
+  });
+};
+
 // Create custom marker icon
 const createAssetIcon = (assetType: string, asset: any, colorMode: string = "ci") => {
   const color = getMarkerColor(asset, colorMode);
@@ -483,13 +515,21 @@ export default function MobileMapPage() {
     }
 
     // Add markers
+    const targetId = searchParams.get('assetId');
+    let highlightedMarker: L.Marker | null = null;
+
     filteredAssets.forEach(asset => {
       if (!mapRef.current) return;
       const coordinates = resolveAssetCoordinates(asset, { rejectNullIsland: true });
       if (!coordinates) return;
 
-      const icon = createAssetIcon(asset.asset_type_name, asset, colorMode);
-      const marker = L.marker([coordinates.lat, coordinates.lng], { icon, draggable: dragMode });
+      const assetId = asset.asset_id || asset.id;
+      const isHighlighted = !!targetId && assetId === targetId;
+      const icon = isHighlighted
+        ? createHighlightedAssetIcon(asset.asset_type_name, asset, colorMode)
+        : createAssetIcon(asset.asset_type_name, asset, colorMode);
+      const marker = L.marker([coordinates.lat, coordinates.lng], { icon, draggable: dragMode, zIndexOffset: isHighlighted ? 1000 : 0 });
+      if (isHighlighted) highlightedMarker = marker;
 
       if (dragMode) {
         marker.on("dragend", () => {
@@ -498,7 +538,6 @@ export default function MobileMapPage() {
         });
       }
 
-      const assetId = asset.asset_id || asset.id;
       const safeid = (assetId || '').replace(/[^a-zA-Z0-9]/g, '_');
 
       const popupContent = `
@@ -538,6 +577,11 @@ export default function MobileMapPage() {
     // Add cluster group to map
     if (clusteringEnabled && markerClusterRef.current) {
       markerClusterRef.current.addTo(mapRef.current);
+    }
+
+    // Open popup for highlighted marker
+    if (highlightedMarker) {
+      setTimeout(() => (highlightedMarker as L.Marker)?.openPopup(), 600);
     }
 
     // Center on first asset if no user location
@@ -656,6 +700,12 @@ export default function MobileMapPage() {
 
   return (
     <div className="relative h-screen">
+      <style>{`
+        @keyframes assetHighlightPulse {
+          0%, 100% { transform: scale(1); opacity: 0.8; }
+          50% { transform: scale(1.4); opacity: 0.3; }
+        }
+      `}</style>
       {/* Map Container - Explicitly set lower z-index */}
       <div ref={mapContainerRef} className="h-full w-full absolute inset-0 z-0" />
       {/* North arrow — right side, vertically centred */}

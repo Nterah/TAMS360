@@ -32,6 +32,7 @@ interface SimpleMapProps {
   draggable?: boolean;
   onAssetMove?: (asset: any, lat: number, lng: number) => void;
   onDeleteAsset?: (asset: any) => void;
+  highlightAssetId?: string;
 }
 
 // Asset type icon SVG paths (simple shapes for different asset types)
@@ -131,6 +132,45 @@ const getMarkerColor = (asset: any, colorMode: string = "condition") => {
   }
 };
 
+// Highlighted marker icon with pulsing ring for "view on map" target
+const createHighlightedAssetIcon = (assetType: string, asset: any, colorMode: string = "condition") => {
+  const color = getMarkerColor(asset, colorMode);
+  const iconShape = ASSET_ICON_SHAPES[assetType as keyof typeof ASSET_ICON_SHAPES] || ASSET_ICON_SHAPES["Road Markings"];
+  return L.divIcon({
+    className: "custom-asset-marker-highlight",
+    html: `
+      <div style="position:relative;width:48px;height:60px;">
+        <div style="
+          position:absolute;top:-10px;left:-10px;
+          width:68px;height:68px;border-radius:50%;
+          background:rgba(255,215,0,0.25);
+          border:3px solid #FFD700;
+          animation:assetHighlightPulse 1.4s ease-in-out infinite;
+        "></div>
+        <div style="filter:drop-shadow(0 4px 8px rgba(0,0,0,0.5));">
+          <svg width="48" height="60" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="shine-hl-${color.replace('#','')}" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:${color};stop-opacity:1"/>
+                <stop offset="100%" style="stop-color:${color};stop-opacity:0.7"/>
+              </linearGradient>
+            </defs>
+            <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 26 16 26s16-14 16-26C32 7.2 24.8 0 16 0z"
+              fill="url(#shine-hl-${color.replace('#','')})"
+              stroke="#FFD700" stroke-width="3" opacity="1"/>
+            <g transform="translate(8,4) scale(1)">
+              <path d="${iconShape}" fill="#fff" stroke="#fff" stroke-width="0.5" opacity="0.95"/>
+            </g>
+          </svg>
+        </div>
+      </div>
+    `,
+    iconSize: [48, 60],
+    iconAnchor: [24, 60],
+    popupAnchor: [0, -60],
+  });
+};
+
 // Create custom marker icon based on asset type and color mode
 const createAssetIcon = (assetType: string, asset: any, colorMode: string = "condition") => {
   const color = getMarkerColor(asset, colorMode);
@@ -192,6 +232,7 @@ export function SimpleMap({
   draggable = false,
   onAssetMove,
   onDeleteAsset,
+  highlightAssetId,
 }: SimpleMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -626,18 +667,27 @@ export function SimpleMap({
     // Add asset markers
     let addedCount = 0;
     const markers: L.Marker[] = [];
-    
+    let highlightedMarker: L.Marker | null = null;
+
     assets.forEach(asset => {
       const coordinates = resolveAssetCoordinates(asset, { rejectNullIsland: true });
       if (!coordinates) return;
 
+      const assetId = asset.asset_id || asset.id;
+      const isHighlighted = !!highlightAssetId && assetId === highlightAssetId;
+
       const marker = L.marker(
         [coordinates.lat, coordinates.lng],
         {
-          icon: createAssetIcon(asset.type, asset, colorMode),
+          icon: isHighlighted
+            ? createHighlightedAssetIcon(asset.type, asset, colorMode)
+            : createAssetIcon(asset.type, asset, colorMode),
           draggable,
+          zIndexOffset: isHighlighted ? 1000 : 0,
         }
       );
+
+      if (isHighlighted) highlightedMarker = marker;
 
       // Use enhanced popup with photos and updated fields
       createEnhancedPopup(asset, marker);
@@ -714,6 +764,11 @@ export function SimpleMap({
       console.log(`SimpleMap: Added ${addedCount} markers without clustering`);
     }
 
+    // Open popup for highlighted marker after a short delay
+    if (highlightedMarker) {
+      setTimeout(() => highlightedMarker?.openPopup(), 600);
+    }
+
     // Add user location marker
     if (userLocation) {
       const userMarker = L.marker(
@@ -764,20 +819,18 @@ export function SimpleMap({
       userMarkerRef.current = userMarker;
       console.log(`SimpleMap: Added user location marker`);
     }
-  }, [assets, userLocation, onAssetClick, colorMode, clusteringEnabled, accessToken, draggable, onAssetMove]);
+  }, [assets, userLocation, onAssetClick, colorMode, clusteringEnabled, accessToken, draggable, onAssetMove, highlightAssetId]);
 
   return (
     <>
       <style>{`
         @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-            transform: translate(-50%, -50%) scale(1);
-          }
-          50% {
-            opacity: 0.5;
-            transform: translate(-50%, -50%) scale(1.5);
-          }
+          0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          50% { opacity: 0.5; transform: translate(-50%, -50%) scale(1.5); }
+        }
+        @keyframes assetHighlightPulse {
+          0%, 100% { transform: scale(1); opacity: 0.8; }
+          50% { transform: scale(1.4); opacity: 0.3; }
         }
       `}</style>
       <div style={{ position: "relative", height: "100%", width: "100%" }}>
