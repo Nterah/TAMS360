@@ -174,12 +174,29 @@ export default function AssetsPage() {
 
     // 2. Fetch page 1 — show immediately without waiting for all pages
     try {
-      const response = await fetch(`${API_URL}/assets?pageSize=5000`, {
+      const response = await fetch(`${API_URL}/assets?pageSize=500`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!response.ok) { if (!cached) setLoading(false); return; }
       const data = await response.json();
-      const allAssets = (data.assets || []).map(normaliseAssetForDisplay);
+      const firstPage = (data.assets || []).map(normaliseAssetForDisplay);
+
+      // Fetch all remaining pages before showing results, so search works on the full dataset
+      let allAssets = firstPage;
+      if (data.totalPages > 1) {
+        const pages = Array.from({ length: data.totalPages - 1 }, (_, i) => i + 2);
+        const rest = await Promise.all(
+          pages.map((p) =>
+            fetch(`${API_URL}/assets?page=${p}&pageSize=500`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }).then((r) => (r.ok ? r.json() : null))
+          )
+        );
+        allAssets = [
+          ...firstPage,
+          ...rest.flatMap((d) => (d?.assets || []).map(normaliseAssetForDisplay)),
+        ];
+      }
       applyAssets(allAssets, data.total || allAssets.length);
       setCacheEntry("assets_list_v2", { assets: allAssets, total: data.total || allAssets.length });
     } catch (error) {
