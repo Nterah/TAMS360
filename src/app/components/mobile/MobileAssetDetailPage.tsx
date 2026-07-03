@@ -303,16 +303,14 @@ export default function MobileAssetDetailPage() {
             <Badge className={getConditionColor(asset.condition)}>
               {asset.condition}
             </Badge>
-            {(asset.gps_lat || asset.latitude) && (
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => navigate(`/mobile/map?assetId=${assetId}`)}
-                title="View on Map"
-              >
-                <MapPin className="w-4 h-4" />
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => navigate(`/mobile/map?assetId=${assetId}`)}
+              title="View on Map"
+            >
+              <MapPin className="w-4 h-4" />
+            </Button>
             <Button
               variant="outline"
               size="icon"

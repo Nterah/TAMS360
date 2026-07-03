@@ -463,12 +463,10 @@ export default function AssetDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {(asset.gps_lat || asset.latitude) && (
-            <Button variant="outline" onClick={() => navigate(`/map?assetId=${assetId}`)}>
-              <MapPin className="w-4 h-4 mr-2" />
-              View on Map
-            </Button>
-          )}
+          <Button variant="outline" onClick={() => navigate(`/map?assetId=${assetId}`)}>
+            <MapPin className="w-4 h-4 mr-2" />
+            View on Map
+          </Button>
           <Button variant="outline" onClick={() => navigate(`/assets/${assetId}/edit`)}>
             <Edit className="w-4 h-4 mr-2" />
             Edit Asset
