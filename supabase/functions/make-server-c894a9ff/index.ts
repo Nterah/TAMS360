@@ -4224,7 +4224,7 @@ app.patch("/make-server-c894a9ff/assets/:id", async (c) => {
 
     // Fields stored in metadata JSONB (no dedicated columns)
     const metadataFields = [
-      "condition", "asset_name",
+      "condition", "asset_name", "direction", "road_side", "orientation", "ward",
       "mounting_type", "number_of_posts_supports", "number_of_beams",
       "width_m", "length_m", "height_m", "orientation_position",
     ];

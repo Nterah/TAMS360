@@ -9,6 +9,16 @@ import { Map, LayoutGrid, RefreshCw, Maximize2, Minimize2, AlertCircle } from 'l
 import { toast } from 'sonner';
 import { projectId } from '../../../../utils/supabase/info';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from '../../utils/offlineAssets';
 import { resolveAssetCoordinates } from '../../utils/assetDisplay';
 
@@ -19,6 +29,8 @@ export default function AssetsMapPage() {
   const [loading, setLoading] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assetToDelete, setAssetToDelete] = useState<Asset | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Filter state
   const [filters, setFilters] = useState<MapFilterState>({
@@ -191,6 +203,34 @@ export default function AssetsMapPage() {
     navigate(`/assets/${asset.asset_id || asset.id}`);
   };
 
+  const handleDeleteAsset = (asset: Asset) => {
+    setAssetToDelete(asset);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!assetToDelete || !accessToken) return;
+    const assetId = assetToDelete.asset_id || assetToDelete.id;
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (response.ok) {
+        setAssets(prev => prev.filter(a => (a.asset_id || a.id) !== assetId));
+        toast.success(`Asset ${assetToDelete.asset_ref} deleted`);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to delete asset');
+      }
+    } catch {
+      toast.error('Network error: could not delete asset');
+    } finally {
+      setIsDeleting(false);
+      setAssetToDelete(null);
+    }
+  };
+
   return (
     <div className={`space-y-6 ${isFullscreen ? 'fixed inset-0 z-50 bg-white p-6' : ''}`}>
       {/* Header */}
@@ -327,6 +367,7 @@ export default function AssetsMapPage() {
                   <AssetMap
                     assets={filteredAssets}
                     onViewAsset={handleViewAsset}
+                    onDeleteAsset={handleDeleteAsset}
                   />
                 </div>
               )}
@@ -429,6 +470,30 @@ export default function AssetsMapPage() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!assetToDelete} onOpenChange={(open) => { if (!open) setAssetToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Asset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete{' '}
+              <span className="font-semibold">{assetToDelete?.asset_ref}</span>
+              {assetToDelete?.asset_type ? ` (${assetToDelete.asset_type})` : ''}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

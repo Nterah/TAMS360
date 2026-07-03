@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet.markercluster';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
-import { MapPin, Eye } from 'lucide-react';
+import { MapPin, Eye, Trash2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { createRoot } from 'react-dom/client';
 import { resolveAssetCoordinates } from '../utils/assetDisplay';
@@ -97,15 +97,17 @@ const getCIColor = (ci?: number) => {
 interface AssetMapProps {
   assets: Asset[];
   onViewAsset?: (asset: Asset) => void;
+  onDeleteAsset?: (asset: Asset) => void;
   center?: [number, number];
   zoom?: number;
 }
 
-export function AssetMap({ 
-  assets, 
+export function AssetMap({
+  assets,
   onViewAsset,
+  onDeleteAsset,
   center = [-26.2041, 28.0473], // Johannesburg, South Africa
-  zoom = 12 
+  zoom = 12
 }: AssetMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -296,22 +298,36 @@ export function AssetMap({
         </div>
       `;
 
-      // Add button if onViewAsset is provided
-      if (onViewAsset) {
+      // Add action buttons
+      if (onViewAsset || onDeleteAsset) {
         const buttonContainer = document.createElement('div');
-        buttonContainer.className = 'mt-2';
+        buttonContainer.className = 'mt-2 flex gap-2';
         popupContent.querySelector('.space-y-2')?.appendChild(buttonContainer);
 
         const root = createRoot(buttonContainer);
         root.render(
-          <Button
-            onClick={() => onViewAsset(asset)}
-            className="w-full bg-[#39AEDF] hover:bg-[#2A9ECF] text-white"
-            size="sm"
-          >
-            <Eye className="w-4 h-4 mr-1" />
-            View Details
-          </Button>
+          <>
+            {onViewAsset && (
+              <Button
+                onClick={() => onViewAsset(asset)}
+                className="flex-1 bg-[#39AEDF] hover:bg-[#2A9ECF] text-white"
+                size="sm"
+              >
+                <Eye className="w-4 h-4 mr-1" />
+                View Details
+              </Button>
+            )}
+            {onDeleteAsset && (
+              <Button
+                onClick={() => onDeleteAsset(asset)}
+                variant="outline"
+                className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                size="sm"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            )}
+          </>
         );
       }
 

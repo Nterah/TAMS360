@@ -53,8 +53,6 @@ export default function EditAssetPage() {
 
       if (assetData.roadNumber  !== undefined) updates.road_number   = assetData.roadNumber  || null;
       if (assetData.roadName    !== undefined) updates.road_name     = assetData.roadName    || null;
-      if (assetData.direction   !== undefined) updates.direction     = assetData.direction   || null;
-      if (assetData.road_side   !== undefined) updates.road_side     = assetData.road_side   || null;
       if (assetData.region      !== undefined) updates.region        = assetData.region      || null;
       if (assetData.depot       !== undefined) updates.depot         = assetData.depot       || null;
       if (assetData.installDate !== undefined) updates.install_date  = assetData.installDate || null;
@@ -104,6 +102,8 @@ export default function EditAssetPage() {
       const metaUpdates: Record<string, any> = {};
       if (assetData.name      !== undefined) metaUpdates.asset_name             = assetData.name;
       if (assetData.condition !== undefined) metaUpdates.condition               = assetData.condition;
+      if (assetData.direction !== undefined) metaUpdates.direction               = assetData.direction;
+      if (assetData.road_side !== undefined) metaUpdates.road_side               = assetData.road_side;
       if (assetData.mounting_type             !== undefined) metaUpdates.mounting_type             = assetData.mounting_type;
       if (assetData.number_of_posts_supports  !== undefined) metaUpdates.number_of_posts_supports  = assetData.number_of_posts_supports;
       if (assetData.number_of_beams           !== undefined) metaUpdates.number_of_beams           = assetData.number_of_beams;

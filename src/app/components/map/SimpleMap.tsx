@@ -31,6 +31,7 @@ interface SimpleMapProps {
   accessToken?: string;
   draggable?: boolean;
   onAssetMove?: (asset: any, lat: number, lng: number) => void;
+  onDeleteAsset?: (asset: any) => void;
 }
 
 // Asset type icon SVG paths (simple shapes for different asset types)
@@ -190,6 +191,7 @@ export function SimpleMap({
   accessToken = publicAnonKey,
   draggable = false,
   onAssetMove,
+  onDeleteAsset,
 }: SimpleMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -402,9 +404,42 @@ export function SimpleMap({
             </div>
           </div>
           
+          <div style="margin-top: 10px; display: flex; gap: 6px;">
+            <button
+              onclick="window.viewAsset_${assetId.replace(/[^a-zA-Z0-9]/g, '_')}()"
+              style="
+                flex: 1;
+                padding: 6px 12px;
+                background: #39AEDF;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                font-weight: 500;
+              "
+            >View Details</button>
+            ${onDeleteAsset ? `
+            <button
+              onclick="window.deleteAsset_${assetId.replace(/[^a-zA-Z0-9]/g, '_')}()"
+              style="
+                padding: 6px 10px;
+                background: white;
+                color: #dc2626;
+                border: 1px solid #fca5a5;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                font-weight: 500;
+              "
+              title="Delete asset"
+            >🗑</button>
+            ` : ''}
+          </div>
+
           ${allDisplayPhotos.length > 0 ? `
             <div style="margin-top: 8px;">
-              <button 
+              <button
                 onclick="window.togglePhotos_${assetId.replace(/[^a-zA-Z0-9]/g, '_')}()"
                 style="
                   width: 100%;
@@ -461,6 +496,16 @@ export function SimpleMap({
     }).setContent(createPopupHtml());
     
     marker.bindPopup(popup);
+
+    // Register view/delete global handlers immediately (before popupopen)
+    (window as any)[`viewAsset_${assetId.replace(/[^a-zA-Z0-9]/g, '_')}`] = () => {
+      onAssetClick(asset);
+    };
+    if (onDeleteAsset) {
+      (window as any)[`deleteAsset_${assetId.replace(/[^a-zA-Z0-9]/g, '_')}`] = () => {
+        onDeleteAsset(asset);
+      };
+    }
 
     // When popup opens, fetch photos, inspection, and maintenance data
     marker.on('popupopen', async () => {

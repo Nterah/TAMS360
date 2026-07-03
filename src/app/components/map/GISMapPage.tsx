@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Checkbox } from "../ui/checkbox";
 import { Label } from "../ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { Textarea } from "../ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { toast } from "sonner";
@@ -50,6 +51,8 @@ export default function GISMapPage() {
   const [mapLayer, setMapLayer] = useState<"street" | "satellite" | "hybrid">("street");
   const [clusteringEnabled, setClusteringEnabled] = useState(true);
   const [dragMode, setDragMode] = useState(false);
+  const [assetToDelete, setAssetToDelete] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const [filters, setFilters] = useState({
     type: "all",
@@ -631,6 +634,33 @@ export default function GISMapPage() {
       toast.success(`${asset.asset_ref || "Asset"} moved and saved`);
     } catch {
       toast.error("Failed to save new position — marker will reset on refresh");
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!assetToDelete || !accessToken) return;
+    const assetId = assetToDelete.asset_id || assetToDelete.id;
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`${API_URL}/assets/${assetId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (response.ok) {
+        setAssets(prev => prev.filter((a: any) => (a.asset_id || a.id) !== assetId));
+        if (selectedAsset && (selectedAsset.asset_id || selectedAsset.id) === assetId) {
+          setSelectedAsset(null);
+        }
+        toast.success(`Asset ${assetToDelete.asset_ref || assetToDelete.asset_name || assetToDelete.name} deleted`);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        toast.error(data.error || 'Failed to delete asset');
+      }
+    } catch {
+      toast.error('Network error: could not delete asset');
+    } finally {
+      setIsDeleting(false);
+      setAssetToDelete(null);
     }
   };
 
@@ -1307,6 +1337,7 @@ export default function GISMapPage() {
                     accessToken={accessToken || publicAnonKey}
                     draggable={dragMode}
                     onAssetMove={handleAssetMove}
+                    onDeleteAsset={setAssetToDelete}
                   />
                 </div>
 
@@ -1652,6 +1683,32 @@ export default function GISMapPage() {
           )}
         </div>
       </div>
+
+      {/* Delete Asset Confirmation */}
+      <AlertDialog open={!!assetToDelete} onOpenChange={(open) => { if (!open) setAssetToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Asset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete{' '}
+              <span className="font-semibold">
+                {assetToDelete?.asset_ref || assetToDelete?.asset_name || assetToDelete?.name}
+              </span>
+              {assetToDelete?.type ? ` (${assetToDelete.type})` : ''}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
