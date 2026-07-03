@@ -186,7 +186,7 @@ export default function AssetsPage() {
 
       // 3. Fetch remaining pages in parallel (background)
       if (data.totalPages > 1) {
-        const pages = Array.from({ length: Math.min(data.totalPages, 4) - 1 }, (_, i) => i + 2);
+        const pages = Array.from({ length: data.totalPages - 1 }, (_, i) => i + 2);
         const rest = await Promise.all(
           pages.map((p) =>
             fetch(`${API_URL}/assets?page=${p}&pageSize=500`, {
