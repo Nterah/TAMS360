@@ -293,7 +293,8 @@ export default function MobileAssetsPage() {
         window.dispatchEvent(new CustomEvent(ASSETS_CHANGED_EVENT));
         setAssets((prev) => prev.filter((a) => (a as any).asset_id !== (asset as any).asset_id && a.id !== asset.id));
       } else {
-        toast.error("Failed to delete asset");
+        const errorData = await response.json().catch(() => null);
+        toast.error(errorData?.error || "Failed to delete asset");
       }
     } catch {
       toast.error("Error deleting asset");

@@ -45,6 +45,37 @@ const DIRECTIONS = ["NB", "SB", "EB", "WB"]; // North, South, East, West Bound
 const ROAD_SIDES = ["LHS", "RHS"]; // Left Hand Side, Right Hand Side
 
 const ASSET_TYPES = Object.keys(ASSET_TYPE_ABBREVIATIONS);
+
+/**
+ * Swaps the direction and road-side segments of an existing asset reference
+ * (format: {TYPE}-{ROAD}-{DIRECTION}[-{SIDE}]-{SEQ}) to match the current
+ * form values, without disturbing the type, road name or sequence segments.
+ * Handles adding/removing the optional SIDE segment.
+ */
+function regenerateEditRef(originalRef: string, direction: string, roadSide: string): string {
+  if (!originalRef) return originalRef;
+
+  const parts = originalRef.split("-");
+  const dirIdx = parts.findIndex((p) => DIRECTIONS.includes(p.toUpperCase()));
+  const sideIdx = parts.findIndex((p) => ROAD_SIDES.includes(p.toUpperCase()));
+  const newSide = roadSide && roadSide !== "none" ? roadSide : "";
+
+  if (dirIdx !== -1 && direction) {
+    parts[dirIdx] = direction;
+  }
+
+  if (sideIdx !== -1) {
+    if (newSide) {
+      parts[sideIdx] = newSide;
+    } else {
+      parts.splice(sideIdx, 1);
+    }
+  } else if (newSide && dirIdx !== -1) {
+    parts.splice(dirIdx + 1, 0, newSide);
+  }
+
+  return parts.join("-");
+}
 const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"];
 const STATUSES = ["Active", "Inactive", "Needs Maintenance", "Scheduled for Replacement"];
 
@@ -102,6 +133,10 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
 
   // Tracks whether the user manually typed a sequential number (suppresses auto-fetch)
   const seqNumManuallyEdited = useRef(false);
+
+  // Stores the original asset_ref as loaded in edit mode, so direction/side
+  // segments can be swapped in place without disturbing type/road/seq parts.
+  const originalEditRef = useRef("");
 
   // Other asset fields
   const [assetName, setAssetName] = useState("");
@@ -173,10 +208,11 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     setLongitude(String(initialValues.gps_lng ?? initialValues.longitude ?? ""));
     setEndLatitude(String(initialValues.end_latitude ?? initialValues.endLatitude ?? ""));
     setEndLongitude(String(initialValues.end_longitude ?? initialValues.endLongitude ?? ""));
-    setGeneratedAssetRef(initialValues.asset_ref || initialValues.referenceNumber || "");
+    const ref = initialValues.asset_ref || initialValues.referenceNumber || "";
+    setGeneratedAssetRef(ref);
+    originalEditRef.current = ref;
 
     // Pre-populate direction and road side — from metadata, direct column, or parsed from asset_ref
-    const ref = initialValues.asset_ref || "";
     const refParts = ref.split("-");
     const parsedDirection = refParts.find((p: string) => DIRECTIONS.includes(p.toUpperCase()))?.toUpperCase() || "";
     const parsedRoadSide = refParts.find((p: string) => ROAD_SIDES.includes(p.toUpperCase()))?.toUpperCase() || "";
@@ -199,6 +235,14 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     if (mode === "edit") return;
     generateAssetReference();
   }, [assetType, roadName, roadSubsection, direction, roadSide, sequentialNumber]);
+
+  // Edit mode: keep the asset reference's direction/side segments in sync with
+  // the form fields so, e.g., changing LHS -> RHS is reflected in the asset
+  // name/reference shown on maps and lists, without altering the type/road/seq parts.
+  useEffect(() => {
+    if (mode !== "edit" || !originalEditRef.current) return;
+    setGeneratedAssetRef(regenerateEditRef(originalEditRef.current, direction, roadSide));
+  }, [mode, direction, roadSide]);
 
   // Reset manual-edit flag whenever prefix fields change so auto-compute re-runs.
   useEffect(() => {
@@ -400,7 +444,7 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
           <div>
             <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Asset Reference</p>
             <p className="text-lg font-mono font-bold mt-1">{generatedAssetRef}</p>
-            <p className="text-xs text-muted-foreground mt-1">Asset reference cannot be changed after creation</p>
+            <p className="text-xs text-muted-foreground mt-1">Updates automatically if direction or road side change below</p>
           </div>
           <Badge variant="default" className="text-base font-mono">{generatedAssetRef}</Badge>
         </div>

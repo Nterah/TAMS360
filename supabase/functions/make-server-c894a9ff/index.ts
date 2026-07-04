@@ -4279,16 +4279,21 @@ app.delete("/make-server-c894a9ff/assets/:id", async (c) => {
 
     const assetId = c.req.param("id");
 
-    // Delete from database. Admin can delete any asset; field users can only delete their own.
-    let deleteQuery = supabase.from("tams360_assets").delete().eq("asset_id", assetId);
-    if (userProfile.role !== "admin") {
-      deleteQuery = deleteQuery.eq("created_by", userData.user.id);
-    }
-    const { error: dbError } = await deleteQuery;
+    // Any authenticated user in the organisation may delete any asset —
+    // there is no created_by restriction, matching admin's existing behavior.
+    const { data: deletedRows, error: dbError } = await supabase
+      .from("tams360_assets")
+      .delete()
+      .eq("asset_id", assetId)
+      .select("asset_id");
 
     if (dbError) {
       console.error("Error deleting asset from database:", dbError);
       return c.json({ error: "Failed to delete asset", details: dbError.message }, 500);
+    }
+
+    if (!deletedRows || deletedRows.length === 0) {
+      return c.json({ error: "Asset not found" }, 404);
     }
 
     // Also remove from KV store (legacy, may not exist)

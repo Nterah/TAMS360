@@ -528,7 +528,8 @@ export default function AssetsPage() {
         window.dispatchEvent(new CustomEvent(ASSETS_CHANGED_EVENT));
         fetchAssets();
       } else {
-        toast.error("Failed to delete asset");
+        const errorData = await response.json().catch(() => null);
+        toast.error(errorData?.error || "Failed to delete asset");
       }
     } catch (error) {
       toast.error("Error deleting asset");

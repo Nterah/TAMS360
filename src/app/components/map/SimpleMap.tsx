@@ -25,6 +25,9 @@ interface SimpleMapProps {
   userLocation: { lat: number; lng: number } | null;
   onAssetClick: (asset: any) => void;
   onNavigate: (asset: any) => void;
+  // Called when the popup's "View Details" button is clicked — should take the
+  // user to the full asset detail page. Falls back to onAssetClick if omitted.
+  onViewAsset?: (asset: any) => void;
   colorMode?: "condition" | "ci" | "urgency" | "status" | "region" | "ward" | "depot" | "owner";
   mapLayer?: "street" | "satellite" | "hybrid";
   clusteringEnabled?: boolean;
@@ -225,6 +228,7 @@ export function SimpleMap({
   userLocation,
   onAssetClick,
   onNavigate,
+  onViewAsset,
   colorMode = "condition",
   mapLayer = "street",
   clusteringEnabled = true,
@@ -540,7 +544,7 @@ export function SimpleMap({
 
     // Register view/delete global handlers immediately (before popupopen)
     (window as any)[`viewAsset_${assetId.replace(/[^a-zA-Z0-9]/g, '_')}`] = () => {
-      onAssetClick(asset);
+      (onViewAsset || onAssetClick)(asset);
     };
     if (onDeleteAsset) {
       (window as any)[`deleteAsset_${assetId.replace(/[^a-zA-Z0-9]/g, '_')}`] = () => {
@@ -819,7 +823,7 @@ export function SimpleMap({
       userMarkerRef.current = userMarker;
       console.log(`SimpleMap: Added user location marker`);
     }
-  }, [assets, userLocation, onAssetClick, colorMode, clusteringEnabled, accessToken, draggable, onAssetMove, highlightAssetId]);
+  }, [assets, userLocation, onAssetClick, onViewAsset, colorMode, clusteringEnabled, accessToken, draggable, onAssetMove, highlightAssetId]);
 
   return (
     <>

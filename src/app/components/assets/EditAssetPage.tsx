@@ -51,6 +51,12 @@ export default function EditAssetPage() {
       // Build update payload using real tams360_assets column names
       const updates: Record<string, any> = {};
 
+      // Regenerated reference reflects direction/road-side changes made in the form;
+      // persist it so the asset name shown on maps/lists stays in sync.
+      if (assetData.referenceNumber && assetData.referenceNumber !== asset?.asset_ref) {
+        updates.asset_ref = assetData.referenceNumber;
+      }
+
       if (assetData.roadNumber  !== undefined) updates.road_number   = assetData.roadNumber  || null;
       if (assetData.roadName    !== undefined) updates.road_name     = assetData.roadName    || null;
       if (assetData.region      !== undefined) updates.region        = assetData.region      || null;

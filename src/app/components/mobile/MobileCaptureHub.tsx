@@ -1,4 +1,4 @@
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Camera, ClipboardCheck, MapPin, Plus, ScanLine, Navigation, CheckCircle2, Clock, AlertCircle, Loader2, Wrench } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -60,6 +60,26 @@ export default function MobileCaptureHub() {
       setSyncing(false);
     }
   };
+
+  // Auto-sync when the device is (or comes back) online and there is pending
+  // data — removes the need to tap "Sync Now" manually.
+  useEffect(() => {
+    if (!accessToken) return;
+
+    const autoSync = () => {
+      const { total } = getPendingCounts();
+      if (total > 0 && navigator.onLine && !syncing) {
+        handleSync();
+      }
+    };
+
+    // Try once on mount (covers "already online with pending items")
+    autoSync();
+
+    // Try again whenever the browser regains connectivity
+    window.addEventListener("online", autoSync);
+    return () => window.removeEventListener("online", autoSync);
+  }, [accessToken]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 pb-20">

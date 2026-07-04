@@ -1,5 +1,5 @@
 import { useState, useContext, useEffect, useMemo, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import L from "leaflet";
 import { AuthContext } from "../../App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -39,6 +39,7 @@ const DEFAULT_ZOOM = 13;
 
 export default function GISMapPage() {
   const { user, accessToken } = useContext(AuthContext);
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [assets, setAssets] = useState<any[]>([]);
   const [totalAssetCount, setTotalAssetCount] = useState<number>(0);
@@ -1348,6 +1349,7 @@ export default function GISMapPage() {
                     assets={filteredAssets}
                     userLocation={userLocation}
                     onAssetClick={setSelectedAsset}
+                    onViewAsset={(asset) => navigate(`/assets/${asset.asset_id || asset.id}`)}
                     onNavigate={navigateToAsset}
                     colorMode={colorMode}
                     mapLayer={mapLayer}
@@ -1600,8 +1602,14 @@ export default function GISMapPage() {
                     <Route className="w-3 h-3 mr-1" />
                     Navigate Here
                   </Button>
-                  <Button size="sm" variant="outline">View History</Button>
                   <Button size="sm" variant="outline">Schedule Inspection</Button>
+                  <Button
+                    size="sm"
+                    onClick={() => navigate(`/assets/${selectedAsset.asset_id || selectedAsset.id}`)}
+                  >
+                    <Eye className="w-3 h-3 mr-1" />
+                    View Asset
+                  </Button>
                 </div>
 
                 {/* Photo Gallery */}
