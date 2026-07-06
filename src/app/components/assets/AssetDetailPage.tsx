@@ -35,6 +35,7 @@ import {
   getUrgencyDisplay,
   resolveCI,
   resolveUrgency,
+  resolveAssetDescription,
 } from "../../utils/assetDisplay";
 
 export default function AssetDetailPage() {
@@ -566,7 +567,7 @@ export default function AssetDetailPage() {
             {(asset.asset_name || asset.metadata?.asset_name || asset.description) && (
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Asset Name / Description</p>
-                <p className="font-medium">{asset.asset_name || asset.metadata?.asset_name || asset.description}</p>
+                <p className="font-medium">{resolveAssetDescription(asset)}</p>
               </div>
             )}
             {asset.notes && (

@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { SimpleMap } from "./SimpleMap";
 import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from "../../utils/offlineAssets";
-import { resolveAssetCoordinates } from "../../utils/assetDisplay";
+import { resolveAssetCoordinates, resolveAssetDescription } from "../../utils/assetDisplay";
 
 const ASSET_TYPES = [
   "Road Sign",
@@ -1534,7 +1534,7 @@ export default function GISMapPage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle>{selectedAsset.name || selectedAsset.referenceNumber}</CardTitle>
+                    <CardTitle>{resolveAssetDescription(selectedAsset) || selectedAsset.referenceNumber}</CardTitle>
                     <CardDescription>{selectedAsset.type}</CardDescription>
                   </div>
                   <Button

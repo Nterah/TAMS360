@@ -707,6 +707,44 @@ export function getAssetKm(asset: any): string {
   return km === undefined || km === null || km === "" ? "N/A" : String(km);
 }
 
+// Matches the auto-generated "{TYPE} @ km {KM} of {ROAD} facing {DIRECTION}"
+// pattern produced by mobile field capture (see FieldCapturePage.buildDescription).
+const AUTO_DESCRIPTION_PATTERN = /@ km .+ of /i;
+
+/**
+ * Resolves the asset's display name/description, regenerating it from the
+ * asset's *current* road name, km marker and direction when the stored value
+ * matches the auto-generated field-capture pattern. Field capture writes this
+ * text once at creation time and it is never re-saved when road name/km/
+ * direction are edited later, so without this the label would silently
+ * go stale on the map, asset detail page, etc. Custom names that don't match
+ * the pattern (i.e. manually typed) are always returned as-is.
+ */
+export function resolveAssetDescription(asset: any): string {
+  const stored = String(
+    firstDefined(asset?.asset_name, asset?.metadata?.asset_name, asset?.description, "")
+  );
+
+  if (!stored || !AUTO_DESCRIPTION_PATTERN.test(stored)) {
+    return stored;
+  }
+
+  const type = getAssetType(asset);
+  const km = getAssetKm(asset);
+  const road = getAssetRoadName(asset);
+  const direction = String(
+    firstDefined(asset?.metadata?.direction, asset?.direction, asset?.metadata?.orientation_position, "")
+  ).trim();
+
+  const parts: string[] = [];
+  if (type && type !== "Unknown") parts.push(type);
+  if (km && km !== "N/A") parts.push(`@ km ${km}`);
+  if (road && road !== "N/A") parts.push(`of ${road}`);
+  if (direction) parts.push(`facing ${direction}`);
+
+  return parts.length ? parts.join(" ") : stored;
+}
+
 
 export function resolveCondition(source: any): string {
   const ci = resolveCI(source);
