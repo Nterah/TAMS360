@@ -7,6 +7,8 @@ import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import EnhancedAssetForm from "./EnhancedAssetForm";
 import { supabase, API_URL } from "../../../lib/supabaseClient";
+import { invalidateCache } from "../../utils/dataCache";
+import { ASSETS_CHANGED_EVENT, removeRecentVisibleAsset } from "../../utils/offlineAssets";
 
 export default function EditAssetPage() {
   const { assetId } = useParams<{ assetId: string }>();
@@ -166,6 +168,13 @@ export default function EditAssetPage() {
       }
 
       toast.success("Asset updated successfully!", { id: "edit-asset" });
+      // Purge any stale cached copies so the updated road name (and other
+      // fields) are reflected immediately in the Assets list, GIS Map, and
+      // the equivalent mobile pages — all of which listen for this event or
+      // read from the same cache/recent-visible-assets store.
+      invalidateCache("assets_list_v2");
+      if (assetId) removeRecentVisibleAsset(assetId);
+      window.dispatchEvent(new CustomEvent(ASSETS_CHANGED_EVENT));
       navigate(detailPath);
     } catch (error: any) {
       toast.error(`Error updating asset: ${error.message || "Unknown error"}`, { id: "edit-asset" });
