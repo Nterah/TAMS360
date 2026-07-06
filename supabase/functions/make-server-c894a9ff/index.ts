@@ -4279,6 +4279,53 @@ app.delete("/make-server-c894a9ff/assets/:id", async (c) => {
 
     const assetId = c.req.param("id");
 
+    // Delete dependent rows first so the FK constraints on inspections,
+    // maintenance_records, asset_photos, and asset_inventory_log don't block
+    // the asset delete (Postgres does not cascade these by default).
+    // Component scores are children of inspections, so they must go first.
+    const { data: assetInspections } = await supabase
+      .from("inspections")
+      .select("inspection_id")
+      .eq("asset_id", assetId);
+
+    const inspectionIds = (assetInspections || []).map((i: any) => i.inspection_id).filter(Boolean);
+
+    if (inspectionIds.length > 0) {
+      const { error: scoresError } = await supabase
+        .from("inspection_component_scores")
+        .delete()
+        .in("inspection_id", inspectionIds);
+      if (scoresError) {
+        console.error("Error deleting inspection component scores:", scoresError);
+        return c.json({ error: "Failed to delete asset", details: scoresError.message }, 500);
+      }
+    }
+
+    const { error: inspectionsError } = await supabase
+      .from("inspections")
+      .delete()
+      .eq("asset_id", assetId);
+    if (inspectionsError) {
+      console.error("Error deleting inspections:", inspectionsError);
+      return c.json({ error: "Failed to delete asset", details: inspectionsError.message }, 500);
+    }
+
+    const { error: maintenanceError } = await supabase
+      .from("maintenance_records")
+      .delete()
+      .eq("asset_id", assetId);
+    if (maintenanceError) {
+      console.error("Error deleting maintenance records:", maintenanceError);
+      return c.json({ error: "Failed to delete asset", details: maintenanceError.message }, 500);
+    }
+
+    await supabase.from("asset_photos").delete().eq("asset_id", assetId).then(({ error }) => {
+      if (error) console.error("Warning: Failed to delete asset_photos rows:", error);
+    });
+    await supabase.from("asset_inventory_log").delete().eq("asset_id", assetId).then(({ error }) => {
+      if (error) console.error("Warning: Failed to delete asset_inventory_log rows:", error);
+    });
+
     // Any authenticated user in the organisation may delete any asset —
     // there is no created_by restriction, matching admin's existing behavior.
     const { data: deletedRows, error: dbError } = await supabase
