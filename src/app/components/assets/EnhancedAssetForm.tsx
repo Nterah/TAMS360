@@ -47,15 +47,34 @@ const ROAD_SIDES = ["LHS", "RHS"]; // Left Hand Side, Right Hand Side
 const ASSET_TYPES = Object.keys(ASSET_TYPE_ABBREVIATIONS);
 
 /**
- * Swaps the direction and road-side segments of an existing asset reference
- * (format: {TYPE}-{ROAD}-{DIRECTION}[-{SIDE}]-{SEQ}) to match the current
- * form values, without disturbing the type, road name or sequence segments.
- * Handles adding/removing the optional SIDE segment.
+ * Swaps the road-name, direction and road-side segments of an existing asset
+ * reference (format: {TYPE}-{ROAD}-{DIRECTION}[-{SIDE}]-{SEQ}) to match the
+ * current form values, without disturbing the type or sequence segments.
+ * Handles adding/removing the optional SIDE segment and re-slugifying the
+ * road segment when the road name is edited.
  */
-function regenerateEditRef(originalRef: string, direction: string, roadSide: string): string {
+function regenerateEditRef(originalRef: string, direction: string, roadSide: string, roadName?: string): string {
   if (!originalRef) return originalRef;
 
   const parts = originalRef.split("-");
+
+  // Rebuild the road-name segment(s) (everything between TYPE at index 0 and
+  // the DIRECTION token) if the road name changed, since the road segment can
+  // itself contain hyphens/underscores from the original slugified name.
+  if (roadName) {
+    const dirIdxForRoad = parts.findIndex((p) => DIRECTIONS.includes(p.toUpperCase()));
+    if (dirIdxForRoad > 1) {
+      const newRoadSlug = roadName
+        .trim()
+        .replace(/\s+/g, "_")
+        .replace(/[^A-Za-z0-9_\-]/g, "")
+        .replace(/_+/g, "_");
+      if (newRoadSlug) {
+        parts.splice(1, dirIdxForRoad - 1, newRoadSlug);
+      }
+    }
+  }
+
   const dirIdx = parts.findIndex((p) => DIRECTIONS.includes(p.toUpperCase()));
   const sideIdx = parts.findIndex((p) => ROAD_SIDES.includes(p.toUpperCase()));
   const newSide = roadSide && roadSide !== "none" ? roadSide : "";
@@ -236,13 +255,14 @@ export default function EnhancedAssetForm({ onSubmit, onCancel, existingAssets =
     generateAssetReference();
   }, [assetType, roadName, roadSubsection, direction, roadSide, sequentialNumber]);
 
-  // Edit mode: keep the asset reference's direction/side segments in sync with
-  // the form fields so, e.g., changing LHS -> RHS is reflected in the asset
-  // name/reference shown on maps and lists, without altering the type/road/seq parts.
+  // Edit mode: keep the asset reference's road/direction/side segments in sync
+  // with the form fields so, e.g., changing road name or LHS -> RHS is
+  // reflected in the asset name/reference shown on maps and lists, without
+  // altering the type/sequence parts.
   useEffect(() => {
     if (mode !== "edit" || !originalEditRef.current) return;
-    setGeneratedAssetRef(regenerateEditRef(originalEditRef.current, direction, roadSide));
-  }, [mode, direction, roadSide]);
+    setGeneratedAssetRef(regenerateEditRef(originalEditRef.current, direction, roadSide, roadName));
+  }, [mode, direction, roadSide, roadName]);
 
   // Reset manual-edit flag whenever prefix fields change so auto-compute re-runs.
   useEffect(() => {
