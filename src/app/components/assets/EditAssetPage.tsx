@@ -9,6 +9,7 @@ import EnhancedAssetForm from "./EnhancedAssetForm";
 import { supabase, API_URL } from "../../../lib/supabaseClient";
 import { invalidateCache } from "../../utils/dataCache";
 import { ASSETS_CHANGED_EVENT, removeRecentVisibleAsset } from "../../utils/offlineAssets";
+import { resolveAssetDescription } from "../../utils/assetDisplay";
 
 export default function EditAssetPage() {
   const { assetId } = useParams<{ assetId: string }>();
@@ -119,6 +120,25 @@ export default function EditAssetPage() {
       if (assetData.length_m                  !== undefined) metaUpdates.length_m                  = assetData.length_m;
       if (assetData.height_m                  !== undefined) metaUpdates.height_m                  = assetData.height_m;
       if (assetData.orientation_position      !== undefined) metaUpdates.orientation_position      = assetData.orientation_position;
+
+      // If the asset's stored name/description was auto-generated at capture time
+      // (e.g. "Traffic Signal @ km 7.76 of M2_Eloff facing SB"), regenerate it now
+      // using the *post-edit* road name/km/direction so it doesn't stay frozen with
+      // stale values after this save. Custom/manual names are left untouched.
+      const mergedAssetForDescription = {
+        ...asset,
+        ...updates,
+        metadata: { ...existingMeta, ...metaUpdates },
+      };
+      const storedBefore = String(
+        existingMeta.asset_name || existingMeta.description || asset?.description || asset?.asset_name || ""
+      );
+      const regeneratedDescription = resolveAssetDescription(mergedAssetForDescription);
+      if (regeneratedDescription && regeneratedDescription !== storedBefore) {
+        metaUpdates.asset_name = regeneratedDescription;
+        metaUpdates.description = regeneratedDescription;
+      }
+
       if (Object.keys(metaUpdates).length > 0) {
         updates.metadata = { ...existingMeta, ...metaUpdates };
       }
