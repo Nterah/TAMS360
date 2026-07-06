@@ -7,7 +7,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { MapPin, Eye, Trash2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { createRoot } from 'react-dom/client';
-import { resolveAssetCoordinates } from '../utils/assetDisplay';
+import { resolveAssetCoordinates, resolveAssetDescription, resolveAssetReference } from '../utils/assetDisplay';
 
 // Asset interface matching the actual data structure
 export interface Asset {
@@ -237,7 +237,7 @@ export function AssetMap({
           <div class="flex items-start justify-between gap-2">
             <div>
               <h3 class="font-semibold text-base text-[#010D13]">
-                ${asset.asset_ref}
+                ${resolveAssetDescription(asset) || resolveAssetReference(asset)}
               </h3>
               <p class="text-sm text-[#455B5E]">
                 ${asset.asset_type}

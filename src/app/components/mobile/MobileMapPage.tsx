@@ -986,7 +986,7 @@ export default function MobileMapPage() {
                     )}
                   </div>
                   <h3 className="font-semibold text-sm mb-1">
-                    {selectedAsset.description}
+                    {resolveAssetDescription(selectedAsset)}
                   </h3>
                   <p className="text-xs text-slate-600 dark:text-slate-400">
                     {selectedAsset.asset_type_name}
