@@ -784,11 +784,21 @@ export function resolveAssetReference(asset: any): string {
   const nextParts = [...parts];
 
   if (roadName && roadName !== "N/A") {
-    const dirIdxForRoad = nextParts.findIndex((p) => REF_DIRECTIONS.includes(p.toUpperCase()));
-    if (dirIdxForRoad > 1) {
+    // The road segment ends at the direction token if present, otherwise the
+    // side token, otherwise falls back to just before the trailing sequence
+    // number (references aren't guaranteed to include a direction/side token,
+    // e.g. "TS-M2_Eloff-002").
+    let roadEndIdx = nextParts.findIndex((p) => REF_DIRECTIONS.includes(p.toUpperCase()));
+    if (roadEndIdx === -1) {
+      roadEndIdx = nextParts.findIndex((p) => REF_ROAD_SIDES.includes(p.toUpperCase()));
+    }
+    if (roadEndIdx === -1) {
+      roadEndIdx = nextParts.length - 1; // just before the sequence number
+    }
+    if (roadEndIdx > 1) {
       const newRoadSlug = slugifyRoadNameForRef(roadName);
       if (newRoadSlug) {
-        nextParts.splice(1, dirIdxForRoad - 1, newRoadSlug);
+        nextParts.splice(1, roadEndIdx - 1, newRoadSlug);
       }
     }
   }

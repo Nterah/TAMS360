@@ -59,18 +59,25 @@ function regenerateEditRef(originalRef: string, direction: string, roadSide: str
   const parts = originalRef.split("-");
 
   // Rebuild the road-name segment(s) (everything between TYPE at index 0 and
-  // the DIRECTION token) if the road name changed, since the road segment can
+  // the DIRECTION/SIDE token, or just before the trailing sequence number if
+  // neither is present) if the road name changed, since the road segment can
   // itself contain hyphens/underscores from the original slugified name.
   if (roadName) {
-    const dirIdxForRoad = parts.findIndex((p) => DIRECTIONS.includes(p.toUpperCase()));
-    if (dirIdxForRoad > 1) {
+    let roadEndIdx = parts.findIndex((p) => DIRECTIONS.includes(p.toUpperCase()));
+    if (roadEndIdx === -1) {
+      roadEndIdx = parts.findIndex((p) => ROAD_SIDES.includes(p.toUpperCase()));
+    }
+    if (roadEndIdx === -1) {
+      roadEndIdx = parts.length - 1; // just before the sequence number
+    }
+    if (roadEndIdx > 1) {
       const newRoadSlug = roadName
         .trim()
         .replace(/\s+/g, "_")
         .replace(/[^A-Za-z0-9_\-]/g, "")
         .replace(/_+/g, "_");
       if (newRoadSlug) {
-        parts.splice(1, dirIdxForRoad - 1, newRoadSlug);
+        parts.splice(1, roadEndIdx - 1, newRoadSlug);
       }
     }
   }
