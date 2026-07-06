@@ -745,6 +745,75 @@ export function resolveAssetDescription(asset: any): string {
   return parts.length ? parts.join(" ") : stored;
 }
 
+const REF_DIRECTIONS = ["NB", "SB", "EB", "WB"];
+const REF_ROAD_SIDES = ["LHS", "RHS"];
+
+function slugifyRoadNameForRef(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^A-Za-z0-9_\-]/g, "")
+    .replace(/_+/g, "_");
+}
+
+/**
+ * Rebuilds an asset's reference (format {TYPE}-{ROAD}-{DIRECTION}[-{SIDE}]-{SEQ})
+ * live from its *current* road name/direction/road side, so the reference
+ * shown everywhere (map, list, detail) stays correct even for assets edited
+ * before this segment was persisted on save, or when road name changes were
+ * only just made. Falls back to the stored reference unchanged if it doesn't
+ * look like the standard generated format (e.g. legacy/custom references).
+ */
+export function resolveAssetReference(asset: any): string {
+  const stored = String(
+    firstDefined(asset?.asset_ref, asset?.referenceNumber, asset?.reference_number, "")
+  );
+  if (!stored) return stored;
+
+  const parts = stored.split("-");
+  if (parts.length < 3) return stored;
+
+  const roadName = getAssetRoadName(asset);
+  const direction = String(
+    firstDefined(asset?.metadata?.direction, asset?.direction, "")
+  ).trim().toUpperCase();
+  const roadSide = String(
+    firstDefined(asset?.metadata?.road_side, asset?.road_side, "")
+  ).trim().toUpperCase();
+
+  const nextParts = [...parts];
+
+  if (roadName && roadName !== "N/A") {
+    const dirIdxForRoad = nextParts.findIndex((p) => REF_DIRECTIONS.includes(p.toUpperCase()));
+    if (dirIdxForRoad > 1) {
+      const newRoadSlug = slugifyRoadNameForRef(roadName);
+      if (newRoadSlug) {
+        nextParts.splice(1, dirIdxForRoad - 1, newRoadSlug);
+      }
+    }
+  }
+
+  const dirIdx = nextParts.findIndex((p) => REF_DIRECTIONS.includes(p.toUpperCase()));
+  const sideIdx = nextParts.findIndex((p) => REF_ROAD_SIDES.includes(p.toUpperCase()));
+  const newSide = roadSide && roadSide !== "NONE" ? roadSide : "";
+
+  if (dirIdx !== -1 && direction) {
+    nextParts[dirIdx] = direction;
+  }
+
+  if (sideIdx !== -1) {
+    if (newSide) {
+      nextParts[sideIdx] = newSide;
+    } else {
+      nextParts.splice(sideIdx, 1);
+    }
+  } else if (newSide && dirIdx !== -1) {
+    nextParts.splice(dirIdx + 1, 0, newSide);
+  }
+
+  return nextParts.join("-");
+}
+
 
 export function resolveCondition(source: any): string {
   const ci = resolveCI(source);

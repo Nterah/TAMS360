@@ -40,7 +40,7 @@ import {
 import { Label } from "../ui/label";
 import { Checkbox } from "../ui/checkbox";
 import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from "../../utils/offlineAssets";
-import { resolveAssetCoordinates } from "../../utils/assetDisplay";
+import { resolveAssetCoordinates, resolveAssetDescription, resolveAssetReference } from "../../utils/assetDisplay";
 import { captureBestGpsFix } from "../../utils/gpsCapture";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
@@ -542,8 +542,8 @@ export default function MobileMapPage() {
 
       const popupContent = `
         <div class="min-w-[200px] p-2">
-          <div class="font-semibold text-sm mb-1">${asset.asset_ref}</div>
-          <div class="text-xs mb-2">${asset.description || ''}</div>
+          <div class="font-semibold text-sm mb-1">${resolveAssetReference(asset)}</div>
+          <div class="text-xs mb-2">${resolveAssetDescription(asset) || ''}</div>
           <div class="flex flex-wrap gap-1 mb-2">
             <span class="inline-flex items-center rounded-md border px-2 py-0.5 text-xs">${asset.asset_type_name || ''}</span>
             ${asset.latest_ci ? `<span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs bg-blue-100 text-blue-800">CI: ${asset.latest_ci}</span>` : ''}
@@ -977,7 +977,7 @@ export default function MobileMapPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <Badge variant="outline" className="text-xs font-mono">
-                      {selectedAsset.asset_ref}
+                      {resolveAssetReference(selectedAsset)}
                     </Badge>
                     {selectedAsset.latest_ci && (
                       <Badge variant="secondary" className="text-xs">

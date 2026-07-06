@@ -22,7 +22,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from "sonner";
 import { projectId } from "../../../../utils/supabase/info";
 import { ASSETS_CHANGED_EVENT, removePendingOfflineAsset, removeRecentVisibleAsset } from "../../utils/offlineAssets";
-import { resolveAssetCoordinates } from "../../utils/assetDisplay";
+import { resolveAssetCoordinates, resolveAssetDescription, resolveAssetReference } from "../../utils/assetDisplay";
 
 interface AssetPhoto {
   photo_id?: string;
@@ -295,7 +295,7 @@ export default function MobileAssetDetailPage() {
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>
-              <h1 className="text-lg font-bold">{asset.asset_ref}</h1>
+              <h1 className="text-lg font-bold">{resolveAssetReference(asset)}</h1>
               <p className="text-xs text-slate-500">{asset.asset_type_name}</p>
             </div>
           </div>
@@ -382,7 +382,7 @@ export default function MobileAssetDetailPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <p className="text-xs text-slate-500 mb-1">Asset Ref</p>
-                <p className="text-sm font-medium font-mono">{(asset as any).asset_ref}</p>
+                <p className="text-sm font-medium font-mono">{resolveAssetReference(asset)}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 mb-1">Type</p>
@@ -415,7 +415,7 @@ export default function MobileAssetDetailPage() {
             {((asset as any).asset_name || (asset as any).metadata?.asset_name || asset.description) && (
               <div>
                 <p className="text-xs text-slate-500 mb-1">Name / Description</p>
-                <p className="text-sm">{(asset as any).asset_name || (asset as any).metadata?.asset_name || asset.description}</p>
+                <p className="text-sm">{resolveAssetDescription(asset)}</p>
               </div>
             )}
 

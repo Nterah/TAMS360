@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import { projectId, publicAnonKey } from "../../../../utils/supabase/info";
 import { SimpleMap } from "./SimpleMap";
 import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets } from "../../utils/offlineAssets";
-import { resolveAssetCoordinates, resolveAssetDescription } from "../../utils/assetDisplay";
+import { resolveAssetCoordinates, resolveAssetDescription, resolveAssetReference } from "../../utils/assetDisplay";
 
 const ASSET_TYPES = [
   "Road Sign",
@@ -1534,7 +1534,7 @@ export default function GISMapPage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle>{resolveAssetDescription(selectedAsset) || selectedAsset.referenceNumber}</CardTitle>
+                    <CardTitle>{resolveAssetDescription(selectedAsset) || resolveAssetReference(selectedAsset)}</CardTitle>
                     <CardDescription>{selectedAsset.type}</CardDescription>
                   </div>
                   <Button
@@ -1550,7 +1550,7 @@ export default function GISMapPage() {
                 <div className="grid gap-4 md:grid-cols-3 mb-4">
                   <div>
                     <p className="text-sm text-muted-foreground">Reference</p>
-                    <p className="font-medium">{selectedAsset.referenceNumber || "N/A"}</p>
+                    <p className="font-medium">{resolveAssetReference(selectedAsset) || "N/A"}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Condition</p>
@@ -1680,7 +1680,7 @@ export default function GISMapPage() {
                       onClick={() => centerOnAsset(asset)}
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">{asset.name || asset.referenceNumber}</p>
+                        <p className="font-medium truncate">{resolveAssetDescription(asset) || resolveAssetReference(asset)}</p>
                         <p className="text-sm text-muted-foreground">{asset.type}</p>
                       </div>
                       <div className="flex items-center gap-2 ml-4">

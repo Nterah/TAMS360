@@ -36,6 +36,7 @@ import {
   resolveCI,
   resolveUrgency,
   resolveAssetDescription,
+  resolveAssetReference,
 } from "../../utils/assetDisplay";
 
 export default function AssetDetailPage() {
@@ -457,7 +458,7 @@ export default function AssetDetailPage() {
             Back
           </Button>
           <div>
-            <h1 className="text-3xl font-bold">{asset.asset_ref || asset.reference_number}</h1>
+            <h1 className="text-3xl font-bold">{resolveAssetReference(asset) || asset.reference_number}</h1>
             <p className="text-muted-foreground">
               {asset.asset_type_name || asset.type} • {asset.road_name || asset.road_number || 'Location'}
             </p>
@@ -537,7 +538,7 @@ export default function AssetDetailPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Asset Reference</p>
-                <p className="font-medium font-mono">{asset.asset_ref || asset.reference_number || "N/A"}</p>
+                <p className="font-medium font-mono">{resolveAssetReference(asset) || asset.reference_number || "N/A"}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Asset Type</p>

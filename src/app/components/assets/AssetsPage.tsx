@@ -31,6 +31,8 @@ import {
   resolveCI,
   resolveUrgency,
   normaliseAssetForDisplay,
+  resolveAssetDescription,
+  resolveAssetReference,
 } from "../../utils/assetDisplay";
 
 const ASSET_TYPES = [
@@ -1071,7 +1073,7 @@ export default function AssetsPage() {
                       {columns.find(c => c.id === "asset_ref")?.visible && (
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2">
-                            <span>{asset.asset_ref || "N/A"}</span>
+                            <span>{resolveAssetReference(asset) || "N/A"}</span>
                             {asset.is_offline_pending && <Badge variant="secondary">Pending Sync</Badge>}
                           </div>
                         </TableCell>
@@ -1082,7 +1084,7 @@ export default function AssetsPage() {
                         </TableCell>
                       )}
                       {columns.find(c => c.id === "description")?.visible && (
-                        <TableCell>{asset.description || "No description"}</TableCell>
+                        <TableCell>{resolveAssetDescription(asset) || "No description"}</TableCell>
                       )}
                       {columns.find(c => c.id === "location")?.visible && (
                         <TableCell>
@@ -1193,7 +1195,7 @@ export default function AssetsPage() {
                     <Database className="w-10 h-10 text-primary flex-shrink-0" />
                     <div className="flex-1 space-y-2">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-semibold">{asset.asset_ref || "N/A"}</h4>
+                        <h4 className="font-semibold">{resolveAssetReference(asset) || "N/A"}</h4>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">{asset.asset_type_name || "Unknown"}</Badge>
                           {asset.is_offline_pending && <Badge variant="secondary">Pending Sync</Badge>}
@@ -1205,7 +1207,7 @@ export default function AssetsPage() {
                           </Badge>
                         </div>
                       </div>
-                      <p className="text-sm text-muted-foreground">{asset.description || "No description"}</p>
+                      <p className="text-sm text-muted-foreground">{resolveAssetDescription(asset) || "No description"}</p>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm text-muted-foreground">
                         <p className="flex items-center gap-2">
                           <MapPin className="w-4 h-4" />

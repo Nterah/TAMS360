@@ -17,6 +17,7 @@ import {
   resolveUrgency,
   resolveAssetCoordinates,
   resolveAssetDescription,
+  resolveAssetReference,
 } from "../../utils/assetDisplay";
 
 interface SimpleMapProps {
@@ -407,7 +408,7 @@ export function SimpleMap({
       return `
         <div id="${popupId}" style="padding: 8px; min-width: 240px; max-width: 320px;">
           <h3 style="font-weight: bold; margin-bottom: 8px; color: #010D13; font-size: 14px;">
-            ${(resolveAssetDescription(asset) || asset.name || asset.referenceNumber || asset.asset_ref || '').replace(/'/g, '&#39;').replace(/"/g, '&quot;')}
+            ${(resolveAssetDescription(asset) || asset.name || resolveAssetReference(asset) || '').replace(/'/g, '&#39;').replace(/"/g, '&quot;')}
           </h3>
           <div style="font-size: 13px;">
             <div style="display: flex; justify-between; margin-bottom: 4px;">

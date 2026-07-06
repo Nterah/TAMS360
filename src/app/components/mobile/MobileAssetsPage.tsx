@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useOffline } from "../offline/OfflineContext";
 import { AssetsCacheService } from "../../utils/offlineCache";
 import { ASSETS_CHANGED_EVENT, mergePendingOfflineAssets, removePendingOfflineAsset, removeRecentVisibleAsset } from "../../utils/offlineAssets";
-import { resolveAssetCoordinates } from "../../utils/assetDisplay";
+import { resolveAssetCoordinates, resolveAssetDescription, resolveAssetReference } from "../../utils/assetDisplay";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
@@ -486,7 +486,7 @@ export default function MobileAssetsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <Badge variant="outline" className="text-xs font-mono">
-                        {asset.asset_ref}
+                        {resolveAssetReference(asset)}
                       </Badge>
                       <Badge className={`text-xs ${getConditionColor(asset.condition)}`}>
                         <span className="flex items-center gap-1">
@@ -501,7 +501,7 @@ export default function MobileAssetsPage() {
                       )}
                     </div>
                     <h3 className="font-semibold text-sm mb-1 truncate">
-                      {asset.description}
+                      {resolveAssetDescription(asset)}
                     </h3>
                     <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
                       {asset.asset_type_name}
