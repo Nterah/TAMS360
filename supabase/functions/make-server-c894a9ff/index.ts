@@ -4006,6 +4006,300 @@ app.get("/make-server-c894a9ff/assets/inventory-log", async (c) => {
   }
 });
 
+// ---------------------------------------------------------------
+// Asset Inventory Report — single endpoint replacing N+1 pattern
+// Returns all assets + latest inspections + DERU component scores
+// + one signed photo URL per asset in parallel DB queries.
+// ---------------------------------------------------------------
+app.get("/make-server-c894a9ff/reports/asset-inventory", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) return c.json({ error: "Unauthorized" }, 401);
+
+    const accessToken = authHeader.split(" ")[1];
+    const { data: userData, error: authError } = await supabaseAuth.auth.getUser(accessToken);
+    if (authError || !userData.user) return c.json({ error: "Invalid session" }, 401);
+
+    const { data: userProfile, error: profileError } = await supabase
+      .from("tams360_user_profiles_v")
+      .select("id, tenant_id, role")
+      .eq("id", userData.user.id)
+      .single();
+    if (profileError || !userProfile?.tenant_id)
+      return c.json({ error: "User not associated with an organization" }, 403);
+
+    const tenantId = userProfile.tenant_id;
+    const PAGE_SIZE = 1000;
+
+    // Step 1: count then fetch all assets + inspections in parallel pages
+    const [{ count: assetCount }, { count: inspCount }] = await Promise.all([
+      supabase
+        .from("tams360_assets_v")
+        .select("asset_id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId),
+      supabase
+        .from("tams360_inspections_v")
+        .select("inspection_id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId),
+    ]);
+
+    const totalAssetPages = Math.max(1, Math.ceil((assetCount || 0) / PAGE_SIZE));
+    const totalInspPages = Math.max(1, Math.ceil((inspCount || 0) / PAGE_SIZE));
+
+    const [assetPages, inspPages] = await Promise.all([
+      Promise.all(
+        Array.from({ length: totalAssetPages }, (_, i) =>
+          supabase
+            .from("tams360_assets_v")
+            .select("*")
+            .eq("tenant_id", tenantId)
+            .order("asset_id", { ascending: false })
+            .range(i * PAGE_SIZE, (i + 1) * PAGE_SIZE - 1)
+        )
+      ),
+      Promise.all(
+        Array.from({ length: totalInspPages }, (_, i) =>
+          supabase
+            .from("tams360_inspections_v")
+            .select(
+              "inspection_id, asset_id, inspection_date, conditional_index, calculated_urgency, ci_band, calculation_metadata, inspector_name, general_comments, overall_comments, notes, photo_url, image_url, photo_1"
+            )
+            .eq("tenant_id", tenantId)
+            .order("inspection_date", { ascending: false })
+            .range(i * PAGE_SIZE, (i + 1) * PAGE_SIZE - 1)
+        )
+      ),
+    ]);
+
+    const allAssets: any[] = assetPages.flatMap((r) => r.data || []);
+    const allInspections: any[] = inspPages.flatMap((r) => r.data || []);
+
+    console.log(
+      `[Reports/asset-inventory] tenant=${tenantId} assets=${allAssets.length} inspections=${allInspections.length}`
+    );
+
+    // Step 2: keep only the latest inspection per asset
+    const latestInspByAsset = new Map<string, any>();
+    for (const insp of allInspections) {
+      if (insp.asset_id && !latestInspByAsset.has(insp.asset_id)) {
+        latestInspByAsset.set(insp.asset_id, insp);
+      }
+    }
+
+    const inspectionIds = Array.from(latestInspByAsset.values())
+      .map((i: any) => i.inspection_id)
+      .filter(Boolean);
+
+    // Step 3: fetch ALL component scores in bulk (one query per 500 IDs)
+    const componentScoresMap = new Map<string, { degree: string; extent: string; relevancy: string }>();
+
+    if (inspectionIds.length > 0) {
+      const CHUNK = 500;
+      const scoreChunks = await Promise.all(
+        Array.from({ length: Math.ceil(inspectionIds.length / CHUNK) }, (_, i) =>
+          supabase
+            .from("inspection_component_scores")
+            .select(
+              "inspection_id, degree_value, extent_value, relevancy_value, degree, extent, relevancy, component_name"
+            )
+            .in("inspection_id", inspectionIds.slice(i * CHUNK, (i + 1) * CHUNK))
+        )
+      );
+      const allScores: any[] = scoreChunks.flatMap((r) => r.data || []);
+
+      const hasVal = (v: any) =>
+        v !== null && v !== undefined && String(v).trim() !== "" && String(v).trim() !== "-";
+      const isMeaningful = (v: any) =>
+        hasVal(v) && !["U", "N", "X"].includes(String(v).toUpperCase().trim());
+
+      const byInsp = new Map<string, any[]>();
+      for (const s of allScores) {
+        if (!byInsp.has(s.inspection_id)) byInsp.set(s.inspection_id, []);
+        byInsp.get(s.inspection_id)!.push(s);
+      }
+
+      for (const [inspId, scores] of byInsp) {
+        const chosen =
+          scores.find(
+            (s) =>
+              isMeaningful(s.degree_value ?? s.degree) &&
+              hasVal(s.extent_value ?? s.extent) &&
+              hasVal(s.relevancy_value ?? s.relevancy)
+          ) ||
+          scores.find((s) => isMeaningful(s.degree_value ?? s.degree)) ||
+          scores.find(
+            (s) =>
+              hasVal(s.degree_value ?? s.degree) ||
+              hasVal(s.extent_value ?? s.extent) ||
+              hasVal(s.relevancy_value ?? s.relevancy)
+          );
+        if (chosen) {
+          componentScoresMap.set(inspId, {
+            degree: String(chosen.degree_value ?? chosen.degree ?? ""),
+            extent: String(chosen.extent_value ?? chosen.extent ?? ""),
+            relevancy: String(chosen.relevancy_value ?? chosen.relevancy ?? ""),
+          });
+        }
+      }
+    }
+
+    // Merge DERU scores into each latest inspection's calculation_metadata
+    for (const insp of latestInspByAsset.values()) {
+      const scores = componentScoresMap.get(insp.inspection_id);
+      if (!scores) continue;
+      const meta = insp.calculation_metadata || {};
+      insp.calculation_metadata = {
+        ...meta,
+        degree: meta.degree ?? scores.degree,
+        extent: meta.extent ?? scores.extent,
+        relevancy: meta.relevancy ?? scores.relevancy,
+      };
+    }
+
+    // Step 4: batch-generate one signed photo URL per asset.
+    //
+    // Photos live in up to two buckets and two folder conventions:
+    //   Primary bucket  : tams360-inspection-photos
+    //   Alt bucket      : make-c894a9ff-tams360-inspection-photos
+    //   New path format : {tenantId}/assets/{assetRef}/photo_0.{ext}  (tracked in asset_photos table)
+    //   Legacy format   : {assetRef}/0.{ext}
+    //
+    // Strategy:
+    //   1. Bulk-query asset_photos (photo_number=0) for exact DB-tracked paths — most reliable.
+    //   2. For assets not in asset_photos, sign legacy-format candidates in both buckets.
+    //   3. First valid signed URL per asset_ref wins.
+
+    const PHOTO_BUCKET_NAME = "tams360-inspection-photos";
+    const ALT_PHOTO_BUCKET_NAME = "make-c894a9ff-tams360-inspection-photos";
+    const PHOTO_SIGN_CHUNK = 500;
+
+    const assetRefById = new Map<string, string>(allAssets.map((a: any) => [a.asset_id, a.asset_ref]));
+
+    // 4a. Bulk query all asset_photos for the tenant ordered by photo_number asc.
+    //     We pick the lowest-numbered photo per asset so photo_0 is preferred,
+    //     but assets that only have inspection photos (1+) still get a URL.
+    const { data: dbAllPhotos } = await supabase
+      .from("asset_photos")
+      .select("asset_id, file_path, photo_number")
+      .eq("tenant_id", tenantId)
+      .order("photo_number", { ascending: true });
+
+    const dbPathByRef = new Map<string, string>();
+    for (const p of (dbAllPhotos || [])) {
+      const ref = assetRefById.get(p.asset_id);
+      if (ref && p.file_path && !dbPathByRef.has(ref)) {
+        dbPathByRef.set(ref, p.file_path);
+      }
+    }
+
+    // 4b. Build candidate paths for every asset.
+    //
+    // createSignedUrls returns a signed token for ANY path — it does not check
+    // whether the file exists. So we cannot pick a single "best" path; instead
+    // we return ALL candidates per asset and let the frontend try them in order,
+    // silently skipping 404s.
+    //
+    // Candidate order (highest priority first):
+    //   DB-tracked path  — exact path from asset_photos table (most reliable)
+    //   new-format paths — {tenantId}/assets/{ref}/photo_0.{ext}  (new upload flow, missing asset_photos record)
+    //   old-format paths — {ref}/0.{ext}  (legacy upload flow)
+    //   … all of the above repeated for the alt bucket
+
+    type Candidate = { path: string; assetRef: string; bucket: string };
+    const allCandidates: Candidate[] = [];
+
+    const exts = ["jpg", "jpeg", "png"];
+
+    for (const asset of allAssets as any[]) {
+      const ref = asset.asset_ref;
+      if (!ref) continue;
+
+      // DB-tracked path (primary bucket only — uploads always go to PHOTO_BUCKET_NAME)
+      const dbPath = dbPathByRef.get(ref);
+      if (dbPath) {
+        allCandidates.push({ path: dbPath, assetRef: ref, bucket: PHOTO_BUCKET_NAME });
+      }
+
+      // New-format candidates (photos uploaded via new flow but asset_photos record missing)
+      for (const ext of exts) {
+        allCandidates.push({ path: `${tenantId}/assets/${ref}/photo_0.${ext}`, assetRef: ref, bucket: PHOTO_BUCKET_NAME });
+        allCandidates.push({ path: `${tenantId}/assets/${ref}/photo_0.${ext}`, assetRef: ref, bucket: ALT_PHOTO_BUCKET_NAME });
+      }
+
+      // Old-format candidates
+      for (const ext of exts) {
+        allCandidates.push({ path: `${ref}/0.${ext}`, assetRef: ref, bucket: PHOTO_BUCKET_NAME });
+        allCandidates.push({ path: `${ref}/0.${ext}`, assetRef: ref, bucket: ALT_PHOTO_BUCKET_NAME });
+      }
+    }
+
+    // 4c. Sign all candidates grouped by bucket
+    const sign = (bucket: string, paths: string[]) =>
+      paths.length === 0
+        ? Promise.resolve([] as Array<{ data: any[] | null }>)
+        : Promise.all(
+            Array.from({ length: Math.ceil(paths.length / PHOTO_SIGN_CHUNK) }, (_, i) =>
+              supabase.storage
+                .from(bucket)
+                .createSignedUrls(paths.slice(i * PHOTO_SIGN_CHUNK, (i + 1) * PHOTO_SIGN_CHUNK), 3600)
+            )
+          );
+
+    const primaryCandidates = allCandidates.filter(c => c.bucket === PHOTO_BUCKET_NAME);
+    const altCandidates     = allCandidates.filter(c => c.bucket === ALT_PHOTO_BUCKET_NAME);
+
+    const [primarySigned, altSigned] = await Promise.all([
+      sign(PHOTO_BUCKET_NAME,     primaryCandidates.map(c => c.path)),
+      sign(ALT_PHOTO_BUCKET_NAME, altCandidates.map(c => c.path)),
+    ]);
+
+    // Map path+bucket -> signed URL
+    const signedByKey = new Map<string, string>();
+    const processChunks = (chunks: any[], candidates: Candidate[]) => {
+      let idx = 0;
+      for (const chunk of chunks) {
+        for (const item of chunk?.data || []) {
+          const candidate = candidates[idx++];
+          if (item.signedUrl && candidate) signedByKey.set(`${candidate.bucket}::${candidate.path}`, item.signedUrl);
+        }
+      }
+    };
+    processChunks(primarySigned as any[], primaryCandidates);
+    processChunks(altSigned as any[], altCandidates);
+
+    // Build photoUrls: asset_ref -> ordered list of candidate signed URLs
+    // The frontend will try each until one loads successfully.
+    const photoUrlsMap = new Map<string, string[]>();
+    for (const c of allCandidates) {
+      const url = signedByKey.get(`${c.bucket}::${c.path}`);
+      if (!url) continue;
+      if (!photoUrlsMap.has(c.assetRef)) photoUrlsMap.set(c.assetRef, []);
+      photoUrlsMap.get(c.assetRef)!.push(url);
+    }
+
+    const photoUrls = Object.fromEntries(photoUrlsMap);
+
+    console.log(
+      `[Reports/asset-inventory] DERU enriched=${componentScoresMap.size} assets with photo candidates=${photoUrlsMap.size}`
+    );
+
+    const debugRef = "TS-M2_Eloff4-002";
+    const debugAsset = (allAssets as any[]).find((a: any) => a.asset_ref === debugRef);
+    const debugDbPath = debugAsset ? dbPathByRef.get(debugRef) : "asset not found";
+    const debugCandidates = photoUrlsMap.get(debugRef);
+    console.log(`[PhotoDebug] ${debugRef}: asset_found=${!!debugAsset}, dbPath=${debugDbPath ?? "none"}, candidates=${debugCandidates?.length ?? 0}`);
+
+    return c.json({
+      assets: allAssets,
+      latestInspections: Object.fromEntries(latestInspByAsset),
+      photoUrls,
+    });
+  } catch (error: any) {
+    console.error("[Reports/asset-inventory] error:", error);
+    return c.json({ error: "Failed to generate asset inventory report" }, 500);
+  }
+});
+
 // Get asset by ID
 app.get("/make-server-c894a9ff/assets/:id", async (c) => {
   try {

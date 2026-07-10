@@ -145,19 +145,25 @@ function getPdfCellPaddingForPageSize(pageSize: PdfPageSizeName): number {
 /**
  * Load image as base64 data URL
  */
+// Max dimensions for embedded PDF thumbnails — keeps per-image base64 under ~10 KB
+// and prevents the document from exceeding JS max string length.
+const PDF_THUMB_W = 120;
+const PDF_THUMB_H = 90;
+
 async function loadImageAsDataURL(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'Anonymous';
     img.onload = () => {
       try {
+        const scale = Math.min(PDF_THUMB_W / img.width, PDF_THUMB_H / img.height, 1);
         const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          resolve(canvas.toDataURL('image/jpeg', 0.8));
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.6));
         } else {
           reject(new Error('Failed to get canvas context'));
         }

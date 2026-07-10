@@ -1242,29 +1242,36 @@ export default function ReportsPage() {
 
       let data: any[] = [];
       let columns: any[] = [];
+      let imageCandidatesMap: Record<string, string[]> = {};
       const title = reportType;
       const fileName = reportType.toLowerCase().replace(/ /g, "-");
 
       switch (reportType) {
         case "Asset Inventory": {
-          const [assets, rawInspections, lifecycleConfigRows, assetValueConfigRows] = await Promise.all([
-            fetchAllAssetRegisterReportAssets(),
-            fetchAllInspections(),
-            fetchTenantConfigRows("lifecycle"),
-            fetchTenantConfigRows("values"),
+          toast.loading(`Fetching report data…`, { id: "export-report" });
+
+          // One server-side endpoint replaces N+1 per-asset/per-inspection requests.
+          const [[reportRes], [lifecycleConfigRows, assetValueConfigRows]] = await Promise.all([
+            Promise.all([fetch(`${API_URL}/reports/asset-inventory`, { headers: getAuthHeaders() })]),
+            Promise.all([fetchTenantConfigRows("lifecycle"), fetchTenantConfigRows("values")]),
           ]);
 
-          // Enrich inspections: pull D/E/R from component scores for any inspection
-          // that has null values in calculation_metadata (all historical inspections).
-          toast.loading(`Loading inspection details…`, { id: "export-report" });
-          const inspections = await enrichInspectionsWithDERU(rawInspections);
+          if (!reportRes.ok) {
+            const errText = await reportRes.text().catch(() => "");
+            throw new Error(`Report endpoint failed: ${reportRes.status} ${errText}`);
+          }
 
-          // Fetch photos — use any URL already on the record, then fall back to the
-          // per-asset Storage API. We fetch 10 at a time to avoid flooding the server.
-          toast.loading(`Loading photos (0 / ${assets.length})…`, { id: "export-report" });
-          const photoMap = await fetchPhotosForAssets(assets);
-          toast.loading(`Building report (${photoMap.size} photos loaded)…`, { id: "export-report" });
+          const reportJson = await reportRes.json();
+          const assets: any[] = reportJson.assets || [];
+          const latestInspByAsset: Record<string, any> = reportJson.latestInspections || {};
+          const photoUrls: Record<string, string[]> = reportJson.photoUrls || {};
 
+          // Convert latestInspections map to array for buildAssetRegisterRows
+          const inspections = Object.values(latestInspByAsset);
+
+          toast.loading(`Building report (${assets.length} assets, ${inspections.length} inspections)…`, { id: "export-report" });
+
+          const DEBUG_REF = "TS-M2_Eloff4-002";
           const assetsWithPhotos = assets.map((a: any) => {
             const metaPhotos = a.metadata?.photo_urls;
             const inlineUrl =
@@ -1276,7 +1283,16 @@ export default function ReportsPage() {
               a.image ||
               a.image_url ||
               null;
-            return { ...a, image: inlineUrl || photoMap.get(a.asset_id) || null };
+            const storageCandidates = photoUrls[a.asset_ref] || [];
+            const allCandidates = [inlineUrl, ...storageCandidates].filter(
+              (u): u is string => typeof u === "string" && u.startsWith("http")
+            );
+            const primaryUrl = allCandidates[0] || null;
+            if (primaryUrl) imageCandidatesMap[primaryUrl] = allCandidates;
+            if (a.asset_ref === DEBUG_REF) {
+              console.log(`[PhotoDebug] ${DEBUG_REF}:`, { inlineUrl, storageCandidates, allCandidates, primaryUrl });
+            }
+            return { ...a, image: primaryUrl };
           });
 
           const assetRegisterRows = buildAssetRegisterRows(
@@ -1793,7 +1809,9 @@ export default function ReportsPage() {
           });
         }
       } else {
-        // Pre-load images for PDF when the data has an image column
+        // Pre-load images for PDF when the data has an image column.
+        // Use controlled concurrency (20 at a time) + per-image timeout so
+        // hundreds of assets don't queue up through the browser's 6-connection limit.
         let preloadedImages: Record<string, string> = {};
         if (format.toLowerCase() === 'pdf') {
           const imageCol = columns.find(c => c.key === 'image' || c.header.toUpperCase() === 'IMAGE');
@@ -1801,29 +1819,60 @@ export default function ReportsPage() {
             const imageUrls = [...new Set(
               data.map((row: any) => row[imageCol.key]).filter((v: any) => typeof v === 'string' && v.startsWith('http'))
             )] as string[];
-            await Promise.allSettled(
-              imageUrls.map(async (url: string) => {
-                try {
-                  // Use Image element with crossOrigin — works better with Supabase Storage CORS
-                  const dataUrl = await new Promise<string>((resolve, reject) => {
-                    const img = new Image();
-                    img.crossOrigin = 'anonymous';
-                    img.onload = () => {
-                      const canvas = document.createElement('canvas');
-                      canvas.width = img.naturalWidth;
-                      canvas.height = img.naturalHeight;
-                      const ctx = canvas.getContext('2d');
-                      if (!ctx) { reject(new Error('no ctx')); return; }
-                      ctx.drawImage(img, 0, 0);
-                      resolve(canvas.toDataURL('image/jpeg', 0.8));
-                    };
-                    img.onerror = () => reject(new Error(`failed: ${url}`));
-                    img.src = url;
-                  });
-                  preloadedImages[url] = dataUrl;
-                } catch { /* skip — cell will be empty */ }
-              })
-            );
+
+            const IMG_CONCURRENCY = 20;
+            const IMG_TIMEOUT_MS = 6000;
+
+            // Thumbnail dimensions — the PDF cell is ~35mm wide (~100px).
+            // Capping here prevents the PDF from exceeding JS max string length.
+            const THUMB_W = 120;
+            const THUMB_H = 90;
+
+            const loadOne = (url: string): Promise<string> =>
+              new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('timeout')), IMG_TIMEOUT_MS);
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                  clearTimeout(timer);
+                  const scale = Math.min(THUMB_W / img.naturalWidth, THUMB_H / img.naturalHeight, 1);
+                  const canvas = document.createElement('canvas');
+                  canvas.width = Math.round(img.naturalWidth * scale);
+                  canvas.height = Math.round(img.naturalHeight * scale);
+                  const ctx = canvas.getContext('2d');
+                  if (!ctx) { reject(new Error('no ctx')); return; }
+                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                  resolve(canvas.toDataURL('image/jpeg', 0.6));
+                };
+                img.onerror = () => { clearTimeout(timer); reject(new Error('load failed')); };
+                img.src = url;
+              });
+
+            for (let i = 0; i < imageUrls.length; i += IMG_CONCURRENCY) {
+              const batch = imageUrls.slice(i, i + IMG_CONCURRENCY);
+              toast.loading(
+                `Loading images (${Math.min(i + IMG_CONCURRENCY, imageUrls.length)} / ${imageUrls.length})…`,
+                { id: "export-report" }
+              );
+              await Promise.allSettled(
+                batch.map(async (url) => {
+                  const candidates = imageCandidatesMap[url] || [url];
+                  for (const candidate of candidates) {
+                    try {
+                      preloadedImages[url] = await loadOne(candidate);
+                      break;
+                    } catch (e) {
+                      if (candidates.indexOf(candidate) === 0) {
+                        console.log(`[PhotoDebug] failed candidate: ${candidate.slice(0, 80)}`, (e as any)?.message);
+                      }
+                    }
+                  }
+                })
+              );
+            }
+            const debugKey = Object.keys(imageCandidatesMap).find(k => imageCandidatesMap[k].length > 0 && data.some((r: any) => r.image === k && r.asset_ref === "TS-M2_Eloff4-002"));
+            console.log(`[PhotoDebug] TS-M2_Eloff4-002 preload result:`, debugKey ? (preloadedImages[debugKey] ? "LOADED" : "FAILED") : "no primaryUrl in data");
+            console.log(`[PhotoDebug] preloadedImages count: ${Object.keys(preloadedImages).length} / ${imageUrls.length} total`);
           }
         }
 
