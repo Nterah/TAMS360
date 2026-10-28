@@ -143,14 +143,22 @@ export default function DataManagementPage() {
             console.log('📄 Export - Sample Inspection Data (first record):', data[0]);
             console.log('📄 Export - Inspection Field Names:', Object.keys(data[0]));
           }
-          // Note: status field is not available in the inspections API response
           columns = [
             { header: 'Asset Number', key: 'asset_ref' },
+            { header: 'Asset Type', key: 'asset_type_name' },
+            { header: 'Description', key: 'asset_description' },
+            { header: 'Region', key: 'region' },
+            { header: 'Road Number', key: 'road_number' },
+            { header: 'Road Name', key: 'road_name' },
+            { header: 'Chainage (km)', key: 'km_marker' },
+            { header: 'Latitude', key: 'gps_lat' },
+            { header: 'Longitude', key: 'gps_lng' },
             { header: 'Inspection Date', key: 'inspection_date' },
             { header: 'Inspector', key: 'inspector_name' },
             { header: 'Condition Index', key: 'conditional_index' },
             { header: 'CI Band', key: 'ci_band' },
             { header: 'Urgency', key: 'calculated_urgency' },
+            { header: 'Notes', key: 'notes' },
           ];
           break;
           

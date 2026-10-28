@@ -8407,6 +8407,20 @@ app.put("/make-server-c894a9ff/inspections/:id", async (c) => {
       return c.json({ error: `Failed to update inspection: ${inspectionError.message}` }, 500);
     }
 
+    // Fetch existing scores first to preserve item_id values (they're set at creation time
+    // and the edit UI doesn't send them back)
+    const { data: existingScores } = await supabase
+      .from("inspection_component_scores")
+      .select("component_name, item_id")
+      .eq("inspection_id", inspectionId);
+
+    const itemIdByName: Record<string, string | null> = {};
+    if (existingScores) {
+      for (const s of existingScores) {
+        if (s.item_id != null) itemIdByName[s.component_name] = s.item_id;
+      }
+    }
+
     // Delete existing component scores
     const { error: deleteError } = await supabase
       .from("inspection_component_scores")
@@ -8419,25 +8433,31 @@ app.put("/make-server-c894a9ff/inspections/:id", async (c) => {
 
     // Insert updated component scores
     if (inspection.component_scores && inspection.component_scores.length > 0) {
-      const componentScores = inspection.component_scores.map((score: any) => ({
-        inspection_id: inspectionId,
-        component_name: score.component_name,
-        degree_value: score.degree_value || score.degree,
-        extent_value: score.extent_value || score.extent,
-        relevancy_value: score.relevancy_value || score.relevancy,
-        urgency_token: score.urgency_token || score.urgency,
-        component_score: score.component_score || score.conditional_index || score.ci,
-        quantity: score.quantity,
-        quantity_unit: score.quantity_unit || score.unit,
-        remedial_work_description: score.remedial_work_description || score.remedial_work,
-        rate: score.rate,
-        component_cost: score.component_cost || score.cost,
-        component_notes: score.component_notes || score.comments,
-        photo_url: score.photo_url,
-      }));
+      const componentScores = inspection.component_scores.map((score: any) => {
+        const deg = score.degree_value ?? score.degree ?? null;
+        const ext = score.extent_value ?? score.extent ?? null;
+        const rel = score.relevancy_value ?? score.relevancy ?? null;
+        const computedScore = calculations.calculateComponentScore(
+          String(deg ?? ''), String(ext ?? ''), String(rel ?? '')
+        );
+        return {
+          inspection_id: inspectionId,
+          item_id: score.item_id || itemIdByName[score.component_name] || undefined,
+          component_name: score.component_name,
+          degree_value: deg,
+          extent_value: ext,
+          relevancy_value: rel,
+          component_score: score.component_score ?? score.conditional_index ?? score.ci ?? computedScore,
+          quantity: score.quantity,
+          quantity_unit: score.quantity_unit ?? score.unit,
+          rate: score.rate,
+          component_cost: score.component_cost ?? score.cost,
+          component_notes: score.component_notes ?? score.comments,
+          photo_references: score.photo_url ? [score.photo_url] : (score.photo_references ?? null),
+        };
+      });
 
       const { error: scoresError } = await supabase
-        .schema("tams360")
         .from("inspection_component_scores")
         .insert(componentScores);
 

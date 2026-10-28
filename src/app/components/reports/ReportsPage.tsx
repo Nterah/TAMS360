@@ -1768,6 +1768,109 @@ export default function ReportsPage() {
           break;
         }
 
+        case "Component CI": {
+          toast.loading(`Fetching report data…`, { id: "export-report" });
+
+          const compCiRes = await fetch(`${API_URL}/reports/asset-inventory`, { headers: getAuthHeaders() });
+          if (!compCiRes.ok) {
+            const errText = await compCiRes.text().catch(() => "");
+            throw new Error(`Report endpoint failed: ${compCiRes.status} ${errText}`);
+          }
+          const compCiJson = await compCiRes.json();
+          const compCiAssets: any[] = compCiJson.assets || [];
+          const compCiLatestInsp: Record<string, any> = compCiJson.latestInspections || {};
+
+          // Collect inspection IDs for all assets that have a latest inspection
+          const inspToAsset = new Map<string, any>();
+          for (const asset of compCiAssets) {
+            const insp = compCiLatestInsp[asset.asset_id];
+            if (insp?.inspection_id) {
+              inspToAsset.set(insp.inspection_id, asset);
+            }
+          }
+
+          // Batch-fetch component scores (10 at a time)
+          const compScoresMap = new Map<string, any[]>();
+          const allInspIds = Array.from(inspToAsset.keys());
+          const COMP_CONCURRENCY = 10;
+
+          toast.loading(`Fetching component scores (${allInspIds.length} inspections)…`, { id: "export-report" });
+
+          for (let ci = 0; ci < allInspIds.length; ci += COMP_CONCURRENCY) {
+            const batch = allInspIds.slice(ci, ci + COMP_CONCURRENCY);
+            await Promise.allSettled(
+              batch.map(async (inspId) => {
+                try {
+                  const res = await fetch(`${API_URL}/inspections/${inspId}/component-scores`, {
+                    headers: getAuthHeaders(),
+                    signal: AbortSignal.timeout(8000),
+                  });
+                  if (res.ok) {
+                    const json = await res.json();
+                    const scores: any[] = json.scores || json.component_scores || json || [];
+                    compScoresMap.set(inspId, scores);
+                  }
+                } catch { /* skip timeout/auth failures */ }
+              })
+            );
+          }
+
+          // Apply asset-level filters first, then flatten to one row per component
+          const filteredCompAssets = applyAssetFilters(compCiAssets);
+          const compRows: any[] = [];
+
+          for (const asset of filteredCompAssets) {
+            const insp = compCiLatestInsp[asset.asset_id];
+            const meta = insp?.calculation_metadata || {};
+            const ciHealth = meta.ci_health ?? null;
+            const ciSafety = meta.ci_safety ?? null;
+            const ciFinal = meta.ci_final ?? null;
+            const worstUrgency = meta.worst_urgency ?? null;
+            const assetRef = asset.asset_ref || asset.reference_number || "-";
+            const assetType = asset.asset_type_name || asset.type || "-";
+            const scores = insp ? (compScoresMap.get(insp.inspection_id) || []) : [];
+
+            if (scores.length === 0) {
+              compRows.push({
+                asset_ref: assetRef,
+                asset_type: assetType,
+                component_name: "-",
+                component_ci: null,
+                asset_ci_health: ciHealth,
+                asset_ci_safety: ciSafety,
+                asset_ci_final: ciFinal,
+                worst_urgency: worstUrgency,
+              });
+            } else {
+              for (const score of scores) {
+                compRows.push({
+                  asset_ref: assetRef,
+                  asset_type: assetType,
+                  component_name: score.component_name || "-",
+                  component_ci: score.component_score ?? null,
+                  asset_ci_health: ciHealth,
+                  asset_ci_safety: ciSafety,
+                  asset_ci_final: ciFinal,
+                  worst_urgency: worstUrgency,
+                });
+              }
+            }
+          }
+
+          data = compRows;
+          columns = [
+            { header: "Asset Ref", key: "asset_ref" },
+            { header: "Asset Type", key: "asset_type" },
+            { header: "Component Name", key: "component_name" },
+            { header: "Component CI", key: "component_ci" },
+            { header: "Asset CI Health", key: "asset_ci_health" },
+            { header: "Asset CI Safety", key: "asset_ci_safety" },
+            { header: "Asset CI Final", key: "asset_ci_final" },
+            { header: "Worst Urgency", key: "worst_urgency" },
+          ];
+          break;
+        }
+
         default:
           toast.error("Unknown report type");
           return;
